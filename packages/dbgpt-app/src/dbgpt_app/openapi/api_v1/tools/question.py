@@ -3,7 +3,7 @@
 import asyncio
 import json
 import logging
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, List
 
 from dbgpt.agent.resource.tool.base import tool
 
@@ -37,6 +37,47 @@ Parameter: {"questions": [{"question": "...", "header": "...", \
 """
 
 
+def _normalize_questions(raw_questions: Any) -> List[Dict[str, Any]]:
+    """Coerce model-provided question payloads into a stable frontend shape."""
+    if isinstance(raw_questions, dict):
+        raw_questions = raw_questions.get("questions", [])
+    if not isinstance(raw_questions, list):
+        return []
+
+    normalized: List[Dict[str, Any]] = []
+    for index, item in enumerate(raw_questions):
+        if not isinstance(item, dict):
+            continue
+        question_text = str(item.get("question") or "").strip()
+        if not question_text:
+            continue
+        raw_options = item.get("options")
+        options: List[Dict[str, str]] = []
+        if isinstance(raw_options, list):
+            for option in raw_options:
+                if not isinstance(option, dict):
+                    continue
+                label = str(option.get("label") or "").strip()
+                if not label:
+                    continue
+                options.append(
+                    {
+                        "label": label,
+                        "description": str(option.get("description") or ""),
+                    }
+                )
+        normalized.append(
+            {
+                "question": question_text,
+                "header": str(item.get("header") or f"Question {index + 1}"),
+                "options": options,
+                "multiple": bool(item.get("multiple", False)),
+                "custom": item.get("custom", True) is not False,
+            }
+        )
+    return normalized
+
+
 def make_question(react_state: Dict[str, Any], stream_callback: Callable):
     """Return a ``question`` FunctionTool bound to react_state and stream_callback."""
 
@@ -58,8 +99,7 @@ def make_question(react_state: Dict[str, Any], stream_callback: Callable):
             parsed_questions = (
                 json.loads(questions) if isinstance(questions, str) else questions
             )
-            if not isinstance(parsed_questions, list):
-                parsed_questions = parsed_questions.get("questions", [])
+            parsed_questions = _normalize_questions(parsed_questions)
         except Exception as e:
             return json.dumps(
                 {
@@ -67,6 +107,18 @@ def make_question(react_state: Dict[str, Any], stream_callback: Callable):
                         {
                             "output_type": "text",
                             "content": f"Error: invalid questions JSON — {e}",
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            )
+        if not parsed_questions:
+            return json.dumps(
+                {
+                    "chunks": [
+                        {
+                            "output_type": "text",
+                            "content": "Error: no valid questions provided.",
                         }
                     ]
                 },

@@ -14,3 +14,4 @@ declare namespace JSX {
 }
 
 declare module 'cytoscape-euler';
+declare module 'cytoscape';

@@ -3,8 +3,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from dbgpt_app.scene.ask_data.agents.router import RouterAgent
-from dbgpt_app.scene.ask_data.ontology.repository import InMemoryOntologyRepository
-from dbgpt_app.scene.ask_data.ontology.service import OntologyLifecycleService
 from dbgpt_app.scene.ask_data.schemas.snapshot import (
     Snapshot,
     SnapshotSourceHashes,
@@ -31,13 +29,16 @@ def _snapshot(scene_id: str, name: str) -> Snapshot:
             "description": f"{name} analysis",
             "keywords": [name.lower()],
             "typical_questions": [f"show {name}"],
-            "metrics": [{"key": "amount", "name": "合同金额", "aliases": ["合同金额"]}],
-            "dimensions": [{"key": "department"}],
         },
         runtime_config={
             "data_source": "ecology",
-            "metrics": [{"key": "amount", "name": "合同金额", "aliases": ["合同金额"]}],
-            "dimensions": [{"key": "department"}],
+            "query_model": {
+                "metrics": [
+                    {"key": "amount", "name": "合同金额", "aliases": ["合同金额"]}
+                ],
+                "dimensions": [{"key": "department", "field": "department"}],
+                "time": {},
+            },
             "rag": {"knowledge_space": f"askdata_{scene_id}_r1"},
         },
         created_at=datetime.now(timezone.utc),
@@ -140,30 +141,17 @@ def test_router_rejects_sql_and_prompt_injection_before_scene_matching():
         assert plan.reason_code == "INVALID_PLAN"
 
 
-def test_router_uses_active_ontology_to_select_metric_and_scene():
+def test_router_keeps_scene_snapshot_routing_when_ontology_provider_is_configured():
     scenes = InMemorySnapshotService()
     contract_scene = _snapshot("contract_analysis", "合同分析")
     scenes.save_ready(contract_scene)
     scenes.activate(contract_scene.snapshot_id)
-    ontology = OntologyLifecycleService(InMemoryOntologyRepository())
-    draft = ontology.draft(user_id="admin")
-    synced = ontology.scene_sync(
-        scene_snapshots=[contract_scene],
-        user_id="admin",
-        expected_revision=draft.revision,
-        apply=True,
-    )
-    ontology.activate(
-        ontology.build_snapshot(
-            synced["revision"].revision, [contract_scene]
-        ).snapshot_id
-    )
 
     plan = RouterAgent(
-        SceneAgentRegistry(scenes), ontology_snapshot_provider=ontology.active_snapshot
+        SceneAgentRegistry(scenes), ontology_snapshot_provider=lambda: object()
     ).route("查询合同金额")
 
     assert plan.action == "execute"
-    assert plan.ontology_snapshot_id is not None
+    assert plan.ontology_snapshot_id is None
     assert plan.tasks[0].scene_id == "contract_analysis"
     assert plan.tasks[0].metrics == ["amount"]

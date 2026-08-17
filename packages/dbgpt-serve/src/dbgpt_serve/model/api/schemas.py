@@ -53,3 +53,5 @@ class ModelResponse(BaseModel):
     check_healthy: bool = Field(True, description="Check model health status")
     prompt_template: Optional[str] = Field(None, description="Model prompt template")
     last_heartbeat: Optional[str] = Field(None, description="Model last heartbeat")
+    provider: Optional[str] = Field(None, description="Model provider")
+    params: Optional[Dict[str, Any]] = Field(None, description="Model startup params")

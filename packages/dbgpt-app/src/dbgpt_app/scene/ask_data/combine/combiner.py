@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from ..query.query_spec import SceneResult
 from ..schemas.combine import CombinedColumn, CombinedResult
 from ..schemas.snapshot import Snapshot
+from ..query.capabilities import metric_definition as snapshot_metric_definition
+from ..query.capabilities import query_metrics
 
 
 class ResultCombiner:
@@ -28,7 +29,7 @@ class ResultCombiner:
             combined = self._separate(results, source_scene_ids, mode)
             combined.warnings.extend(warnings)
             return combined
-        selected_keys = keys or self._common_keys(snapshots, source_scene_ids)
+        selected_keys = keys or []
         rows, columns = self._align(results, selected_keys, snapshots)
         if mode == "derived":
             rows, derived_columns, derived_warnings = self._apply_derived(
@@ -74,20 +75,13 @@ class ResultCombiner:
             warnings=warnings,
         )
 
-    @staticmethod
-    def _common_keys(snapshots: dict[str, Snapshot], scene_ids: list[str]) -> list[str]:
-        sets = [
-            set(snapshots[scene_id].runtime_config.get("common_keys", []))
-            for scene_id in scene_ids
-        ]
-        return sorted(set.intersection(*sets)) if sets else []
-
     def _compatibility_warnings(
         self,
         results: list[SceneResult],
         snapshots: dict[str, Snapshot],
         keys: list[str],
     ) -> list[dict[str, str]]:
+        del snapshots
         warnings: list[dict[str, str]] = []
         if any(result.status != "succeeded" for result in results):
             warnings.append(
@@ -126,24 +120,29 @@ class ResultCombiner:
                         "message": "Time grains are not compatible",
                     }
                 )
-        common_keys = self._common_keys(
-            snapshots, [result.scene_id for result in results]
-        )
-        if keys and not set(keys) <= set(common_keys):
+        if keys and not self._keys_exist_in_all_results(results, keys):
             warnings.append(
                 {
                     "code": "COMMON_KEY_NOT_ALLOWED",
-                    "message": "Requested key is not common to all scenes",
+                    "message": "Requested key is not present in every scene result",
                 }
             )
-        if not keys and not common_keys:
+        if not keys:
             warnings.append(
                 {
                     "code": "COMBINE_NOT_ALLOWED",
-                    "message": "No common stable key is available",
+                    "message": "No Ontology relation key was provided for alignment",
                 }
             )
         return warnings
+
+    @staticmethod
+    def _keys_exist_in_all_results(results: list[SceneResult], keys: list[str]) -> bool:
+        for result in results:
+            available = {column.key for column in result.columns}
+            if not set(keys) <= available:
+                return False
+        return True
 
     @staticmethod
     def _align(
@@ -159,12 +158,7 @@ class ResultCombiner:
                     metric_occurrences[column.key] = (
                         metric_occurrences.get(column.key, 0) + 1
                     )
-                    metadata = {
-                        item["key"]: item
-                        for item in snapshots[result.scene_id].runtime_config.get(
-                            "metrics", []
-                        )
-                    }
+                    metadata = {item["key"]: item for item in query_metrics(snapshots[result.scene_id])}
                     definition = metadata.get(column.key, {})
                     metric_signatures.setdefault(column.key, set()).add(
                         (
@@ -177,10 +171,7 @@ class ResultCombiner:
             metric_keys = {
                 column.key for column in result.columns if column.type == "metric"
             }
-            metadata = {
-                item["key"]: item
-                for item in snapshots[result.scene_id].runtime_config.get("metrics", [])
-            }
+            metadata = {item["key"]: item for item in query_metrics(snapshots[result.scene_id])}
             for metric_key in metric_keys:
                 item = metadata.get(metric_key, {})
                 output_key = (
@@ -224,100 +215,19 @@ class ResultCombiner:
         snapshots: dict[str, Snapshot],
         scene_ids: list[str],
     ) -> tuple[list[dict[str, Any]], list[CombinedColumn], list[dict[str, str]]]:
-        definitions = {}
-        for scene_id in scene_ids:
-            for item in snapshots[scene_id].runtime_config.get("derived_metrics", []):
-                if isinstance(item, dict) and item.get("key"):
-                    definitions[item["key"]] = item
-        columns: list[CombinedColumn] = []
+        del snapshots, scene_ids
         warnings: list[dict[str, str]] = []
         for key in requested:
-            definition = definitions.get(key)
-            if not definition:
-                warnings.append(
-                    {
-                        "code": "DERIVED_METRIC_SKIPPED",
-                        "message": f"Unknown derived metric: {key}",
-                    }
-                )
-                continue
-            operation = definition.get("operation")
-            numerator = definition.get("numerator")
-            denominator = definition.get("denominator")
-            numerator_key = str(numerator).rsplit(".", 1)[-1]
-            denominator_key = str(denominator).rsplit(".", 1)[-1]
-            numerator_scene = str(numerator).split(".", 1)[0]
-            denominator_scene = str(denominator).split(".", 1)[0]
-            numerator_definition = ResultCombiner._metric_definition(
-                snapshots, numerator_scene, numerator_key
+            warnings.append(
+                {
+                    "code": "DERIVED_METRIC_SKIPPED",
+                    "message": (
+                        "Derived metric must be declared in the active Ontology "
+                        f"before deterministic combination can apply it: {key}"
+                    ),
+                }
             )
-            denominator_definition = ResultCombiner._metric_definition(
-                snapshots, denominator_scene, denominator_key
-            )
-            if operation in {"add", "subtract"}:
-                if not numerator_definition or not denominator_definition:
-                    warnings.append(
-                        {
-                            "code": "DERIVED_METRIC_SKIPPED",
-                            "message": f"Missing input metric for {key}",
-                        }
-                    )
-                    continue
-                if (
-                    numerator_definition.get("unit")
-                    != denominator_definition.get("unit")
-                ):
-                    warnings.append(
-                        {
-                            "code": "DERIVED_UNIT_MISMATCH",
-                            "message": f"Input units differ for {key}",
-                        }
-                    )
-                    continue
-                if any(
-                    item.get("additivity") == "non_additive"
-                    for item in (numerator_definition, denominator_definition)
-                ):
-                    warnings.append(
-                        {
-                            "code": "DERIVED_NON_ADDITIVE",
-                            "message": f"Non-additive input cannot be {operation}ed",
-                        }
-                    )
-                    continue
-            for row in rows:
-                try:
-                    if operation == "ratio":
-                        denominator_value = Decimal(str(row.get(denominator_key)))
-                        row[key] = (
-                            None
-                            if denominator_value == 0
-                            else Decimal(str(row.get(numerator_key)))
-                            / denominator_value
-                        )
-                    elif operation in {"add", "subtract"}:
-                        left = Decimal(str(row.get(numerator_key)))
-                        right = Decimal(str(row.get(denominator_key)))
-                        row[key] = left + right if operation == "add" else left - right
-                    else:
-                        row[key] = None
-                        warnings.append(
-                            {
-                                "code": "DERIVED_METRIC_SKIPPED",
-                                "message": f"Unsupported operation: {operation}",
-                            }
-                        )
-                except (InvalidOperation, TypeError, ValueError):
-                    row[key] = None
-            columns.append(
-                CombinedColumn(
-                    key=key,
-                    name=definition.get("name") or key,
-                    type="derived_metric",
-                    unit=definition.get("unit"),
-                )
-            )
-        return rows, columns, warnings
+        return rows, [], warnings
 
     @staticmethod
     def _metric_definition(
@@ -326,14 +236,7 @@ class ResultCombiner:
         snapshot = snapshots.get(scene_id)
         if snapshot is None:
             return None
-        return next(
-            (
-                item
-                for item in snapshot.runtime_config.get("metrics", [])
-                if item.get("key") == metric_key
-            ),
-            None,
-        )
+        return snapshot_metric_definition(snapshot, metric_key)
 
 
 __all__ = ["ResultCombiner"]

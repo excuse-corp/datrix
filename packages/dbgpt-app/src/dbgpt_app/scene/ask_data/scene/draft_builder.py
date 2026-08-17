@@ -33,7 +33,6 @@ class SemanticDraftBuilder:
             "dimensions: []",
             "metrics: []",
             "named_filters: []",
-            "derived_metrics: []",
             "# Candidate fields from the inspected view (all require confirmation):",
         ]
         for column in schema.columns:

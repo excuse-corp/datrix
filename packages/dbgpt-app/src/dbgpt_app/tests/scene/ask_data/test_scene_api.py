@@ -123,7 +123,10 @@ def test_scene_management_api_lifecycle():
     updated = client.put(
         "/api/v1/ask-data/scenes/api_contracts",
         json={key: value for key, value in payload.items() if key != "scene_id"}
-        | {"name": "Contracts v2", "semantic_md": _document("api_contracts", name="Contracts v2")},
+        | {
+            "name": "Contracts v2",
+            "semantic_md": _document("api_contracts", name="Contracts v2"),
+        },
     )
     assert updated.status_code == 200
     assert updated.json()["revision"] == 2
@@ -183,6 +186,28 @@ def test_scene_publish_api_validates_enables_and_disables_system_snapshot():
     enabled = client.post("/api/v1/ask-data/scenes/api_publish/enable")
     assert enabled.status_code == 200
     assert enabled.json()["data"]["status"] == "active"
+
+
+def test_rebuild_active_snapshots_api_returns_migration_summary():
+    client = _client_with_scene_services()
+    created = client.post(
+        "/api/v1/ask-data/scenes",
+        json={
+            "scene_id": "api_rebuild",
+            "name": "Contracts",
+            "description": "Contract analysis",
+            "data_source_name": "ecology",
+            "view_name": "dbo.vw_contracts",
+            "semantic_md": _document("api_rebuild"),
+        },
+    )
+    assert created.status_code == 200
+
+    rebuilt = client.post("/api/v1/ask-data/snapshots/rebuild-active", json={})
+
+    assert rebuilt.status_code == 200
+    assert rebuilt.json()["data"]["failed_count"] == 0
+    assert rebuilt.json()["data"]["items"][0]["scene_id"] == "api_rebuild"
 
 
 def test_query_api_persists_contract_and_returns_structured_result():

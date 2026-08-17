@@ -11,8 +11,8 @@ export interface PendingQuestionEvent {
   conv_id: string;
   questions: Array<{
     question: string;
-    header: string;
-    options: Array<{ label: string; description: string }>;
+    header?: string;
+    options?: Array<{ label: string; description?: string }>;
     multiple?: boolean;
     custom?: boolean;
   }>;
@@ -44,6 +44,13 @@ export interface ChatContextStatus {
   message?: string;
 }
 
+const DEFAULT_CONTEXT_STATUS: ChatContextStatus = {
+  state: 'OK',
+  used_tokens: 0,
+  max_tokens: 0,
+  usage_percent: 0,
+};
+
 /** Map backend TokenState enum values to frontend display states. */
 function mapContextState(raw: string): 'OK' | 'WARNING' | 'ERROR' {
   switch (raw) {
@@ -63,13 +70,13 @@ const useChat = ({ queryAgentURL = '/api/v1/chat/completions', app_code }: Props
   const [ctrl, setCtrl] = useState<AbortController>({} as AbortController);
   const lastMessageRef = useRef<string>('');
   const { scene } = useContext(ChatContext);
-  const [contextStatus, setContextStatus] = useState<ChatContextStatus | null>(null);
+  const [contextStatus, setContextStatus] = useState<ChatContextStatus | null>(DEFAULT_CONTEXT_STATUS);
   const [pendingQuestion, setPendingQuestion] = useState<PendingQuestionEvent | null>(null);
   const chat = useCallback(
     async ({ data, chatId, onMessage, onClose, onDone, onError, ctrl }: ChatParams) => {
       ctrl && setCtrl(ctrl);
       lastMessageRef.current = '';
-      setContextStatus(null);
+      setContextStatus(DEFAULT_CONTEXT_STATUS);
       if (!data?.user_input && !data?.doc_id) {
         message.warning(i18n.t('no_context_tip'));
         return;
@@ -133,22 +140,17 @@ const useChat = ({ queryAgentURL = '/api/v1/chat/completions', app_code }: Props
               if (cs) {
                 const budget = Number(cs.budget ?? 0);
                 if (!Number.isFinite(budget) || budget <= 0) {
-                  setContextStatus(null);
+                  setContextStatus(DEFAULT_CONTEXT_STATUS);
                   return;
                 }
-                // Only show banner when Layer 3 (LLM compression) is active
-                if (cs.compact_layer === 'layer3') {
-                  setContextStatus({
-                    state: mapContextState(cs.state || 'normal'),
-                    used_tokens: cs.used ?? 0,
-                    max_tokens: budget,
-                    usage_percent: (cs.ratio ?? 0) * 100,
-                    layer: cs.compact_layer,
-                    message: cs.message,
-                  });
-                } else {
-                  setContextStatus(null);
-                }
+                setContextStatus({
+                  state: mapContextState(cs.state || 'normal'),
+                  used_tokens: cs.used ?? 0,
+                  max_tokens: budget,
+                  usage_percent: (cs.ratio ?? 0) * 100,
+                  layer: cs.compact_layer,
+                  message: cs.message,
+                });
                 return; // Don't process as a chat message
               }
 

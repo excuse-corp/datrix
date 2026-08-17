@@ -1,9 +1,9 @@
-import { apiInterceptors, createModel, getSupportModels } from '@/client/api';
+import { apiInterceptors, createModel, getSupportModels, updateModel } from '@/client/api';
 import { renderModelIcon } from '@/components/chat/header/model-selector';
 import { ConfigurableParams } from '@/types/common';
-import { StartModelParams, SupportModel } from '@/types/model';
+import { IModelData, StartModelParams, SupportModel } from '@/types/model';
 import { AutoComplete, Button, Form, Select, Tooltip, message } from 'antd';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import ReactMarkdown from 'react-markdown';
 import ConfigurableForm from '../common/configurable-form';
@@ -13,9 +13,61 @@ const FormItem = Form.Item;
 
 // The supported worker types
 const WORKER_TYPES = ['llm', 'text2vec', 'reranker'];
+const MODEL_IDENTITY_PARAM_NAMES = new Set(['name', 'provider', 'worker_type']);
 
-function ModelForm({ onCancel, onSuccess }: { onCancel: () => void; onSuccess: () => void }) {
+type ModelFormProps = {
+  onCancel: () => void;
+  onSuccess: () => void;
+  mode?: 'create' | 'edit';
+  initialModel?: IModelData;
+};
+
+const normalizeParams = (modelParams?: SupportModel['params']): ConfigurableParams[] => {
+  if (!modelParams) return [];
+  return Array.isArray(modelParams) ? [...modelParams] : [modelParams];
+};
+
+const inferParamType = (value: unknown) => {
+  if (typeof value === 'boolean') return 'bool';
+  if (typeof value === 'number') return Number.isInteger(value) ? 'int' : 'float';
+  return 'string';
+};
+
+const createStoredParam = (key: string, value: unknown): ConfigurableParams => ({
+  param_class: 'stored.model.param',
+  param_name: key,
+  param_type: inferParamType(value),
+  default_value: typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string' ? value : '',
+  description: '',
+  required: false,
+  valid_values: null,
+  ext_metadata: { tags: '', order: 0 },
+  is_array: false,
+  label: key,
+  nested_fields: null,
+});
+
+const mergeParamsWithStoredValues = (
+  modelParams?: SupportModel['params'],
+  storedParams?: IModelData['params'],
+): ConfigurableParams[] => {
+  const mergedParams = normalizeParams(modelParams);
+  if (!storedParams) return mergedParams;
+
+  const knownParamNames = new Set(mergedParams.map(param => param.param_name));
+  Object.entries(storedParams).forEach(([key, value]) => {
+    const isPrimitive = value == null || ['string', 'number', 'boolean'].includes(typeof value);
+    if (!MODEL_IDENTITY_PARAM_NAMES.has(key) && !knownParamNames.has(key) && isPrimitive) {
+      mergedParams.push(createStoredParam(key, value));
+      knownParamNames.add(key);
+    }
+  });
+  return mergedParams;
+};
+
+function ModelForm({ onCancel, onSuccess, mode = 'create', initialModel }: ModelFormProps) {
   const { t } = useTranslation();
+  const isEdit = mode === 'edit' && !!initialModel;
   const [_, setModels] = useState<Array<SupportModel> | null>([]);
   const [selectedWorkerType, setSelectedWorkerType] = useState<string>();
   const [selectedProvider, setSelectedProvider] = useState<string>();
@@ -25,6 +77,30 @@ function ModelForm({ onCancel, onSuccess }: { onCancel: () => void; onSuccess: (
 
   const [groupedModels, setGroupedModels] = useState<{ [key: string]: SupportModel[] }>({});
   const [providers, setProviders] = useState<string[]>([]);
+
+  const getProvidersByWorkerType = useCallback(
+    (workerType: string, groups = groupedModels) => {
+      const availableProviders = new Set<string>();
+      Object.entries(groups).forEach(([provider, models]) => {
+        if (models.some(model => model.worker_type === workerType)) {
+          availableProviders.add(provider);
+        }
+      });
+      return Array.from(availableProviders).sort();
+    },
+    [groupedModels],
+  );
+
+  const findSupportModel = useCallback(
+    (provider: string, workerType: string, modelName?: string) => {
+      const providerModels = groupedModels[provider] || [];
+      return (
+        providerModels.find(model => model.worker_type === workerType && model.model === modelName) ||
+        providerModels.find(model => model.worker_type === workerType)
+      );
+    },
+    [groupedModels],
+  );
 
   async function getModels() {
     const [, res] = await apiInterceptors(getSupportModels());
@@ -54,15 +130,46 @@ function ModelForm({ onCancel, onSuccess }: { onCancel: () => void; onSuccess: (
     getModels();
   }, []);
 
+  useEffect(() => {
+    if (!isEdit || !initialModel || !Object.keys(groupedModels).length) return;
+
+    const workerType = initialModel.worker_type;
+    const availableProviders = getProvidersByWorkerType(workerType, groupedModels);
+    const storedProvider = typeof initialModel.params?.provider === 'string' ? initialModel.params.provider : undefined;
+    const inferredProvider =
+      storedProvider ||
+      initialModel.provider ||
+      Object.values(groupedModels)
+        .flat()
+        .find(model => model.model === initialModel.model_name && model.worker_type === workerType)?.provider ||
+      availableProviders[0];
+    const displayProviders =
+      inferredProvider && !availableProviders.includes(inferredProvider)
+        ? [...availableProviders, inferredProvider].sort()
+        : availableProviders;
+
+    setSelectedWorkerType(workerType);
+    setProviders(displayProviders);
+    setSelectedProvider(inferredProvider);
+
+    if (inferredProvider) {
+      const supportModel = findSupportModel(inferredProvider, workerType, initialModel.model_name);
+      setParams(mergeParamsWithStoredValues(supportModel?.params, initialModel.params));
+    } else {
+      setParams(mergeParamsWithStoredValues(undefined, initialModel.params));
+    }
+
+    form.setFieldsValue({
+      ...(initialModel.params ?? {}),
+      worker_type: workerType,
+      provider: inferredProvider,
+      name: initialModel.model_name,
+    });
+  }, [isEdit, initialModel, groupedModels, form, getProvidersByWorkerType, findSupportModel]);
+
   // Filter and set available providers based on worker_type
   function updateProvidersByWorkerType(workerType: string) {
-    const availableProviders = new Set<string>();
-    Object.entries(groupedModels).forEach(([provider, models]) => {
-      if (models.some(model => model.worker_type === workerType)) {
-        availableProviders.add(provider);
-      }
-    });
-    setProviders(Array.from(availableProviders).sort());
+    setProviders(getProvidersByWorkerType(workerType));
   }
 
   function handleWorkerTypeChange(value: string) {
@@ -78,14 +185,8 @@ function ModelForm({ onCancel, onSuccess }: { onCancel: () => void; onSuccess: (
     form.setFieldValue('provider', value);
 
     // Get the params of the first model that matches the selected worker_type under the current provider as the default params
-    const providerModels = groupedModels[value] || [];
-    const filteredModels = providerModels.filter(m => m.worker_type === selectedWorkerType);
-    if (filteredModels.length > 0) {
-      const firstModel = filteredModels[0];
-      if (firstModel?.params) {
-        setParams(Array.isArray(firstModel.params) ? firstModel.params : [firstModel.params]);
-      }
-    }
+    const firstModel = selectedWorkerType ? findSupportModel(value, selectedWorkerType) : undefined;
+    setParams(normalizeParams(firstModel?.params));
   }
 
   async function onFinish(values: any) {
@@ -123,24 +224,34 @@ function ModelForm({ onCancel, onSuccess }: { onCancel: () => void; onSuccess: (
     setLoading(true);
     try {
       const processedValues = processFormValues(values);
-      const selectedModel = groupedModels[selectedProvider]?.find(m => m.model === processedValues.name);
-
-      const params: StartModelParams = {
-        host: selectedModel?.host || '',
-        port: selectedModel?.port || 0,
-        model: processedValues.name,
-        worker_type: selectedWorkerType,
-        params: processedValues,
+      const modelName = isEdit && initialModel ? initialModel.model_name : processedValues.name;
+      const workerType = isEdit && initialModel ? initialModel.worker_type : selectedWorkerType;
+      if (!workerType) return;
+      const selectedModel = groupedModels[selectedProvider]?.find(m => m.model === modelName);
+      const payloadParams = {
+        ...(isEdit ? (initialModel?.params ?? {}) : {}),
+        ...processedValues,
+        name: modelName,
+        provider: selectedProvider,
+        worker_type: workerType,
       };
 
-      const [, , data] = await apiInterceptors(createModel(params));
+      const request: StartModelParams = {
+        host: initialModel?.host || selectedModel?.host || '',
+        port: initialModel?.port || selectedModel?.port || 0,
+        model: modelName,
+        worker_type: workerType,
+        params: payloadParams,
+      };
+
+      const [, , data] = await apiInterceptors(isEdit ? updateModel(request) : createModel(request));
       if (data?.success) {
-        message.success(t('start_model_success'));
+        message.success(t(isEdit ? 'edit_model_success' : 'start_model_success'));
         form.resetFields();
         onSuccess?.();
       }
     } catch (_error) {
-      message.error(t('start_model_failed'));
+      message.error(t(isEdit ? 'edit_model_failed' : 'start_model_failed'));
     } finally {
       setLoading(false);
     }
@@ -164,7 +275,7 @@ function ModelForm({ onCancel, onSuccess }: { onCancel: () => void; onSuccess: (
         name='worker_type'
         rules={[{ required: true, message: t('worker_type_select_tips') }]}
       >
-        <Select onChange={handleWorkerTypeChange} placeholder={t('model_select_worker_type')}>
+        <Select disabled={isEdit} onChange={handleWorkerTypeChange} placeholder={t('model_select_worker_type')}>
           {WORKER_TYPES.map(type => (
             <Option key={type} value={type}>
               {type}
@@ -175,7 +286,12 @@ function ModelForm({ onCancel, onSuccess }: { onCancel: () => void; onSuccess: (
 
       {selectedWorkerType && (
         <FormItem label='Provider' name='provider' rules={[{ required: true, message: t('provider_select_tips') }]}>
-          <Select onChange={handleProviderChange} placeholder={t('model_select_provider')} value={selectedProvider}>
+          <Select
+            disabled={isEdit}
+            onChange={handleProviderChange}
+            placeholder={t('model_select_provider')}
+            value={selectedProvider}
+          >
             {providers.map(provider => (
               <Option key={provider} value={provider}>
                 {provider}
@@ -193,6 +309,7 @@ function ModelForm({ onCancel, onSuccess }: { onCancel: () => void; onSuccess: (
             rules={[{ required: true, message: t('model_please_input_name') }]}
           >
             <AutoComplete
+              disabled={isEdit}
               style={{ width: '100%' }}
               placeholder={t('model_select_or_input_model')}
               options={groupedModels[selectedProvider]
@@ -216,7 +333,7 @@ function ModelForm({ onCancel, onSuccess }: { onCancel: () => void; onSuccess: (
             />
           </FormItem>
 
-          <ConfigurableForm params={params.filter(p => p.param_name !== 'name')} form={form} />
+          <ConfigurableForm params={params.filter(p => !MODEL_IDENTITY_PARAM_NAMES.has(p.param_name))} form={form} />
         </>
       )}
 

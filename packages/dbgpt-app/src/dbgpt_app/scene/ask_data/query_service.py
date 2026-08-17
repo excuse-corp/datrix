@@ -11,6 +11,7 @@ from .query.executor import SafeSceneQueryExecutor
 from .query.query_spec import QuerySpec, ResultColumn, SceneResult
 from .rag.manager import SceneKnowledgeManager
 from .schemas.snapshot import Snapshot, SnapshotStatus
+from .query.capabilities import metric_definition, metric_keys, schema_config
 
 
 class SceneQueryService:
@@ -39,26 +40,13 @@ class SceneQueryService:
         started = monotonic()
         compiled = self.compiler.compile(spec, snapshot)
         keys, rows, truncated, query_duration = self.executor.execute(
-            engine,
-            compiled,
-            snapshot,
-            enforce_row_limit=False,
+            engine, compiled, snapshot
         )
         columns = [
             ResultColumn(
                 key=key,
-                type="metric"
-                if key
-                in {item["key"] for item in snapshot.runtime_config.get("metrics", [])}
-                else "dimension",
-                unit=next(
-                    (
-                        item.get("unit")
-                        for item in snapshot.runtime_config.get("metrics", [])
-                        if item["key"] == key
-                    ),
-                    None,
-                ),
+                type="metric" if key in metric_keys(snapshot) else "dimension",
+                unit=(metric_definition(snapshot, key) or {}).get("unit"),
             )
             for key in keys
         ]
@@ -104,7 +92,10 @@ class SceneQueryService:
             f"sha256:{hashlib.sha256((task_id + sql).encode('utf-8')).hexdigest()}",
         )
         keys, rows, truncated, query_duration = self.executor.execute(
-            engine, compiled, snapshot
+            engine,
+            compiled,
+            snapshot,
+            enforce_row_limit=False,
         )
         columns = [
             ResultColumn(
@@ -132,11 +123,9 @@ class SceneQueryService:
 
     @staticmethod
     def _result_column_type(snapshot: Snapshot, key: str) -> str:
-        metric_keys = {item["key"] for item in snapshot.runtime_config.get("metrics", [])}
-        if key in metric_keys:
+        if key in metric_keys(snapshot):
             return "metric"
-        schema = snapshot.runtime_config.get("schema", {})
-        columns = schema.get("columns", []) if isinstance(schema, dict) else []
+        columns = schema_config(snapshot).get("columns", [])
         for column in columns:
             if not isinstance(column, dict) or column.get("name") != key:
                 continue

@@ -188,6 +188,28 @@ def test_run_service_persists_bundle_warnings_on_query_run():
     assert query.warnings == ["RAG_DEGRADED"]
 
 
+def test_run_service_persists_runtime_ontology_snapshot_id():
+    repository = InMemoryRunRepository()
+    orchestrator = FakeOrchestrator(
+        _snapshot(),
+        QueryRunResult(status="succeeded", ontology_snapshot_id="onto_contracts"),
+    )
+    service = RunExecutionService(orchestrator, repository)
+
+    query, result = __import__("asyncio").run(
+        service.execute(
+            question="total amount",
+            plan=_plan(),
+            user_id="user-1",
+            request_id="req-ontology",
+            engine_resolver=lambda _: object(),
+        )
+    )
+
+    assert result.ontology_snapshot_id == "onto_contracts"
+    assert query.ontology_snapshot_id == "onto_contracts"
+
+
 def test_run_service_replays_success_result_and_rejects_key_reuse_conflict():
     import asyncio
 

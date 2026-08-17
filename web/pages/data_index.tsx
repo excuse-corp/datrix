@@ -1,8 +1,8 @@
 import { apiInterceptors, collectApp, getAppList, newDialogue, recommendApps, unCollectApp } from '@/client/api';
-import { PlusOutlined, SearchOutlined, StarFilled, StarOutlined } from '@ant-design/icons';
+import { SearchOutlined, StarFilled, StarOutlined } from '@ant-design/icons';
 import { useRequest } from 'ahooks';
 import type { SegmentedProps } from 'antd';
-import { Avatar, Button, ConfigProvider, Input, Segmented, Spin, message } from 'antd';
+import { Avatar, ConfigProvider, Input, Segmented, Spin, message } from 'antd';
 import cls from 'classnames';
 import { NextPage } from 'next';
 import { useRouter } from 'next/router';
@@ -326,19 +326,6 @@ const Playground: NextPage = () => {
                   },
                 )}
               />
-            </div>
-
-            <div className='flex items-center gap-4'>
-              <Button
-                className='border-none text-white bg-button-gradient'
-                icon={<PlusOutlined />}
-                onClick={() => {
-                  localStorage.removeItem('new_app_info');
-                  router.push('/construct/app?openModal=true');
-                }}
-              >
-                {t('create_app')}
-              </Button>
             </div>
           </div>
           {loading && !apps.app_list.length ? (

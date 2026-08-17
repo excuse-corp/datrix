@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 
 type AskDataPageShellProps = {
-  title: string;
+  title: ReactNode;
   description: string;
   actions?: ReactNode;
   children: ReactNode;

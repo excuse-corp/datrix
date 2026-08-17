@@ -7,6 +7,7 @@ from dbgpt_app.scene.ask_data.api import scenes
 from dbgpt_app.scene.ask_data.models import InMemorySceneRepository
 from dbgpt_app.scene.ask_data.schemas.plan import CombinePlan, MainAgentPlan, PlanTask
 from dbgpt_app.scene.ask_data.snapshot import InMemorySnapshotService
+from dbgpt_app.scene.ask_data.query.capabilities import query_metrics
 from dbgpt_app.scene.ask_data.testsupport import build_test_snapshot
 
 
@@ -22,7 +23,7 @@ class ConcurrentSceneQueryAgent:
             await asyncio.sleep(0.01)
             from dbgpt_app.scene.ask_data.query import QuerySpec
 
-            return QuerySpec(metrics=[snapshot.runtime_config["metrics"][0]["key"]])
+            return QuerySpec(metrics=[query_metrics(snapshot)[0]["key"]])
         finally:
             self.active -= 1
 

@@ -121,7 +121,10 @@ def test_publish_service_builds_internal_snapshot_without_rag_sync():
 
     assert snapshot.runtime_config["rag"]["knowledge_space"] is None
     assert snapshot.source_hashes.knowledge_hash == "sha256:none"
-    assert repository.get_revision("contracts_publish", 1).knowledge_hash == "sha256:none"
+    assert (
+        repository.get_revision("contracts_publish", 1).knowledge_hash
+        == "sha256:none"
+    )
     assert snapshots.get(snapshot.snapshot_id).content_hash == snapshot.content_hash
 
 
@@ -133,3 +136,37 @@ def test_publish_service_ignores_rag_quality_gate_in_scene_lifecycle():
 
     assert snapshot.source_hashes.knowledge_hash == "sha256:none"
     assert repository.get_revision("contracts_publish", 1).status.value == "ready"
+
+
+def test_rebuild_active_snapshots_replaces_legacy_snapshot_schema():
+    service, repository, snapshots = _service()
+    service.builder.snapshot_schema_version = "1"
+    _, old_snapshot, _ = service.publish("contracts_publish", 1)
+
+    service.builder.snapshot_schema_version = "2"
+    results, registry_version = service.rebuild_active_snapshots()
+    active = snapshots.active("contracts_publish")
+
+    assert results[0]["status"] == "rebuilt"
+    assert results[0]["old_snapshot_id"] == old_snapshot.snapshot_id
+    assert results[0]["new_snapshot_id"] == active.snapshot_id
+    assert active.schema_version == "2"
+    assert active.runtime_config["schema_version"] == "2"
+    assert (
+        repository.get_scene("contracts_publish").current_snapshot_id
+        == active.snapshot_id
+    )
+    assert registry_version == snapshots.registry_version
+
+
+def test_rebuild_active_snapshots_is_idempotent_for_current_schema():
+    service, _, snapshots = _service()
+    _, active_before, _ = service.publish("contracts_publish", 1)
+
+    results, _ = service.rebuild_active_snapshots()
+
+    assert results[0]["status"] == "unchanged"
+    assert (
+        snapshots.active("contracts_publish").snapshot_id
+        == active_before.snapshot_id
+    )

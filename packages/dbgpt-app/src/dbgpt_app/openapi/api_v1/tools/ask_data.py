@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import uuid
 from asyncio import Semaphore, gather
+from time import monotonic
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from dbgpt.agent.resource.tool.base import tool
@@ -16,6 +17,15 @@ from dbgpt_app.scene.ask_data.security import AskDataPrincipal
 if TYPE_CHECKING:
     from dbgpt_app.scene.ask_data.agents import SceneQueryAgent
     from dbgpt_app.scene.ask_data.schemas.plan import MainAgentPlan
+
+
+_ASK_DATA_RESULT_ANALYSIS_GUIDANCE = [
+    "先直接回答用户问题，再解释关键数字的业务含义。",
+    "结合 ontology_context_for_analysis 中的实体、指标含义、指标关系和分析规则分析结果。",
+    "只分析用户明确询问的范围；不要为了补充未要求的字段再次查询。",
+    "存在空值、零值、极端值或查询警告时，提示可能的数据质量、口径或业务风险。",
+    "只基于查询结果给结论；未命中的场景只能作为后续分析方向，不要当作事实。",
+]
 
 
 def _capability_items(principal: AskDataPrincipal) -> list[dict[str, Any]]:
@@ -41,6 +51,7 @@ def _capability_items(principal: AskDataPrincipal) -> list[dict[str, Any]]:
 def ask_data_capability_summary(
     principal: AskDataPrincipal, question: str | None = None
 ) -> str:
+    del question
     items = _capability_items(principal)
     if not items:
         return "当前用户没有可用的已发布业务问数场景。"
@@ -51,22 +62,27 @@ def ask_data_capability_summary(
             f"- {item['name'] or item['scene_id']}（{item['scene_id']}）："
             f"{introduction or '未填写场景介绍'}"
         )
-    try:
-        from dbgpt_app.scene.ask_data.api.ontology import get_ontology_service
-        from dbgpt_app.scene.ask_data.ontology.context import (
-            render_main_agent_ontology_context,
-        )
-
-        ontology_context = render_main_agent_ontology_context(
-            get_ontology_service().active_snapshot(), question
-        )
-        if ontology_context:
-            lines.extend(["", ontology_context])
-    except Exception:
-        # Ontology is additive context. A temporary metadata issue must never
-        # hide already-published Scene capabilities.
-        pass
     return "\n".join(lines)
+
+
+def _duration_ms(started: float) -> int:
+    return max(0, int((monotonic() - started) * 1000))
+
+
+def _normalize_ask_data_question(question: str) -> str:
+    return " ".join(question.split())
+
+
+def _ask_data_idempotency_key(
+    react_state: dict[str, Any], user_id: str, normalized_question: str
+) -> str:
+    conversation_id = str(react_state.get("conv_id") or "anonymous")
+    turn_id = str(react_state.get("turn_id") or "unknown-turn")
+    fingerprint = uuid.uuid5(
+        uuid.NAMESPACE_URL,
+        f"{user_id}\n{conversation_id}\n{turn_id}\n{normalized_question}",
+    ).hex
+    return f"react-{fingerprint}"
 
 
 def _parse_ask_data_query_args(input_str: str | None):
@@ -112,6 +128,8 @@ def make_ask_data_tools(
 ):
     """Build constrained AskData tools for a single generic-chat request."""
 
+    successful_results: dict[str, dict[str, Any]] = {}
+
     @tool(
         description=(
             "查询已授权的业务数据场景。仅用于业务指标、统计、合同、项目、"
@@ -132,7 +150,7 @@ def make_ask_data_tools(
     async def ask_data_query(question: str) -> str:
         from dbgpt_app.scene.ask_data.api import scenes
 
-        normalized_question = question.strip()
+        normalized_question = _normalize_ask_data_question(question)
         if not normalized_question:
             return json.dumps(
                 {
@@ -142,12 +160,68 @@ def make_ask_data_tools(
                 },
                 ensure_ascii=False,
             )
-        await stream_callback(
+
+        cached = successful_results.get(normalized_question)
+        if cached is not None:
+            reused_content = dict(cached["content"])
+            reused_content.update(
+                {
+                    "reused": True,
+                    "query_complete": True,
+                    "next_action": (
+                        "相同问题已在本轮成功查询。直接使用当前结果回答用户，"
+                        "不要再次调用 ask_data_query。"
+                    ),
+                }
+            )
+            await stream_callback(
+                "ask_data.reused",
+                {
+                    "call_id": cached["call_id"],
+                    "query_id": cached.get("query_id"),
+                    "question": normalized_question,
+                    "status": "reused",
+                    "title": "复用本轮业务查询结果",
+                    "detail": "相同问题已成功查询，不再生成或执行 SQL",
+                },
+            )
+            return json.dumps(
+                {
+                    "chunks": [
+                        {
+                            "output_type": "text",
+                            "content": json.dumps(
+                                reused_content, ensure_ascii=False, default=str
+                            ),
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            )
+
+        call_id = f"call_{uuid.uuid4().hex}"
+
+        async def call_stream_callback(
+            event_type: str, payload: dict[str, Any]
+        ) -> None:
+            await stream_callback(event_type, {"call_id": call_id, **payload})
+
+        await call_stream_callback(
+            "ask_data.started",
+            {
+                "question": normalized_question,
+                "status": "running",
+                "title": "业务问数",
+                "detail": normalized_question,
+            },
+        )
+        routing_started = monotonic()
+        await call_stream_callback(
             "ask_data.stage",
             {
                 "stage": "routing",
-                "title": "正在匹配业务场景",
-                "detail": "验证可用场景和权限",
+                "title": "正在语义选择业务场景",
+                "detail": "基于用户问题和场景 Snapshot 进行判断",
             },
         )
         try:
@@ -158,25 +232,39 @@ def make_ask_data_tools(
                 max_scenes=10,
             )
             scenes._require_plan_scene_access(principal, plan)
+            routing_duration_ms = _duration_ms(routing_started)
+            await call_stream_callback(
+                "ask_data.stage",
+                {
+                    "stage": "routing",
+                    "title": "业务场景语义选择完成",
+                    "detail": "基于用户问题和场景 Snapshot 完成判断",
+                    "status": "done",
+                    "duration_ms": routing_duration_ms,
+                },
+            )
             if plan.action == "execute":
-                await stream_callback(
+                planning_started = monotonic()
+                planning_detail = "、".join(task.scene_id for task in plan.tasks)
+                await call_stream_callback(
                     "ask_data.stage",
                     {
                         "stage": "planning",
                         "title": "已选中业务场景",
-                        "detail": "、".join(task.scene_id for task in plan.tasks),
+                        "detail": planning_detail,
                         "status": "done",
+                        "duration_ms": _duration_ms(planning_started),
                     },
                 )
             sql_by_task = await _build_scene_sqls(
                 plan,
                 scene_query_agent,
-                stream_callback=stream_callback,
+                stream_callback=call_stream_callback,
                 max_parallel_scene_agents=_scene_agent_parallelism(
                     scenes, max_parallel_scene_agents
                 ),
             )
-            await stream_callback(
+            await call_stream_callback(
                 "ask_data.stage",
                 {
                     "stage": "querying",
@@ -184,40 +272,59 @@ def make_ask_data_tools(
                     "detail": f"并发执行 {len(sql_by_task)} 个场景",
                 },
             )
+            query_started = monotonic()
             query, result = await scenes.get_run_service().execute(
                 question=normalized_question,
                 plan=plan,
                 user_id=principal.user_id,
                 request_id=f"react_{uuid.uuid4().hex}",
                 conversation_id=react_state.get("conv_id"),
-                idempotency_key=f"react-{react_state.get('conv_id', 'anonymous')}-{uuid.uuid4().hex}",
+                idempotency_key=_ask_data_idempotency_key(
+                    react_state, principal.user_id, normalized_question
+                ),
                 engine_resolver=scenes._default_engine_resolver,
                 max_agents=10,
                 entry_type="main_agent",
                 sql_by_task=sql_by_task,
             )
             payload = scenes._query_response(query, result, plan)
+            payload["querying_duration_ms"] = _duration_ms(query_started)
         except Exception as exc:
             payload = {
                 "status": "failed",
                 "errors": [{"code": "ASK_DATA_EXECUTION_FAILED", "message": str(exc)}],
             }
 
-        await _emit_query_outcome_stages(payload, stream_callback)
-        await stream_callback("ask_data.result", payload)
+        payload["call_id"] = call_id
+        await _emit_query_outcome_stages(payload, call_stream_callback)
+        await call_stream_callback("ask_data.result", payload)
         clarification = payload.get("clarification")
         if payload.get("status") == "clarification_required" and clarification:
             react_state["ask_data_pending_query_id"] = payload.get("query_id")
-            await stream_callback(
+            await call_stream_callback(
                 "ask_data.clarification",
                 {"query_id": payload.get("query_id"), "clarification": clarification},
             )
             content = clarification.get("question") or "需要补充业务查询条件。"
         elif payload.get("status") in {"succeeded", "partial_succeeded"}:
-            content = _main_agent_result_content(payload, max_result_tokens)
+            content = _main_agent_result_content(
+                payload, max_result_tokens, normalized_question
+            )
         else:
             error = (payload.get("errors") or [{}])[0]
             content = error.get("message") or "业务查询未能完成。"
+
+        if payload.get("status") == "succeeded":
+            try:
+                cached_content = json.loads(content)
+            except Exception:
+                cached_content = None
+            if isinstance(cached_content, dict):
+                successful_results[normalized_question] = {
+                    "call_id": call_id,
+                    "query_id": payload.get("query_id"),
+                    "content": cached_content,
+                }
         return json.dumps(
             {"chunks": [{"output_type": "text", "content": content}]},
             ensure_ascii=False,
@@ -258,11 +365,22 @@ async def _route_ask_data_plan(
     scene_query_agent: "SceneQueryAgent | None",
     max_scenes: int,
 ) -> "MainAgentPlan":
-    from dbgpt_app.scene.ask_data.api import scenes
     from dbgpt_app.scene.ask_data.schemas.plan import CombinePlan, MainAgentPlan, PlanTask
+    from dbgpt_app.scene.ask_data.snapshot.runtime import query_metrics
 
+    normalized_question = question.strip()
+    if not normalized_question:
+        return MainAgentPlan(
+            action="reject",
+            reason_code="EMPTY_QUESTION",
+            message="Question is empty",
+        )
     if scene_query_agent is None:
-        return scenes.get_router_agent().route(question)
+        return MainAgentPlan(
+            action="reject",
+            reason_code="SCENE_ROUTER_UNAVAILABLE",
+            message="场景路由 Agent 暂时不可用。",
+        )
 
     snapshots = _visible_active_snapshots(principal)
     if not snapshots:
@@ -273,7 +391,7 @@ async def _route_ask_data_plan(
         )
     try:
         scene_ids = await scene_query_agent.select_scenes(
-            snapshots, question, max_scenes=max_scenes
+            snapshots, normalized_question, max_scenes=max_scenes
         )
     except Exception as exc:
         return MainAgentPlan(
@@ -291,7 +409,7 @@ async def _route_ask_data_plan(
     tasks = []
     for scene_id in scene_ids[:max_scenes]:
         snapshot = snapshots_by_id[scene_id]
-        metrics = snapshot.runtime_config.get("metrics", [])
+        metrics = query_metrics(snapshot)
         metric_key = (
             metrics[0].get("key")
             if metrics and isinstance(metrics[0], dict) and metrics[0].get("key")
@@ -301,7 +419,7 @@ async def _route_ask_data_plan(
             PlanTask(
                 task_id=f"route_{scene_id}",
                 scene_id=scene_id,
-                question=question,
+                question=normalized_question,
                 metrics=[metric_key],
             )
         )
@@ -341,6 +459,7 @@ async def _build_scene_sqls(
     semaphore = Semaphore(max(1, min(max_parallel_scene_agents, 10)))
 
     async def build_task(task):
+        task_started = monotonic()
         snapshot = scenes._snapshot_service.active(task.scene_id)
         if snapshot is None:
             raise ValueError("SCENE_NOT_ACTIVE")
@@ -366,6 +485,7 @@ async def _build_scene_sqls(
                     "title": f"SQL 生成成功：{task.scene_id}",
                     "detail": "已通过绑定表/视图校验",
                     "status": "done",
+                    "duration_ms": _duration_ms(task_started),
                 },
             )
             return task.task_id, sql
@@ -377,6 +497,7 @@ async def _build_scene_sqls(
                     "title": f"SQL 生成失败：{task.scene_id}",
                     "detail": str(exc),
                     "status": "failed",
+                    "duration_ms": _duration_ms(task_started),
                 },
             )
             raise
@@ -398,6 +519,7 @@ async def _emit_query_outcome_stages(
                 "title": f"SQL 执行成功：{scene_id}",
                 "detail": f"{result.get('row_count', 0)} 行",
                 "status": "done",
+                "duration_ms": result.get("duration_ms"),
             },
         )
     for error in payload.get("errors") or []:
@@ -409,16 +531,31 @@ async def _emit_query_outcome_stages(
                 "title": f"SQL 执行失败：{task_id}",
                 "detail": error.get("message") or error.get("code") or "查询失败",
                 "status": "failed",
+                "duration_ms": error.get("duration_ms")
+                or payload.get("querying_duration_ms"),
             },
         )
 
 
 def _main_agent_result_content(
-    payload: dict[str, Any], max_result_tokens: int | None
+    payload: dict[str, Any], max_result_tokens: int | None, question: str | None = None
 ) -> str:
+    scene_items = [item for item in payload.get("results", []) if isinstance(item, dict)]
+    scene_ids = [
+        str(item.get("scene_id"))
+        for item in scene_items
+        if item.get("scene_id")
+    ]
+    result_columns = [
+        column
+        for item in scene_items
+        for column in item.get("columns", [])
+        if isinstance(column, dict)
+    ]
     compact = {
         "status": payload.get("status"),
         "query_id": payload.get("query_id"),
+        "call_id": payload.get("call_id"),
         "answer": payload.get("answer"),
         "scenes": [
             {
@@ -433,11 +570,26 @@ def _main_agent_result_content(
                 ],
                 "rows": item.get("rows", []),
             }
-            for item in payload.get("results", [])
-            if isinstance(item, dict)
+            for item in scene_items
         ],
         "errors": payload.get("errors", []),
     }
+    if payload.get("status") == "succeeded":
+        compact["query_complete"] = True
+        compact["next_action"] = (
+            "本次业务查询已成功完成。直接基于这些结果回答用户；"
+            "不要用相同问题再次调用 ask_data_query。"
+        )
+    ontology_context = _active_ontology_analysis_context(
+        question,
+        scene_ids=scene_ids,
+        result_columns=result_columns,
+    )
+    if ontology_context:
+        compact["ontology_context_for_analysis"] = ontology_context
+        compact["analysis_guidance_for_final_answer"] = (
+            _ASK_DATA_RESULT_ANALYSIS_GUIDANCE
+        )
     max_chars = max(1024, int(max_result_tokens or 0) * 4)
     if not max_result_tokens:
         return json.dumps(compact, ensure_ascii=False, default=str)
@@ -477,6 +629,9 @@ def _main_agent_result_content(
     minimal = {
         "status": compact.get("status"),
         "query_id": compact.get("query_id"),
+        "call_id": compact.get("call_id"),
+        "query_complete": compact.get("query_complete"),
+        "next_action": compact.get("next_action"),
         "truncated_for_main_agent": True,
         "truncation_message": compact["truncation_message"],
         "scene_summaries": [
@@ -490,11 +645,38 @@ def _main_agent_result_content(
         ],
         "errors": compact.get("errors", []),
     }
+    if ontology_context:
+        minimal["ontology_context_for_analysis"] = ontology_context
+        minimal["analysis_guidance_for_final_answer"] = (
+            _ASK_DATA_RESULT_ANALYSIS_GUIDANCE
+        )
     encoded = json.dumps(minimal, ensure_ascii=False, default=str)
     if len(encoded) <= max_chars:
         return encoded
     minimal["scene_summaries"] = []
     return json.dumps(minimal, ensure_ascii=False, default=str)
+
+
+def _active_ontology_analysis_context(
+    question: str | None,
+    *,
+    scene_ids: list[str] | None = None,
+    result_columns: list[dict[str, Any]] | None = None,
+) -> str:
+    try:
+        from dbgpt_app.scene.ask_data.api.ontology import get_ontology_service
+        from dbgpt_app.scene.ask_data.ontology.context import (
+            render_main_agent_ontology_context,
+        )
+
+        return render_main_agent_ontology_context(
+            get_ontology_service().active_snapshot(),
+            question,
+            scene_ids=scene_ids,
+            result_columns=result_columns,
+        )
+    except Exception:
+        return ""
 
 
 async def reply_to_ask_data_query(

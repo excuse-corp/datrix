@@ -7,7 +7,6 @@ import {
   BookOutlined,
   CaretDownOutlined,
   CaretRightOutlined,
-  CheckCircleFilled,
   CheckCircleOutlined,
   CheckOutlined,
   ClockCircleOutlined,
@@ -26,6 +25,7 @@ import {
   FileTextOutlined,
   FolderOpenOutlined,
   LoadingOutlined,
+  MinusCircleOutlined,
   PlayCircleOutlined,
   PlusOutlined,
   QuestionCircleOutlined,
@@ -39,7 +39,7 @@ import { useTranslation } from 'react-i18next';
 import ObservationFormatter from './ObservationFormatter';
 import TaskPlanCard, { TaskItem } from './TaskPlanCard';
 
-export type StepStatus = 'pending' | 'running' | 'completed' | 'error';
+export type StepStatus = 'pending' | 'running' | 'completed' | 'error' | 'cancelled';
 
 export type StepType =
   | 'read'
@@ -140,6 +140,9 @@ const getStepIcon = (type: StepType, status: StepStatus) => {
 
   if (status === 'running') {
     return <LoadingOutlined spin className={classNames(iconClass, 'text-blue-500')} />;
+  }
+  if (status === 'cancelled') {
+    return <MinusCircleOutlined className={classNames(iconClass, 'text-slate-400')} />;
   }
 
   switch (type) {
@@ -532,7 +535,7 @@ const StepCard: React.FC<{
           <span className='animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75' />
           <span className='relative inline-flex rounded-full h-2.5 w-2.5 bg-gradient-to-r from-blue-400 to-cyan-400' />
         </span>
-        <span className='text-sm text-gray-700 dark:text-gray-300'>{t('thinking')}</span>
+        <span className='text-sm text-gray-700 dark:text-gray-300'>{t('planning_next_step')}</span>
       </div>
     );
   }
@@ -546,10 +549,10 @@ const StepCard: React.FC<{
           'group relative cursor-pointer rounded-lg border transition-all duration-200',
           'px-3 py-2.5',
           'transform',
+          'bg-gradient-to-r from-amber-50/80 via-orange-50/50 to-white dark:from-amber-900/20 dark:via-orange-900/10 dark:to-[#1a1b1e]',
           {
             'opacity-0 translate-y-1': !isVisible,
             'opacity-100 translate-y-0': isVisible,
-            'bg-gradient-to-r from-amber-50/80 via-orange-50/50 to-white dark:from-amber-900/20 dark:via-orange-900/10 dark:to-[#1a1b1e]': true,
             'border-amber-300/80 dark:border-amber-500/30 shadow-[0_4px_16px_rgba(245,158,11,0.12)] ring-1 ring-amber-200/50 dark:ring-amber-500/20':
               isActive || isWaiting,
             'border-amber-200/60 dark:border-amber-600/20 hover:border-amber-300 hover:shadow-[0_4px_12px_rgba(245,158,11,0.08)]':
@@ -583,6 +586,8 @@ const StepCard: React.FC<{
               <CheckCircleOutlined className='text-xs text-emerald-500' />
             ) : step.status === 'error' ? (
               <ExclamationCircleOutlined className='text-xs text-red-500' />
+            ) : step.status === 'cancelled' ? (
+              <MinusCircleOutlined className='text-xs text-slate-400' />
             ) : null}
           </div>
         </div>
@@ -649,6 +654,8 @@ const StepCard: React.FC<{
               <LoadingOutlined spin className='text-[11px] text-sky-500' />
             ) : step.status === 'error' ? (
               <ExclamationCircleOutlined className='text-[11px] text-red-500' />
+            ) : step.status === 'cancelled' ? (
+              <MinusCircleOutlined className='text-[11px] text-slate-400' />
             ) : (
               <CheckCircleOutlined className='text-[11px] text-emerald-500' />
             )}
@@ -673,6 +680,7 @@ const StepCard: React.FC<{
           'border-l-[3px] border-l-blue-500': step.status === 'running',
           'border-l-[3px] border-l-emerald-500': step.status === 'completed' && isActive,
           'border-l-[3px] border-l-red-500': step.status === 'error',
+          'border-l-[3px] border-l-slate-400': step.status === 'cancelled',
         },
       )}
       style={{
@@ -711,6 +719,7 @@ const StepCard: React.FC<{
         {step.status === 'running' && <LoadingOutlined spin className='text-xs text-blue-500' />}
         {step.status === 'completed' && <CheckCircleOutlined className='text-xs text-emerald-500' />}
         {step.status === 'error' && <ExclamationCircleOutlined className='text-xs text-red-500' />}
+        {step.status === 'cancelled' && <MinusCircleOutlined className='text-xs text-slate-400' />}
       </div>
     </div>
   );
@@ -787,6 +796,7 @@ const SkillResourceCard: React.FC<{
           'border-l-[3px] border-l-blue-500': step.status === 'running',
           'border-l-[3px] border-l-emerald-500': step.status === 'completed' && isActive,
           'border-l-[3px] border-l-red-500': step.status === 'error',
+          'border-l-[3px] border-l-slate-400': step.status === 'cancelled',
         },
       )}
       style={{ transition: 'opacity 0.2s ease-out, transform 0.2s ease-out' }}
@@ -812,6 +822,7 @@ const SkillResourceCard: React.FC<{
           {step.status === 'running' && <LoadingOutlined spin className='text-xs text-blue-500' />}
           {step.status === 'completed' && <CheckCircleOutlined className='text-xs text-emerald-500' />}
           {step.status === 'error' && <ExclamationCircleOutlined className='text-xs text-red-500' />}
+          {step.status === 'cancelled' && <MinusCircleOutlined className='text-xs text-slate-400' />}
         </div>
       </div>
     </div>
@@ -864,32 +875,14 @@ const SectionBlock: React.FC<{
 
   const completedCount = section.steps.filter(s => s.status === 'completed').length;
   const totalCount = section.steps.length;
-  const isAllCompleted = completedCount === totalCount && totalCount > 0;
-  const hasRunningStep = section.steps.some(s => s.status === 'running');
 
   return (
     <div className='mb-4'>
       {/* Section Header */}
       <div className='flex items-center gap-2 mb-3 cursor-pointer group' onClick={() => setIsExpanded(!isExpanded)}>
         {/* Status indicator */}
-        <div
-          className={classNames('w-5 h-5 rounded-full flex items-center justify-center transition-all duration-300', {
-            'bg-emerald-100 dark:bg-emerald-900/50 scale-110': isAllCompleted,
-            'bg-blue-100 dark:bg-blue-900/50': hasRunningStep && !isAllCompleted,
-            'bg-gray-100 dark:bg-gray-800': !isAllCompleted && !hasRunningStep,
-          })}
-        >
-          {isAllCompleted ? (
-            <CheckCircleFilled
-              className={classNames('text-xs text-emerald-500 animate-bounce', {
-                'animation-iteration-count-1': isAllCompleted,
-              })}
-            />
-          ) : hasRunningStep ? (
-            <LoadingOutlined spin className='text-xs text-blue-500' />
-          ) : (
-            <span className='w-2 h-2 rounded-full bg-gray-400 dark:bg-gray-500' />
-          )}
+        <div className='w-5 h-5 rounded-full flex items-center justify-center bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500 transition-colors duration-200'>
+          <FileTextOutlined className='text-[11px]' />
         </div>
 
         {/* Section title */}
@@ -950,8 +943,8 @@ const ManusLeftPanel: React.FC<ManusLeftPanelProps> = ({
   onArtifactDownload,
   onViewAllFiles,
   onShare: _onShare,
-  isCollapsed,
-  onExpand,
+  isCollapsed: _isCollapsed,
+  onExpand: _onExpand,
   attachedFile,
   attachedKnowledge,
   attachedSkill,
@@ -963,47 +956,17 @@ const ManusLeftPanel: React.FC<ManusLeftPanelProps> = ({
   taskPlan,
 }) => {
   const { t } = useTranslation();
+  const hasRunningStep = useMemo(
+    () => sections.some(section => section.steps.some(step => step.status === 'running')),
+    [sections],
+  );
+  const showAnswerGenerationStatus = Boolean(isWorking && !hasRunningStep);
   const handleStepClick = useCallback(
     (stepId: string, sectionId: string) => {
       onStepClick?.(stepId, sectionId);
     },
     [onStepClick],
   );
-
-  // Collapsed mode: show compact summary of the round
-  if (isCollapsed) {
-    return (
-      <div
-        onClick={onExpand}
-        className='group px-4 py-3 border-b border-gray-100 dark:border-gray-800 cursor-pointer hover:bg-gray-50/50 dark:hover:bg-[#1a1b1e]/50 transition-colors'
-      >
-        {/* User query bubble (compact) */}
-        {userQuery && (
-          <div className='flex justify-end mb-2'>
-            <div className='max-w-[85%]'>
-              <div className='rounded-2xl bg-gray-100 dark:bg-[#2a2b2f] px-3 py-2 text-sm text-gray-800 dark:text-gray-200 leading-relaxed line-clamp-2'>
-                {userQuery}
-              </div>
-            </div>
-          </div>
-        )}
-        {/* Truncated assistant response */}
-        {assistantText && (
-          <div className='text-sm text-gray-500 dark:text-gray-400 line-clamp-2 leading-relaxed'>
-            {assistantText.slice(0, 150)}
-            {assistantText.length > 150 ? '...' : ''}
-          </div>
-        )}
-        {/* Completed indicator */}
-        {!assistantText && sections.length > 0 && (
-          <div className='flex items-center gap-1.5 text-xs text-gray-400'>
-            <CheckCircleFilled className='text-emerald-500' />
-            <span>{t('steps_completed_count', { count: sections.length })}</span>
-          </div>
-        )}
-      </div>
-    );
-  }
 
   return (
     <div className='flex flex-col'>
@@ -1094,13 +1057,13 @@ const ManusLeftPanel: React.FC<ManusLeftPanelProps> = ({
 
         {sections.length > 0 ? (
           <div className='pt-1'>
-            {sections.map((section, index) => (
+            {sections.map(section => (
               <SectionBlock
                 key={section.id}
                 section={section}
                 activeStepId={activeStepId}
                 onStepClick={stepId => handleStepClick(stepId, section.id)}
-                defaultExpanded={index === sections.length - 1}
+                defaultExpanded
                 stepThoughts={stepThoughts}
               />
             ))}
@@ -1109,7 +1072,7 @@ const ManusLeftPanel: React.FC<ManusLeftPanelProps> = ({
           <div className='px-4 py-6 text-gray-400 space-y-2'>
             <div className='flex items-center gap-2'>
               <LoadingOutlined spin className='text-blue-500' />
-              <span className='text-sm text-blue-600 dark:text-blue-400'>{t('db_gpt_thinking')}</span>
+              <span className='text-sm text-blue-600 dark:text-blue-400'>{t('generating_answer')}</span>
             </div>
             {stepThoughts?.[activeStepId || 'initial'] && (
               <ThoughtBubble text={stepThoughts[activeStepId || 'initial']} />
@@ -1117,11 +1080,11 @@ const ManusLeftPanel: React.FC<ManusLeftPanelProps> = ({
           </div>
         ) : null}
 
-        {isWorking && sections.length > 0 && (
+        {showAnswerGenerationStatus && sections.length > 0 && (
           <div className='px-4 py-3 mt-2 rounded-lg bg-blue-50/50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 space-y-2'>
             <div className='flex items-center gap-2'>
               <LoadingOutlined spin className='text-blue-500' />
-              <span className='text-sm text-blue-600 dark:text-blue-400'>{t('db_gpt_thinking')}</span>
+              <span className='text-sm text-blue-600 dark:text-blue-400'>{t('generating_answer')}</span>
             </div>
             {stepThoughts?.[activeStepId || 'initial'] && (
               <ThoughtBubble text={stepThoughts[activeStepId || 'initial']} />

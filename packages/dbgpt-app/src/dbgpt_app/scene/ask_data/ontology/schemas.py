@@ -23,7 +23,15 @@ class OntologyNode(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: str = Field(min_length=1, max_length=128)
-    type: Literal["entity", "metric", "scene", "rule"]
+    type: Literal[
+        "entity",
+        "metric",
+        "scene",
+        "rule",
+        "analysis_dimension",
+        "analysis_path",
+        "analysis_rule",
+    ]
     name: str = Field(min_length=1, max_length=255)
     aliases: list[str] = Field(default_factory=list)
     description: str = ""
@@ -46,6 +54,7 @@ class OntologyEdge(BaseModel):
         "scene_binding",
         "cross_scene_join",
         "clarification_rule",
+        "metric_relation",
     ]
     name: str = Field(min_length=1, max_length=255)
     description: str = ""

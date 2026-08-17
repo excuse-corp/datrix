@@ -1239,6 +1239,10 @@ def initialize_worker_manager_in_client(
         worker_params.host = binding_host or "127.0.0.1"
         logger.info(f"Worker params: {worker_params}")
         _setup_fastapi(worker_params, app, ignore_exception=True, system_app=system_app)
+        if not worker_manager.worker_manager:
+            worker_manager.worker_manager = _create_local_model_manager(
+                worker_params, model_storage
+            )
         for llm_deploy_config in models_config.llms:
             # Multiple LLMs
             _start_local_worker(

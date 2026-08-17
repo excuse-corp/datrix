@@ -37,24 +37,26 @@ def _snapshot() -> Snapshot:
         runtime_config={
             "data_source": "test",
             "view": "dbo.vw_contracts",
-            "dimensions": [
-                {
-                    "key": "department",
-                    "field": "department_id",
-                    "filter_operators": ["eq", "in"],
-                }
-            ],
-            "metrics": [
-                {
-                    "key": "contract_amount",
-                    "field": "contract_amount",
-                    "aggregation": "sum",
-                }
-            ],
-            "time": {
-                "field": "signed_date",
-                "required": False,
-                "granularities": ["day", "month"],
+            "query_model": {
+                "dimensions": [
+                    {
+                        "key": "department",
+                        "field": "department_id",
+                        "filter_operators": ["eq", "in"],
+                    }
+                ],
+                "metrics": [
+                    {
+                        "key": "contract_amount",
+                        "field": "contract_amount",
+                        "aggregation": "sum",
+                    }
+                ],
+                "time": {
+                    "field": "signed_date",
+                    "required": False,
+                    "granularities": ["day", "month"],
+                },
             },
             "named_filters": [],
             "query_limits": {"max_rows": 2},
@@ -193,9 +195,7 @@ def test_executor_does_not_mark_exact_row_limit_as_truncated():
     spec = _spec().model_copy(update={"filters": [], "limit": 2})
     compiled = QuerySpecCompiler().compile(spec, snapshot)
 
-    _, rows, truncated, _ = SafeSceneQueryExecutor().execute(
-        engine, compiled, snapshot
-    )
+    _, rows, truncated, _ = SafeSceneQueryExecutor().execute(engine, compiled, snapshot)
 
     assert len(rows) == 2
     assert not truncated

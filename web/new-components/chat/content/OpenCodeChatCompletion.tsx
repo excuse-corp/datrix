@@ -199,20 +199,26 @@ const OpenCodeChatCompletion: React.FC = () => {
     );
   };
 
+  const visibleContextStatus = contextStatus ?? {
+    state: 'OK' as const,
+    used_tokens: 0,
+    max_tokens: 0,
+    usage_percent: 0,
+    layer: null,
+  };
+
   return (
     <div className='flex flex-col w-5/6 mx-auto space-y-2 py-4'>
       {/* Context usage floating bar — persists after streaming ends */}
-      {contextStatus && (
-        <div className='sticky top-0 z-10 flex justify-center py-1'>
-          <ContextUsageBar
-            used={contextStatus.used_tokens}
-            budget={contextStatus.max_tokens}
-            ratio={contextStatus.usage_percent / 100}
-            state={contextStatus.state}
-            compactLayer={contextStatus.layer ?? null}
-          />
-        </div>
-      )}
+      <div className='sticky top-0 z-10 flex justify-center py-1'>
+        <ContextUsageBar
+          used={visibleContextStatus.used_tokens}
+          budget={visibleContextStatus.max_tokens}
+          ratio={visibleContextStatus.usage_percent / 100}
+          state={visibleContextStatus.state}
+          compactLayer={visibleContextStatus.layer ?? null}
+        />
+      </div>
 
       {groupedTurns.map((turn, index) => renderTurn(turn, index, index === groupedTurns.length - 1 && !streamingTurn))}
 

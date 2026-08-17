@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from ..combine import ResultCombiner
+from ..ontology.context import relevant_ontology_projection
+from ..ontology.schemas import OntologySnapshot
 from ..query.query_spec import SceneResult
 from ..schemas.result import ResultBundle, SceneResultSummary
 from ..schemas.snapshot import Snapshot
@@ -31,8 +35,9 @@ class ResultBundleBuilder:
         keys: list[str] | None = None,
         derived_metrics: list[str] | None = None,
         status: str = "succeeded",
+        ontology_snapshot: OntologySnapshot | None = None,
+        question: str | None = None,
     ) -> ResultBundle:
-        del snapshots, mode, keys, derived_metrics
         warnings: list[dict[str, str]] = []
         for result in results:
             warnings.extend(
@@ -53,13 +58,26 @@ class ResultBundleBuilder:
                         "message": f"RAG retrieval degraded for {result.scene_id}",
                     }
                 )
+        combined = None
+        charts = []
+        if results:
+            combined = self.combiner.combine(
+                results=results,
+                snapshots=snapshots,
+                mode=mode,
+                keys=keys,
+                derived_metrics=derived_metrics,
+            )
+            warnings.extend(combined.warnings)
+            charts = self.chart_builder.build(combined)
         references = [
             reference
             for result in results
             for reference in result.rag.get("references", [])
             if isinstance(reference, str)
         ]
-        answer = self._answer(status, results, warnings)
+        ontology_context = self._ontology_context(ontology_snapshot, question, results)
+        answer = self._answer(status, results, warnings, ontology_context)
         return ResultBundle(
             status=status,
             answer=answer,
@@ -76,10 +94,33 @@ class ResultBundleBuilder:
                 )
                 for result in results
             ],
-            combined=None,
-            charts=[],
+            combined=combined,
+            charts=charts,
             warnings=warnings,
             rag_references=references,
+            ontology_context=ontology_context,
+        )
+
+    @staticmethod
+    def _ontology_context(
+        ontology_snapshot: OntologySnapshot | None,
+        question: str | None,
+        results: list[SceneResult],
+    ) -> dict[str, Any] | None:
+        if ontology_snapshot is None:
+            return None
+        scene_ids = sorted({result.scene_id for result in results if result.scene_id})
+        result_columns = [
+            column.model_dump(mode="json")
+            for result in results
+            for column in result.columns
+        ]
+        return relevant_ontology_projection(
+            ontology_snapshot,
+            question,
+            max_nodes=16,
+            scene_ids=scene_ids,
+            result_columns=result_columns,
         )
 
     @staticmethod
@@ -87,12 +128,20 @@ class ResultBundleBuilder:
         status: str,
         results: list[SceneResult],
         warnings: list[dict[str, str]],
+        ontology_context: dict[str, Any] | None = None,
     ) -> str:
         if status != "succeeded":
             return "查询未完成，请根据返回的错误或澄清信息继续操作。"
         row_count = sum(result.row_count for result in results)
         scene_count = len({result.scene_id for result in results})
-        suffix = "结果包含警告，请查看 warnings。" if warnings else ""
+        suffixes = []
+        if ontology_context:
+            suffixes.append(
+                f"已结合 Ontology v{ontology_context.get('revision')} 的业务语义。"
+            )
+        if warnings:
+            suffixes.append("结果包含警告，请查看 warnings。")
+        suffix = "".join(suffixes)
         return f"查询完成，返回 {scene_count} 个场景、{row_count} 行结果。{suffix}"
 
 

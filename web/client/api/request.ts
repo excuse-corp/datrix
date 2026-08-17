@@ -264,6 +264,11 @@ export const createModel = (data: StartModelParams) => {
   return POST<StartModelParams, boolean>('/api/v2/serve/model/models', data);
 };
 
+// Update model startup params
+export const updateModel = (data: StartModelParams) => {
+  return PUT<StartModelParams, boolean>('/api/v2/serve/model/models', data);
+};
+
 // Stop the running model
 export const stopModel = (data: BaseModelParams) => {
   return POST<BaseModelParams, boolean>('/api/v2/serve/model/models/stop', data);

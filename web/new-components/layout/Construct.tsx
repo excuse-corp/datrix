@@ -1,15 +1,5 @@
 import { ModelSvg } from '@/components/icons';
-import Icon, {
-  ApiOutlined,
-  AppstoreOutlined,
-  BuildOutlined,
-  ClockCircleOutlined,
-  ConsoleSqlOutlined,
-  ForkOutlined,
-  MessageOutlined,
-  PartitionOutlined,
-  ThunderboltOutlined,
-} from '@ant-design/icons';
+import Icon, { ConsoleSqlOutlined, MessageOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { ConfigProvider, Tabs } from 'antd';
 import { t } from 'i18next';
 import { useRouter } from 'next/router';
@@ -18,27 +8,6 @@ import './style.css';
 
 function ConstructLayout({ children, className }: { children: React.ReactNode; className?: string }) {
   const items = [
-    {
-      key: 'app',
-      name: t('App'),
-      path: '/app',
-      icon: <AppstoreOutlined />,
-      // operations: (
-      //   <Button
-      //     className='border-none text-white bg-button-gradient h-full flex items-center'
-      //     icon={<PlusOutlined className='text-base' />}
-      //     // onClick={handleCreate}
-      //   >
-      //     {t('create_app')}
-      //   </Button>
-      // ),
-    },
-    {
-      key: 'flow',
-      name: t('awel_flow'),
-      icon: <ForkOutlined />,
-      path: '/flow',
-    },
     {
       key: 'models',
       name: t('model_manage'),
@@ -50,12 +19,6 @@ function ConstructLayout({ children, className }: { children: React.ReactNode; c
       name: t('Database'),
       icon: <ConsoleSqlOutlined />,
       path: '/database',
-    },
-    {
-      key: 'knowledge',
-      name: t('Knowledge_Space'),
-      icon: <PartitionOutlined />,
-      path: '/knowledge',
     },
     // {
     //   key: 'agent',
@@ -74,24 +37,6 @@ function ConstructLayout({ children, className }: { children: React.ReactNode; c
       name: t('skills') || '技能',
       path: '/skills',
       icon: <ThunderboltOutlined />,
-    },
-    {
-      key: 'connectors',
-      name: t('connectors'),
-      icon: <ApiOutlined />,
-      path: '/connectors',
-    },
-    {
-      key: 'scheduled-tasks',
-      name: t('scheduled_tasks'),
-      icon: <ClockCircleOutlined />,
-      path: '/scheduled-tasks',
-    },
-    {
-      key: 'dbgpts',
-      name: t('dbgpts_community'),
-      path: '/dbgpts',
-      icon: <BuildOutlined />,
     },
   ];
   const router = useRouter();

@@ -31,9 +31,6 @@ _SKILLS_MAP = {
     for name in [
         "csv-data-analysis",
         "skill-creator",
-        "financial-report-analyzer",
-        "walmart-sales-analyzer",
-        "agent-browser",
     ]
 }
 

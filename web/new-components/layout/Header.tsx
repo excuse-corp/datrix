@@ -2,28 +2,14 @@ import { ReadOutlined } from '@ant-design/icons';
 import { Tooltip } from 'antd';
 import { useRouter } from 'next/router';
 
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { useTranslation } from 'react-i18next';
 
 const Header: React.FC = () => {
   const { t } = useTranslation();
   const router = useRouter();
 
-  const [showHeader, setShowHeader] = useState(true);
-
-  useEffect(() => {
-    if (
-      router.pathname === '/construct/flow/canvas' ||
-      router.pathname === '/construct/app/extra' ||
-      (router.pathname === '/chat' && router.asPath !== '/chat')
-    ) {
-      setShowHeader(false);
-    } else {
-      setShowHeader(true);
-    }
-  }, [router]);
-
-  if (!showHeader) {
+  if (router.pathname === '/chat' && router.asPath !== '/chat') {
     return null;
   }
 

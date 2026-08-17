@@ -7,8 +7,13 @@ from typing import Any
 from .schemas import OntologyEdge, OntologyGraph, OntologyNode
 
 
+def scene_snapshot(source: Any) -> Any:
+    return source.get("snapshot") if isinstance(source, dict) else source
+
+
 def build_scene_fragment(snapshot: Any) -> OntologyGraph:
     """Expose Scene capabilities, never its Markdown, schema or physical fields."""
+    snapshot = scene_snapshot(snapshot)
     projection = getattr(snapshot, "routing_projection", {}) or {}
     scene_id = str(getattr(snapshot, "scene_id", ""))
     snapshot_id = str(getattr(snapshot, "snapshot_id", ""))
@@ -84,12 +89,18 @@ def source_snapshot_refs(snapshots: list[Any]) -> list[dict[str, str]]:
                 "scene_id": str(snapshot.scene_id),
                 "snapshot_id": str(snapshot.snapshot_id),
                 "revision_id": str(snapshot.revision_id),
-                "semantic_hash": str(snapshot.source_hashes.semantic_hash),
+                "semantic_md_hash": str(snapshot.source_hashes.semantic_hash),
             }
-            for snapshot in snapshots
+            for source in snapshots
+            if (snapshot := scene_snapshot(source)) is not None
         ],
         key=lambda item: item["scene_id"],
     )
 
 
-__all__ = ["build_scene_fragment", "merge_graphs", "source_snapshot_refs"]
+__all__ = [
+    "build_scene_fragment",
+    "merge_graphs",
+    "scene_snapshot",
+    "source_snapshot_refs",
+]

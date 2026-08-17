@@ -87,6 +87,30 @@ class QuestionManager:
         pq.event.set()
         logger.info("QuestionManager.reject: request_id=%s rejected", request_id)
 
+    def reject_by_conv(self, conv_id: str) -> int:
+        """Reject all pending questions for a conversation.
+
+        Used by run cancellation so a blocked question tool can exit promptly.
+        """
+        request_ids = [
+            request_id
+            for request_id, pending in self._pending.items()
+            if pending.conv_id == conv_id
+        ]
+        for request_id in request_ids:
+            pending = self._pending.get(request_id)
+            if not pending:
+                continue
+            pending.rejected = True
+            pending.event.set()
+        if request_ids:
+            logger.info(
+                "QuestionManager.reject_by_conv: conv_id=%s rejected=%d",
+                conv_id,
+                len(request_ids),
+            )
+        return len(request_ids)
+
     def remove(self, request_id: str) -> None:
         self._pending.pop(request_id, None)
 

@@ -58,14 +58,9 @@ ontology_id: "global_business"
 - 查询合同金额且未给出时间口径时，询问使用签约日期、生效日期还是其他业务日期。
 """
 
-# A global Ontology begins with identity only. Business objects are generated
-# from accepted active Scene Snapshots, never invented by a sample document.
-DEFAULT_ONTOLOGY_MARKDOWN = """---
-schema_version: "1"
-ontology_id: "global_business"
-revision: 1
----
-"""
+# A global Ontology begins without sample business content. Server-owned
+# revision metadata lives in storage/API fields, not in the editable Markdown.
+DEFAULT_ONTOLOGY_MARKDOWN = "# 企业业务本体\n"
 
 
 class OntologyMarkdownError(ValueError):
@@ -82,20 +77,69 @@ _FORBIDDEN_TERMS = re.compile(
     re.IGNORECASE,
 )
 
-_FRONTMATTER = re.compile(r"\A---\s*\n.*?\n---\s*(?:\n|\Z)", re.DOTALL)
+_FRONTMATTER = re.compile(
+    r"\A\ufeff?\s*---\s*\n.*?\n\s*---\s*(?:\n|\Z)", re.DOTALL
+)
+_EMPTY_CONFLICT_VALUES = {"", "无", "none", "n/a", "na", "-"}
+_NON_BUSINESS_SECTION_HEADERS = {
+    "待管理员确认事项",
+    "管理员确认事项",
+    "草稿说明",
+    "生成说明",
+}
+_NON_BUSINESS_BOILERPLATE_PATTERNS = [
+    re.compile(pattern)
+    for pattern in (
+        r"本草稿",
+        r"草稿版?本体",
+        r"全局业务本体草稿",
+        r"由已激活场景.*生成",
+        r"通过\s*LLM\s*生成",
+        r"请人工确认",
+        r"待管理员确认",
+    )
+]
 
 
 def with_managed_frontmatter(document: str, revision: int) -> str:
-    """Keep identity and revision server-owned while preserving the user body."""
+    """Strip legacy frontmatter; identity and revision are server-owned fields."""
+    del revision
     body = _FRONTMATTER.sub("", document.replace("\r\n", "\n").replace("\r", "\n"))
-    header = (
-        "---\n"
-        'schema_version: "1"\n'
-        'ontology_id: "global_business"\n'
-        f"revision: {revision}\n"
-        "---\n\n"
+    body = _strip_non_business_boilerplate(body)
+    body = body.lstrip("\n")
+    return body if body.strip() else DEFAULT_ONTOLOGY_MARKDOWN
+
+
+def _strip_non_business_boilerplate(document: str) -> str:
+    """Remove generation metadata that would pollute analysis prompts."""
+    lines = document.split("\n")
+    kept: list[str] = []
+    skipping_section = False
+    for line in lines:
+        heading = re.match(r"^(#{2,6})\s+(.+?)\s*$", line)
+        if heading:
+            title = heading.group(2).strip()
+            if title in _NON_BUSINESS_SECTION_HEADERS:
+                skipping_section = True
+                continue
+            skipping_section = False
+        if skipping_section:
+            continue
+        if _is_non_business_boilerplate_line(line):
+            continue
+        kept.append(line)
+    return "\n".join(kept)
+
+
+def _is_non_business_boilerplate_line(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped:
+        return False
+    if stripped.startswith("|"):
+        return False
+    return any(
+        pattern.search(stripped) for pattern in _NON_BUSINESS_BOILERPLATE_PATTERNS
     )
-    return header + body.lstrip("\n")
 
 
 def is_legacy_default_ontology(document: str) -> bool:
@@ -114,7 +158,7 @@ def _split_row(line: str) -> list[str]:
 class OntologyMarkdownParser:
     """The Markdown document is readable by people and deterministic for services."""
 
-    compiler_version = "1"
+    compiler_version = "2"
 
     def compile(self, document: str) -> OntologyCompilation:
         if not isinstance(document, str) or not document.strip():
@@ -131,7 +175,12 @@ class OntologyMarkdownParser:
                     )
                 )
         tables = self._tables(normalized, issues)
-        graph = self._build_graph(tables, self._rule_lines(normalized), issues)
+        graph = self._build_graph(
+            tables,
+            self._rule_lines(normalized),
+            self._bullet_lines(normalized, "查询结果分析规则"),
+            issues,
+        )
         projection = build_prompt_projection(graph)
         return OntologyCompilation(
             graph=graph, issues=issues, prompt_projection=projection
@@ -190,6 +239,7 @@ class OntologyMarkdownParser:
         self,
         tables: dict[str, list[tuple[dict[str, str], int]]],
         rules: list[tuple[str, int]],
+        analysis_rules: list[tuple[str, int]],
         issues: list[OntologyValidationIssue],
     ) -> OntologyGraph:
         nodes: dict[str, OntologyNode] = {}
@@ -238,6 +288,11 @@ class OntologyMarkdownParser:
                     name=name,
                     aliases=self._aliases(cell(row, "别名")),
                     description=cell(row, "定义", "说明"),
+                    data={
+                        "analysis_role": cell(row, "业务分析角色", "分析角色"),
+                        "source_scenes": self._aliases(cell(row, "来源场景", "场景")),
+                        "evidence": cell(row, "证据"),
+                    },
                 ),
                 line,
             )
@@ -256,6 +311,7 @@ class OntologyMarkdownParser:
                 )
                 continue
             source_scene = cell(row, "来源场景", "场景")
+            conflict = cell(row, "冲突说明", "冲突")
             add_node(
                 OntologyNode(
                     id=identifier,
@@ -267,6 +323,11 @@ class OntologyMarkdownParser:
                         "formula": cell(row, "计算公式", "公式"),
                         "zero_policy": cell(row, "零值处理", "零值策略"),
                         "source_scene": source_scene,
+                        "analysis_meaning": cell(row, "分析含义"),
+                        "interpretation": cell(row, "常见解读", "解读"),
+                        "common_anomalies": cell(row, "常见异常", "异常"),
+                        "recommended_dimensions": cell(row, "推荐分析维度", "建议维度"),
+                        "conflict_note": conflict,
                     },
                 ),
                 line,
@@ -323,7 +384,69 @@ class OntologyMarkdownParser:
                     type="relation",
                     name=relation,
                     description=cell(row, "说明", "定义"),
-                    data={"cardinality": cell(row, "基数")},
+                    data={
+                        "cardinality": cell(row, "基数"),
+                        "analysis_meaning": cell(row, "分析含义"),
+                    },
+                ),
+                line,
+            )
+
+        for row, line in tables.get("指标关系", []):
+            identifier = cell(row, "ID")
+            primary = cell(row, "主指标")
+            related = cell(row, "关联指标")
+            relation = cell(row, "关系")
+            usage = cell(row, "分析用途", "用途")
+            if not identifier or not primary or not related or not relation:
+                issues.append(
+                    OntologyValidationIssue(
+                        code="METRIC_RELATION_REQUIRED",
+                        message="指标关系必须填写 ID、主指标、关系和关联指标。",
+                        line=line,
+                    )
+                )
+                continue
+            self._add_edge(
+                edges,
+                issues,
+                OntologyEdge(
+                    id=identifier,
+                    source=primary,
+                    target=related,
+                    type="metric_relation",
+                    name=relation,
+                    description=usage,
+                    data={"analysis_usage": usage},
+                ),
+                line,
+            )
+
+        for row, line in tables.get("分析维度", []):
+            name = cell(row, "维度", "名称")
+            if not name:
+                issues.append(
+                    OntologyValidationIssue(
+                        code="ANALYSIS_DIMENSION_REQUIRED",
+                        message="分析维度必须填写维度名称。",
+                        line=line,
+                    )
+                )
+                continue
+            identifier = (
+                cell(row, "ID") or f"analysis_dimension_{self._stable_id(name)}"
+            )
+            add_node(
+                OntologyNode(
+                    id=identifier,
+                    type="analysis_dimension",
+                    name=name,
+                    description=cell(row, "分析用途", "用途"),
+                    data={
+                        "applicable_entities": self._aliases(cell(row, "适用实体")),
+                        "applicable_metrics": self._aliases(cell(row, "适用指标")),
+                        "caveats": self._aliases(cell(row, "注意事项", "说明")),
+                    },
                 ),
                 line,
             )
@@ -356,6 +479,34 @@ class OntologyMarkdownParser:
                 line,
             )
 
+        for row, line in tables.get("跨场景分析路径", []):
+            identifier = cell(row, "ID")
+            topic = cell(row, "分析主题", "主题")
+            if not identifier or not topic:
+                issues.append(
+                    OntologyValidationIssue(
+                        code="ANALYSIS_PATH_REQUIRED",
+                        message="跨场景分析路径必须填写 ID 和分析主题。",
+                        line=line,
+                    )
+                )
+                continue
+            add_node(
+                OntologyNode(
+                    id=identifier,
+                    type="analysis_path",
+                    name=topic,
+                    description=cell(row, "推荐分析方式", "推荐分析"),
+                    data={
+                        "scenes": self._aliases(cell(row, "涉及场景", "场景")),
+                        "entities": self._aliases(cell(row, "关联实体", "实体")),
+                        "join_keys": self._aliases(cell(row, "关联键")),
+                        "caveats": self._aliases(cell(row, "注意事项", "说明")),
+                    },
+                ),
+                line,
+            )
+
         for row, line in tables.get("跨场景关联", []):
             identifier = cell(row, "ID")
             left = cell(row, "左侧场景")
@@ -371,15 +522,6 @@ class OntologyMarkdownParser:
                 continue
             business_key = cell(row, "关联键")
             grain = cell(row, "粒度")
-            if not business_key or not grain:
-                issues.append(
-                    OntologyValidationIssue(
-                        code="CROSS_SCENE_JOIN_GRAIN_REQUIRED",
-                        message="跨场景关联必须明确关联键和粒度。",
-                        line=line,
-                        path=identifier,
-                    )
-                )
             add_scene(left, line)
             add_scene(right, line)
             self._add_edge(
@@ -412,24 +554,20 @@ class OntologyMarkdownParser:
                 line,
             )
 
-        self._validate_metric_formulas(nodes, issues)
-        for edge in edges.values():
-            if edge.source not in nodes:
-                issues.append(
-                    OntologyValidationIssue(
-                        code="UNKNOWN_RELATION_SOURCE",
-                        message=f"关系 {edge.id} 的主体不存在：{edge.source}。",
-                        path=edge.id,
-                    )
-                )
-            if edge.target not in nodes:
-                issues.append(
-                    OntologyValidationIssue(
-                        code="UNKNOWN_RELATION_TARGET",
-                        message=f"关系 {edge.id} 的客体不存在：{edge.target}。",
-                        path=edge.id,
-                    )
-                )
+        for number, (text, line) in enumerate(analysis_rules, start=1):
+            rule_id = f"analysis_rule_{number}"
+            trigger, guidance = self._split_rule(text)
+            add_node(
+                OntologyNode(
+                    id=rule_id,
+                    type="analysis_rule",
+                    name=trigger or f"查询结果分析规则 {number}",
+                    description=guidance or text,
+                    data={"trigger": trigger, "guidance": guidance or text},
+                ),
+                line,
+            )
+
         return OntologyGraph(nodes=list(nodes.values()), edges=list(edges.values()))
 
     @staticmethod
@@ -539,21 +677,38 @@ class OntologyMarkdownParser:
         return [item.strip() for item in re.split(r"[,，、\n]", value) if item.strip()]
 
     @staticmethod
-    def _rule_lines(document: str) -> list[tuple[str, int]]:
-        """Rules stay prose but become visible to the main Agent as guidance."""
+    def _stable_id(value: str) -> str:
+        text = re.sub(r"[^0-9A-Za-z_\u4e00-\u9fff]+", "_", str(value).strip())
+        text = re.sub(r"_+", "_", text).strip("_").lower()
+        return text or "item"
+
+    @staticmethod
+    def _split_rule(value: str) -> tuple[str, str]:
+        parts = re.split(r"[：:]", value, maxsplit=1)
+        if len(parts) == 2:
+            return parts[0].strip(), parts[1].strip()
+        return value.strip(), value.strip()
+
+    @staticmethod
+    def _bullet_lines(document: str, section: str) -> list[tuple[str, int]]:
         lines = document.split("\n")
         in_section = False
         rules: list[tuple[str, int]] = []
         for line_number, line in enumerate(lines, start=1):
             heading = re.match(r"^#{2,3}\s+(.+?)\s*$", line)
             if heading:
-                in_section = heading.group(1).strip() == "需求澄清规则"
+                in_section = heading.group(1).strip() == section
                 continue
             if in_section:
                 match = re.match(r"^\s*[-*]\s+(.+?)\s*$", line)
                 if match:
                     rules.append((match.group(1), line_number))
         return rules
+
+    @staticmethod
+    def _rule_lines(document: str) -> list[tuple[str, int]]:
+        """Rules stay prose but become visible to the main Agent as guidance."""
+        return OntologyMarkdownParser._bullet_lines(document, "需求澄清规则")
 
 
 def build_prompt_projection(graph: OntologyGraph) -> dict:
@@ -568,12 +723,27 @@ def build_prompt_projection(graph: OntologyGraph) -> dict:
                 "data": node.data,
             }
         )
+    edges = [edge.model_dump(mode="json") for edge in graph.edges]
+    metric_relations = [edge for edge in edges if edge.get("type") == "metric_relation"]
+    relation_edges = [edge for edge in edges if edge.get("type") == "relation"]
+    cross_scene_join_edges = [
+        edge for edge in edges if edge.get("type") == "cross_scene_join"
+    ]
     return {
         "entities": by_type["entity"],
         "metrics": by_type["metric"],
+        "relations": relation_edges,
         "scenes": by_type["scene"],
         "rules": by_type["rule"],
-        "relations": [edge.model_dump(mode="json") for edge in graph.edges],
+        "clarification_rules": [
+            node.get("description", "") for node in by_type["rule"]
+        ],
+        "analysis_dimensions": by_type["analysis_dimension"],
+        "metric_relations": metric_relations,
+        "cross_scene_analysis_paths": by_type["analysis_path"],
+        "cross_scene_joins": cross_scene_join_edges,
+        "result_analysis_rules": by_type["analysis_rule"],
+        "edges": edges,
     }
 
 

@@ -140,7 +140,6 @@ function ConfigurableForm({ params, form }: { params: Array<ConfigurableParams> 
           key={param.param_name}
           label={<p className='whitespace-normal overflow-wrap-break-word'>{param.label || param.param_name}</p>}
           name={param.param_name}
-          initialValue={param.default_value}
           valuePropName={
             param.param_type.toLowerCase() === 'bool' || param.param_type.toLowerCase() === 'boolean'
               ? 'checked'

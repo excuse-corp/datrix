@@ -12,10 +12,8 @@ const NestedFormFields: React.FC<NestedFormFieldsProps> = ({ parentName, fields,
 
   useEffect(() => {
     const currentValue = form.getFieldValue(parentName);
-    if (currentValue?.type && !selectedType) {
-      setSelectedType(currentValue.type);
-    }
-  }, [form, parentName]);
+    setSelectedType(currentValue?.type || null);
+  }, [fields, form, parentName]);
 
   const handleTypeChange = (value: string) => {
     setSelectedType(value);

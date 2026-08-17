@@ -97,6 +97,7 @@ class ScenePublishService:
         run_rag_quality_gate: bool = False,
         force_rebuild_knowledge: bool = False,
         build_knowledge: bool = False,
+        persist_revision_state: bool = True,
     ) -> Snapshot:
         del force_rebuild_knowledge, build_knowledge
         current = self._revision(scene_id, revision)
@@ -127,51 +128,57 @@ class ScenePublishService:
                 run_rag_quality_gate=run_rag_quality_gate,
                 rag_quality_ok=True,
             )
-            self.snapshot_service.save_ready(snapshot)
-            self.repository.save_revision(
-                current.model_copy(
-                    update={
-                        "status": RevisionStatus.READY,
-                        "parsed_config_json": parsed.config.model_dump(mode="json"),
-                        "view_schema_json": view_schema.model_dump(mode="json"),
-                        "semantic_hash": parsed.semantic_hash,
-                        "schema_hash": view_schema.schema_hash,
-                        "knowledge_hash": knowledge_hash,
-                        "knowledge_space_name": knowledge_space,
-                    }
+            self._save_ready_snapshot(snapshot)
+            if persist_revision_state and self._revision_state_mutable(current):
+                self.repository.save_revision(
+                    current.model_copy(
+                        update={
+                            "status": RevisionStatus.READY,
+                            "parsed_config_json": parsed.config.model_dump(mode="json"),
+                            "view_schema_json": view_schema.model_dump(mode="json"),
+                            "semantic_hash": parsed.semantic_hash,
+                            "schema_hash": view_schema.schema_hash,
+                            "knowledge_hash": knowledge_hash,
+                            "knowledge_space_name": knowledge_space,
+                        }
+                    )
                 )
-            )
             return snapshot
         except ScenePublishError as exc:
-            self.repository.set_revision_status(
-                scene_id,
-                revision,
-                RevisionStatus.FAILED,
-                error_code=exc.code,
-                error_message=exc.message,
-            )
+            if persist_revision_state and self._revision_state_mutable(current):
+                self.repository.set_revision_status(
+                    scene_id,
+                    revision,
+                    RevisionStatus.FAILED,
+                    error_code=exc.code,
+                    error_message=exc.message,
+                )
             raise
         except (SnapshotBuildError, SceneRepositoryError) as exc:
             code = getattr(exc, "code", str(exc))
-            self.repository.set_revision_status(
-                scene_id,
-                revision,
-                RevisionStatus.FAILED,
-                error_code=code,
-                error_message=str(exc),
-            )
+            if persist_revision_state and self._revision_state_mutable(current):
+                self.repository.set_revision_status(
+                    scene_id,
+                    revision,
+                    RevisionStatus.FAILED,
+                    error_code=code,
+                    error_message=str(exc),
+                )
             raise ScenePublishError(code, str(exc)) from exc
         except Exception as exc:
-            self.repository.set_revision_status(
-                scene_id,
-                revision,
-                RevisionStatus.FAILED,
-                error_code="SNAPSHOT_BUILD_FAILED",
-                error_message=str(exc),
-            )
+            if persist_revision_state and self._revision_state_mutable(current):
+                self.repository.set_revision_status(
+                    scene_id,
+                    revision,
+                    RevisionStatus.FAILED,
+                    error_code="SNAPSHOT_BUILD_FAILED",
+                    error_message=str(exc),
+                )
             raise ScenePublishError("SNAPSHOT_BUILD_FAILED", str(exc)) from exc
 
-    def publish(self, scene_id: str, revision: int) -> tuple[ValidationResult, Snapshot, int]:
+    def publish(
+        self, scene_id: str, revision: int
+    ) -> tuple[ValidationResult, Snapshot, int]:
         """Validate, build the internal Scene snapshot and activate it.
 
         This is the current lifecycle entry point used by Scene creation and the
@@ -212,6 +219,63 @@ class ScenePublishService:
         )
         active, registry_version = self.activate(scene_id, snapshot.snapshot_id)
         return validation, active, registry_version
+
+    def rebuild_active_snapshots(
+        self, scene_ids: list[str] | None = None
+    ) -> tuple[list[dict[str, object]], int]:
+        """Rebuild active Scene Snapshots with the current SnapshotBuilder.
+
+        This supports Snapshot schema migrations without mutating the immutable
+        Scene revision document. Old snapshots remain stored for audit/rollback.
+        """
+        allowed = set(scene_ids or [])
+        scenes = [
+            scene
+            for scene in self.repository.list_scenes()
+            if scene.status == SceneStatus.ACTIVE
+            and scene.active_revision is not None
+            and (not allowed or scene.scene_id in allowed)
+        ]
+        results: list[dict[str, object]] = []
+        for scene in scenes:
+            old_snapshot_id = scene.current_snapshot_id
+            try:
+                snapshot = self.build_snapshot(
+                    scene.scene_id,
+                    scene.active_revision,
+                    run_rag_quality_gate=False,
+                    build_knowledge=False,
+                    persist_revision_state=False,
+                )
+                if old_snapshot_id == snapshot.snapshot_id:
+                    active = self.snapshot_service.active(scene.scene_id)
+                    status = "unchanged"
+                else:
+                    active, _ = self.activate(scene.scene_id, snapshot.snapshot_id)
+                    status = "rebuilt"
+                results.append(
+                    {
+                        "scene_id": scene.scene_id,
+                        "revision": scene.active_revision,
+                        "old_snapshot_id": old_snapshot_id,
+                        "new_snapshot_id": snapshot.snapshot_id,
+                        "snapshot_schema_version": snapshot.schema_version,
+                        "status": status,
+                        "active": active is not None,
+                    }
+                )
+            except ScenePublishError as exc:
+                results.append(
+                    {
+                        "scene_id": scene.scene_id,
+                        "revision": scene.active_revision,
+                        "old_snapshot_id": old_snapshot_id,
+                        "status": "failed",
+                        "error_code": exc.code,
+                        "error_message": exc.message,
+                    }
+                )
+        return results, self.snapshot_service.registry_version
 
     def activate(self, scene_id: str, snapshot_id: str) -> tuple[Snapshot, int]:
         try:
@@ -265,6 +329,28 @@ class ScenePublishService:
             if isinstance(exc, ScenePublishError):
                 raise
             raise ScenePublishError(str(exc), str(exc)) from exc
+
+    def _save_ready_snapshot(self, snapshot: Snapshot) -> Snapshot:
+        try:
+            existing = self.snapshot_service.get(snapshot.snapshot_id)
+        except KeyError:
+            return self.snapshot_service.save_ready(snapshot)
+        if existing.status in {SnapshotStatus.READY, SnapshotStatus.ACTIVE} and (
+            self._same_snapshot_content(existing, snapshot)
+        ):
+            return snapshot
+        return self.snapshot_service.save_ready(snapshot)
+
+    @staticmethod
+    def _same_snapshot_content(left: Snapshot, right: Snapshot) -> bool:
+        ignored = {"status", "error_code", "error_message", "created_at"}
+        return left.model_dump(mode="json", exclude=ignored) == right.model_dump(
+            mode="json", exclude=ignored
+        )
+
+    @staticmethod
+    def _revision_state_mutable(revision) -> bool:
+        return revision.status not in {RevisionStatus.ACTIVE, RevisionStatus.SUPERSEDED}
 
     def _revision(self, scene_id: str, revision: int):
         try:

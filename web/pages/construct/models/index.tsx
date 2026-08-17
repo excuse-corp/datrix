@@ -4,7 +4,7 @@ import BlurredCard, { InnerDropdown } from '@/new-components/common/blurredCard'
 import ConstructLayout from '@/new-components/layout/Construct';
 import { IModelData } from '@/types/model';
 import { getModelIcon } from '@/utils/constants';
-import { PlusOutlined } from '@ant-design/icons';
+import { EditOutlined, PlusOutlined } from '@ant-design/icons';
 import { Button, Modal, Tag, message } from 'antd';
 import moment from 'moment';
 import { useEffect, useState } from 'react';
@@ -14,6 +14,7 @@ function Models() {
   const { t } = useTranslation();
   const [models, setModels] = useState<Array<IModelData>>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingModel, setEditingModel] = useState<IModelData | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
 
   async function getModels() {
@@ -121,6 +122,7 @@ function Models() {
               className='border-none text-white bg-button-gradient'
               icon={<PlusOutlined />}
               onClick={() => {
+                setEditingModel(null);
                 setIsModalOpen(true);
               }}
             >
@@ -158,6 +160,19 @@ function Models() {
                   menu={{
                     items: [
                       {
+                        key: 'edit_model',
+                        label: (
+                          <span
+                            onClick={() => {
+                              setEditingModel(item);
+                              setIsModalOpen(true);
+                            }}
+                          >
+                            {t('edit_model')}
+                          </span>
+                        ),
+                      },
+                      {
                         key: 'stop_model',
                         label: (
                           <span className='text-red-400' onClick={() => stopTheModel(item)}>
@@ -186,6 +201,19 @@ function Models() {
                 />
               }
               rightTopHover={false}
+              RightBottom={
+                <Button
+                  size='small'
+                  icon={<EditOutlined />}
+                  onClick={e => {
+                    e.stopPropagation();
+                    setEditingModel(item);
+                    setIsModalOpen(true);
+                  }}
+                >
+                  {t('edit_model')}
+                </Button>
+              }
               Tags={
                 <div>
                   <Tag color={item.healthy ? 'green' : 'red'}>{item.healthy ? 'Healthy' : 'Unhealthy'}</Tag>
@@ -198,18 +226,24 @@ function Models() {
         <Modal
           width={800}
           open={isModalOpen}
-          title={t('create_model')}
+          title={editingModel ? t('edit_model') : t('create_model')}
           onCancel={() => {
             setIsModalOpen(false);
+            setEditingModel(null);
           }}
           footer={null}
+          destroyOnClose
         >
           <ModelForm
+            mode={editingModel ? 'edit' : 'create'}
+            initialModel={editingModel ?? undefined}
             onCancel={() => {
               setIsModalOpen(false);
+              setEditingModel(null);
             }}
             onSuccess={() => {
               setIsModalOpen(false);
+              setEditingModel(null);
               getModels();
             }}
           />

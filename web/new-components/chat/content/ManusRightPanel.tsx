@@ -16,7 +16,6 @@ import {
   DownOutlined,
   DownloadOutlined,
   EditOutlined,
-  ExportOutlined,
   EyeOutlined,
   FileExcelOutlined,
   FileImageOutlined,
@@ -26,21 +25,19 @@ import {
   FileTextOutlined,
   FolderOpenOutlined,
   LeftOutlined,
-  LinkOutlined,
   LoadingOutlined,
+  MinusCircleOutlined,
   PlayCircleOutlined,
   PlusOutlined,
   RightOutlined,
   SearchOutlined,
-  ClockCircleOutlined,
-  SyncOutlined,
   TableOutlined,
   UpOutlined,
 } from '@ant-design/icons';
 import { GPTVis } from '@antv/gpt-vis';
 import { Button, Table, Tooltip, message } from 'antd';
 import classNames from 'classnames';
-import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ArtifactItem, StepStatus, StepType } from './ManusLeftPanel';
 
@@ -179,6 +176,13 @@ const StatusBadge: React.FC<{ status: StepStatus }> = ({ status }) => {
         <div className='flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-900/50 text-red-600 dark:text-red-400 text-[10px] font-medium'>
           <CloseCircleFilled className='text-xs' />
           <span>{t('Error_Message')}</span>
+        </div>
+      );
+    case 'cancelled':
+      return (
+        <div className='flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-[10px] font-medium'>
+          <MinusCircleOutlined className='text-xs' />
+          <span>已取消</span>
         </div>
       );
     default:
@@ -574,7 +578,7 @@ const parseLoadSkillDetail = (
         }
       }
     }
-    // Fallback: extract skill name from step title like "Load Skill: walmart-sales-analyzer"
+    // Fallback: extract skill name from step title like "Load Skill: csv-data-analysis"
     if (!skillName && title) {
       const titleMatch = title.match(/Load\s+Skill:\s*(.+)/i);
       if (titleMatch) skillName = titleMatch[1].trim();
@@ -1230,7 +1234,7 @@ const SkillCardRenderer: React.FC<{
       setIsAdded(true);
       message.success(t('skill_added_success', { skillName }));
     }
-  }, [skillName, isAdded]);
+  }, [skillName, isAdded, t]);
 
   const displayName = detailData?.metadata?.name || detailData?.skill_name || skillName;
   const description = detailData?.metadata?.description || '';
@@ -1450,11 +1454,6 @@ const ManusRightPanel: React.FC<ManusRightPanelProps> = ({
   activeStep,
   outputs,
   isRunning,
-  onRerun,
-  onShare,
-  onSchedule,
-  terminalTitle,
-  onCollapse,
   artifacts,
   onArtifactClick,
   panelView: controlledPanelView,
@@ -1470,39 +1469,10 @@ const ManusRightPanel: React.FC<ManusRightPanelProps> = ({
   const [inputCollapsed, setInputCollapsed] = useState(false);
   const [internalPanelView, setInternalPanelView] = useState<PanelView>('execution');
   const [fileFilter, setFileFilter] = useState<FileFilterTab>('all');
-  const htmlPreviewRef = useRef<HTMLIFrameElement>(null);
   const panelView = controlledPanelView ?? internalPanelView;
   const setPanelView = (view: PanelView) => {
     setInternalPanelView(view);
     onPanelViewChange?.(view);
-  };
-
-  const handleExportPdf = () => {
-    try {
-      const iframe = htmlPreviewRef.current;
-      if (iframe?.contentWindow) {
-        iframe.contentWindow.focus();
-        iframe.contentWindow.print();
-        return;
-      }
-    } catch {
-      /* fallback below */
-    }
-    if (previewArtifact) {
-      const htmlStr =
-        typeof previewArtifact.content === 'string'
-          ? previewArtifact.content
-          : previewArtifact.content?.html || previewArtifact.content?.content || String(previewArtifact.content);
-      const win = window.open('', '_blank');
-      if (win) {
-        win.document.write(resolveHtmlImageUrls(htmlStr));
-        win.document.close();
-        win.focus();
-        win.print();
-      } else {
-        message.error('浏览器阻止了弹出窗口，请允许后重试');
-      }
-    }
   };
 
   useEffect(() => {
@@ -1609,80 +1579,6 @@ const ManusRightPanel: React.FC<ManusRightPanelProps> = ({
     <div className='relative flex flex-col h-full bg-[#f8f9fc] dark:bg-[#0d0e11]'>
       {/* Collapse button is rendered by the parent layout to avoid overflow clipping */}
 
-      {/* Terminal Header */}
-      <div className='flex items-center justify-between px-5 py-3 bg-white dark:bg-[#111217] border-b border-gray-200 dark:border-gray-800'>
-        <div className='flex items-center gap-3'>
-          <div className='flex items-center gap-2'>
-            <div className='w-3 h-3 rounded-full bg-red-500' />
-            <div className='w-3 h-3 rounded-full bg-yellow-500' />
-            <div className='w-3 h-3 rounded-full bg-green-500' />
-          </div>
-          <div className='flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 font-medium'>
-            <DesktopOutlined className='text-gray-500' />
-            <span>{terminalTitle || t('db_gpt_computer')}</span>
-            {isRunning && <LoadingOutlined spin className='text-blue-500 ml-1' />}
-          </div>
-        </div>
-
-        <div className='flex items-center gap-1'>
-          {panelView === 'html-preview' && previewArtifact && (
-            <Tooltip title={t('export_pdf')}>
-              <Button
-                type='text'
-                size='small'
-                icon={<ExportOutlined />}
-                onClick={handleExportPdf}
-                className='text-gray-500 hover:text-blue-500'
-              >
-                {t('export_pdf')}
-              </Button>
-            </Tooltip>
-          )}
-
-          {onSchedule && (
-            <Tooltip title={t('scheduled.save.title')}>
-              <Button
-                type='text'
-                size='small'
-                icon={<ClockCircleOutlined />}
-                onClick={onSchedule}
-                className='text-gray-500 hover:text-blue-500'
-              >
-                {t('scheduled.save.title')}
-              </Button>
-            </Tooltip>
-          )}
-
-          {activeStep && onRerun && activeStep.status === 'completed' && (
-            <Tooltip title={t('rerun')}>
-              <Button
-                type='text'
-                size='small'
-                icon={<SyncOutlined />}
-                onClick={onRerun}
-                className='text-gray-500 hover:text-blue-500'
-              >
-                {t('rerun')}
-              </Button>
-            </Tooltip>
-          )}
-
-          {onShare && (
-            <Tooltip title={t('share_conversation_tooltip')}>
-              <Button
-                type='text'
-                size='small'
-                icon={<LinkOutlined />}
-                onClick={onShare}
-                className='text-blue-500 hover:text-blue-600'
-              >
-                {t('share_conversation')}
-              </Button>
-            </Tooltip>
-          )}
-        </div>
-      </div>
-
       {/* View Toggle Tabs */}
       {((artifacts && artifacts.length > 0) || previewArtifact || skillName || !!summaryContent) && (
         <div className='flex items-center gap-0 px-5 bg-white dark:bg-[#111217] border-b border-gray-200 dark:border-gray-800'>
@@ -1779,7 +1675,9 @@ const ManusRightPanel: React.FC<ManusRightPanelProps> = ({
       <div
         className={classNames(
           'flex-1 overflow-y-auto flex flex-col min-h-0',
-          panelView === 'html-preview' || panelView === 'image-preview' || panelView === 'skill-preview' ? 'p-0' : 'p-5 space-y-4',
+          panelView === 'html-preview' || panelView === 'image-preview' || panelView === 'skill-preview'
+            ? 'p-0'
+            : 'p-5 space-y-4',
         )}
       >
         {panelView === 'skill-preview' && skillName ? (
@@ -1807,7 +1705,6 @@ const ManusRightPanel: React.FC<ManusRightPanelProps> = ({
               return (
                 <iframe
                   key={previewArtifact.id || 'html-preview'}
-                  ref={htmlPreviewRef}
                   srcDoc={srcDoc}
                   sandbox='allow-scripts allow-same-origin allow-modals'
                   className='w-full flex-1 bg-white'
@@ -2243,20 +2140,6 @@ const ManusRightPanel: React.FC<ManusRightPanelProps> = ({
             <span className='text-xs text-gray-500'>点击左侧的步骤卡片以显示执行结果</span>
           </div>
         )}
-      </div>
-
-      {/* Footer Status Bar */}
-      <div className='px-5 py-2 border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-[#111217]'>
-        <div className='flex items-center justify-between text-[10px] text-gray-400'>
-          <div className='flex items-center gap-4'>
-            <span className='flex items-center gap-1'>
-              <span className={`w-2 h-2 rounded-full ${isRunning ? 'bg-blue-500 animate-pulse' : 'bg-emerald-500'}`} />
-              {isRunning ? '执行中' : '就绪'}
-            </span>
-            {visibleOutputs.length > 0 && <span>{visibleOutputs.length} 个输出</span>}
-          </div>
-          {activeStep && <span>Step ID: {activeStep.id}</span>}
-        </div>
       </div>
     </div>
   );

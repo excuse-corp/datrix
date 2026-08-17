@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy import text
 
 from ..schemas.snapshot import Snapshot
+from .capabilities import query_limits
 from .ast_validator import QueryAstValidator
 from .compiler import CompiledQuery
 
@@ -27,7 +28,7 @@ class SafeSceneQueryExecutor:
         dialect_name = engine.dialect.name.lower()
         self.ast_validator.validate(compiled.sql, snapshot, dialect=dialect_name)
         started = monotonic()
-        limits = snapshot.runtime_config.get("query_limits", {})
+        limits = query_limits(snapshot)
         raw_max_rows = limits.get("max_rows", 1000) if enforce_row_limit else None
         max_rows = (
             int(raw_max_rows)

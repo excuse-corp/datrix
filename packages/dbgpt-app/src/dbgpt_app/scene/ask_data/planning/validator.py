@@ -97,20 +97,16 @@ class PlanValidator:
                         )
                         for item in exc.issues
                     )
-            allowed_derived = {
-                item.get("key")
-                for item in snapshot.runtime_config.get("derived_metrics", [])
-                if isinstance(item, dict)
-            }
-            for derived in plan.combine.derived_metrics if plan.combine else []:
-                if derived not in allowed_derived:
-                    issues.append(
-                        PlanValidationIssue(
-                            code="DERIVED_METRIC_NOT_ALLOWED",
-                            path="combine.derived_metrics",
-                            message=f"Unknown derived metric: {derived}",
-                        )
+        for derived in plan.combine.derived_metrics if plan.combine else []:
+            issues.append(
+                PlanValidationIssue(
+                    code="DERIVED_METRIC_NOT_ALLOWED",
+                    path="combine.derived_metrics",
+                    message=(
+                        f"Derived metric is not declared in active Ontology: {derived}"
                     )
+                )
+            )
         if plan.combine and plan.combine.mode in {"compare", "derived"}:
             if len(plan.tasks) < 2:
                 issues.append(

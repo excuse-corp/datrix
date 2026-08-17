@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..ontology.fragments import source_snapshot_refs
+from ..ontology.fragments import scene_snapshot, source_snapshot_refs
+from ..ontology.markdown import with_managed_frontmatter
 from ..ontology.service import (
     OntologyConflictError,
     OntologyLifecycleService,
@@ -40,11 +41,18 @@ class OntologyLayoutRequest(BaseModel):
     layout: dict[str, Any] = Field(default_factory=dict)
 
 
-class OntologySceneSyncRequest(BaseModel):
+class OntologyDraftFromScenesRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     expected_revision: int | None = Field(default=None, ge=1)
     apply: bool = False
+    mode: Literal["llm", "rules"] | None = None
+
+
+class OntologyPublishRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    revision: int = Field(ge=1)
 
 
 def configure_ontology_service(service: OntologyLifecycleService) -> None:
@@ -57,12 +65,14 @@ def get_ontology_service() -> OntologyLifecycleService:
 
 
 def _revision_payload(revision) -> dict[str, Any]:
+    markdown = with_managed_frontmatter(revision.ontology_md, revision.revision)
     return {
         "ontology_id": revision.ontology_id,
         "revision": revision.revision,
         "status": revision.status.value,
-        "markdown": revision.ontology_md,
+        "markdown": markdown,
         "content_hash": revision.content_hash,
+        "source_scene_snapshots": revision.source_scene_snapshots,
         "validation_issues": revision.validation_issues,
         "created_by": revision.created_by,
         "created_at": revision.created_at.isoformat(),
@@ -90,15 +100,76 @@ def _authorized_scene_snapshots(principal: AskDataPrincipal) -> list[Any]:
     from . import scenes
 
     snapshots = []
-    for snapshot in scenes._snapshot_service.active_snapshots():
-        if not principal.can_access_scene(snapshot.scene_id):
+    snapshot_service = scenes.get_publish_service().snapshot_service
+    authorizer = getattr(scenes, "_authorizer", None)
+    for snapshot in snapshot_service.active_snapshots():
+        if authorizer is not None and not principal.can_access_scene(snapshot.scene_id):
             continue
         snapshots.append(snapshot)
     return snapshots
 
 
+def _authorized_scene_sources(principal: AskDataPrincipal) -> list[dict[str, Any]]:
+    from . import scenes
+
+    repository = scenes.get_scene_service().repository
+    sources: list[dict[str, Any]] = []
+    for snapshot in _authorized_scene_snapshots(principal):
+        semantic_md = _semantic_md_from_snapshot(snapshot)
+        try:
+            revision = repository.get_revision(
+                snapshot.scene_id, int(snapshot.revision_id)
+            )
+            if revision.semantic_md:
+                semantic_md = revision.semantic_md
+        except Exception:
+            pass
+        sources.append({"snapshot": snapshot, "semantic_md": semantic_md})
+    return sources
+
+
+def _semantic_md_from_snapshot(snapshot: Any) -> str | None:
+    runtime_config = getattr(snapshot, "runtime_config", {}) or {}
+    if not isinstance(runtime_config, dict):
+        return None
+    documents = runtime_config.get("documents", {})
+    if not isinstance(documents, dict):
+        return None
+    semantic_md = documents.get("semantic_md")
+    return semantic_md if isinstance(semantic_md, str) and semantic_md.strip() else None
+
+
 def _source_scene_snapshots(principal: AskDataPrincipal) -> list[dict[str, str]]:
-    return source_snapshot_refs(_authorized_scene_snapshots(principal))
+    return source_snapshot_refs(_authorized_scene_sources(principal))
+
+
+def _source_scene_display_refs(principal: AskDataPrincipal) -> list[dict[str, str]]:
+    sources = _authorized_scene_sources(principal)
+    refs = source_snapshot_refs(sources)
+    names: dict[str, str] = {}
+    for source in sources:
+        snapshot = scene_snapshot(source)
+        if snapshot is None:
+            continue
+        projection = getattr(snapshot, "routing_projection", {}) or {}
+        name = projection.get("name") if isinstance(projection, dict) else None
+        if name:
+            names[str(snapshot.scene_id)] = str(name)
+    for item in refs:
+        scene_name = names.get(item["scene_id"])
+        if scene_name:
+            item["scene_name"] = scene_name
+    return refs
+
+
+def _source_manifest_payload(revision, principal: AskDataPrincipal) -> dict[str, Any]:
+    return {
+        "ontology_id": revision.ontology_id,
+        "revision": revision.revision,
+        "source_type": "active_scenes",
+        "sources": revision.source_scene_snapshots,
+        "active_sources": _source_scene_display_refs(principal),
+    }
 
 
 def _http_error(exc: OntologyServiceError) -> HTTPException:
@@ -122,7 +193,7 @@ def get_ontology(
         "data": {
             "draft": _revision_payload(draft),
             "active_snapshot": _snapshot_payload(active) if active else None,
-            "source_scenes": _source_scene_snapshots(principal),
+            "source_scenes": _source_scene_display_refs(principal),
         },
     }
 
@@ -174,6 +245,15 @@ def compile_preview(
         ) from exc
 
 
+@router.post("/compile")
+def compile_ontology(
+    payload: OntologyPreviewRequest,
+    service: OntologyLifecycleService = Depends(get_ontology_service),
+    principal: AskDataPrincipal = Depends(get_principal),
+):
+    return compile_preview(payload, service, principal)
+
+
 @router.post("/revisions/{revision}/validate")
 def validate_revision(
     revision: int,
@@ -182,7 +262,7 @@ def validate_revision(
 ):
     _require_admin(principal)
     try:
-        result = service.validate(revision, _authorized_scene_snapshots(principal))
+        result = service.validate(revision, _authorized_scene_sources(principal))
         return {
             "status": "succeeded",
             "data": {
@@ -204,9 +284,26 @@ def build_snapshot(
     _require_admin(principal)
     try:
         snapshot = service.build_snapshot(
-            revision, _authorized_scene_snapshots(principal)
+            revision, _authorized_scene_sources(principal)
         )
         return {"status": "succeeded", "data": _snapshot_payload(snapshot)}
+    except OntologyServiceError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post("/publish")
+def publish_snapshot(
+    payload: OntologyPublishRequest,
+    service: OntologyLifecycleService = Depends(get_ontology_service),
+    principal: AskDataPrincipal = Depends(get_principal),
+):
+    _require_admin(principal)
+    try:
+        snapshot = service.build_snapshot(
+            payload.revision, _authorized_scene_sources(principal)
+        )
+        active = service.activate(snapshot.snapshot_id)
+        return {"status": "succeeded", "data": _snapshot_payload(active)}
     except OntologyServiceError as exc:
         raise _http_error(exc) from exc
 
@@ -239,7 +336,7 @@ def get_graph(
             "data": service.graph(
                 revision=revision,
                 user_id=principal.user_id,
-                scene_snapshots=_authorized_scene_snapshots(principal),
+                scene_snapshots=_authorized_scene_sources(principal),
             ),
         }
     except OntologyServiceError as exc:
@@ -268,7 +365,9 @@ def list_snapshots(
     service.draft(user_id=principal.user_id)
     return {
         "status": "succeeded",
-        "data": {"items": [_snapshot_payload(item) for item in service.list_snapshots()]},
+        "data": {
+            "items": [_snapshot_payload(item) for item in service.list_snapshots()]
+        },
     }
 
 
@@ -282,8 +381,8 @@ def revision_scene_diff(
     try:
         return {
             "status": "succeeded",
-            "data": service.scene_sync(
-                scene_snapshots=_authorized_scene_snapshots(principal),
+            "data": service.generate_from_active_scenes(
+                scene_snapshots=_authorized_scene_sources(principal),
                 user_id=principal.user_id,
                 expected_revision=revision,
             ),
@@ -292,30 +391,53 @@ def revision_scene_diff(
         raise _http_error(exc) from exc
 
 
-@router.post("/sync-scenes")
-def sync_scenes(
-    payload: OntologySceneSyncRequest,
+@router.post("/generate-from-scenes")
+async def generate_from_scenes(
+    payload: OntologyDraftFromScenesRequest,
+    service: OntologyLifecycleService = Depends(get_ontology_service),
+    principal: AskDataPrincipal = Depends(get_principal),
+):
+    return await draft_from_active_scenes(payload, service, principal)
+
+
+@router.post("/draft/from-active-scenes")
+async def draft_from_active_scenes(
+    payload: OntologyDraftFromScenesRequest,
     service: OntologyLifecycleService = Depends(get_ontology_service),
     principal: AskDataPrincipal = Depends(get_principal),
 ):
     _require_admin(principal)
     try:
-        result = service.scene_sync(
-            scene_snapshots=_authorized_scene_snapshots(principal),
+        result = await service.generate_from_active_scenes_async(
+            scene_snapshots=_authorized_scene_sources(principal),
             user_id=principal.user_id,
             expected_revision=payload.expected_revision,
             apply=payload.apply,
+            mode=payload.mode,
         )
         return {
             "status": "succeeded",
             "data": {
                 "pending_count": result["pending_count"],
                 "changes": result["changes"],
+                "generation": result.get("generation"),
                 "revision": _revision_payload(result["revision"]),
             },
         }
     except OntologyServiceError as exc:
         raise _http_error(exc) from exc
+
+
+@router.get("/draft/source-manifest")
+def draft_source_manifest(
+    service: OntologyLifecycleService = Depends(get_ontology_service),
+    principal: AskDataPrincipal = Depends(get_principal),
+):
+    revision = service.draft(user_id=principal.user_id)
+    return {
+        "status": "succeeded",
+        "data": _source_manifest_payload(revision, principal),
+    }
 
 
 @router.put("/revisions/{revision}/layout")
@@ -345,7 +467,18 @@ def source_scenes(
 ):
     return {
         "status": "succeeded",
-        "data": {"items": _source_scene_snapshots(principal)},
+        "data": {"items": _source_scene_display_refs(principal)},
+    }
+
+
+@router.get("/snapshot/latest")
+def latest_snapshot(
+    service: OntologyLifecycleService = Depends(get_ontology_service),
+):
+    snapshot = service.active_snapshot()
+    return {
+        "status": "succeeded",
+        "data": _snapshot_payload(snapshot) if snapshot else None,
     }
 
 

@@ -1,7 +1,5 @@
 import { ChatContext } from '@/app/chat-context';
-import { ResultDisplay } from '@/components/ask-data/ResultDisplay';
 import ModelSelector from '@/components/chat/header/model-selector';
-import { useConnectors } from '@/hooks/use-connector-api';
 import { ColumnAnalysis, PreprocessingResult, analyzeDataset } from '@/new-components/analysis';
 import { ChartConfig, ChartType } from '@/new-components/charts';
 import ContextUsageBar from '@/new-components/chat/content/ContextUsageBar';
@@ -22,22 +20,14 @@ import ConfirmDialog from '@/new-components/connector/ConfirmDialog';
 import { AttachedConnector, ConnectorInstance } from '@/new-components/connector/types';
 import { useConfirmPolling } from '@/new-components/connector/useConfirmPolling';
 import FromTaskBanner from '@/new-components/scheduled-task/FromTaskBanner';
-import SaveAsScheduledTaskDrawer from '@/new-components/scheduled-task/SaveAsScheduledTaskDrawer';
-import type { ChatReplayPayload } from '@/types/scheduled-task';
 import type { AskDataQueryResponse } from '@/utils/ask-data';
 import axios from '@/utils/ctx-axios';
-import { sendSpacePostRequest } from '@/utils/request';
 import {
-  ApiOutlined,
   ArrowUpOutlined,
   AudioOutlined,
   BarChartOutlined,
-  BookOutlined,
   CheckCircleFilled,
-  CloudServerOutlined,
   CodeOutlined,
-  ConsoleSqlOutlined,
-  DatabaseOutlined,
   FileExcelOutlined,
   FileImageOutlined,
   FileOutlined,
@@ -47,28 +37,15 @@ import {
   PaperClipOutlined,
   PieChartOutlined,
   PlusOutlined,
-  ReadOutlined,
   RightOutlined,
   SearchOutlined,
+  StopOutlined,
   TableOutlined,
   ThunderboltOutlined,
   UploadOutlined,
 } from '@ant-design/icons';
 import { useRequest } from 'ahooks';
-import {
-  Button,
-  ConfigProvider,
-  Dropdown,
-  Input,
-  List,
-  Modal,
-  Popover,
-  Spin,
-  Tag,
-  Tooltip,
-  Upload,
-  message,
-} from 'antd';
+import { Button, ConfigProvider, Dropdown, Input, Popover, Spin, Tag, Tooltip, Upload, message } from 'antd';
 import { NextPage } from 'next';
 import Image from 'next/image';
 import { useRouter } from 'next/router';
@@ -90,6 +67,295 @@ const cleanFinalContent = (text: string): string => {
   // Strip raw ReAct prefixes that may leak from the backend
   cleaned = cleaned.replace(/^(Thought|Action|Action Input|Observation|Phase):\s*/gm, '').trim();
   return cleaned;
+};
+
+const getAskDataSceneResults = (resultPayload: any): any[] => {
+  if (!resultPayload || typeof resultPayload !== 'object') return [];
+  if (Array.isArray(resultPayload.scenes)) return resultPayload.scenes;
+  if (Array.isArray(resultPayload.results)) return resultPayload.results;
+  if (Array.isArray(resultPayload.scene_summaries)) return resultPayload.scene_summaries;
+  return [];
+};
+
+const formatAskDataStageOutput = (stage: {
+  stage?: string;
+  title?: string;
+  detail?: string;
+  status?: string;
+  duration_ms?: number;
+  scene?: any;
+  resultPayload?: any;
+}): string => {
+  const lines: string[] = [];
+  const title = stage.title || 'AskData 阶段';
+  const status = stage.status || stage.scene?.status || stage.resultPayload?.status;
+  lines.push(`### ${title}`);
+  if (stage.stage) lines.push(`- 阶段：\`${stage.stage}\``);
+  if (status) lines.push(`- 状态：\`${status}\``);
+  if (typeof stage.duration_ms === 'number') lines.push(`- 耗时：${(stage.duration_ms / 1000).toFixed(2)} 秒`);
+  if (stage.detail) lines.push(`- 说明：${stage.detail}`);
+
+  const scene = stage.scene;
+  if (scene && typeof scene === 'object') {
+    const sceneId = scene.scene_id || scene.task_id;
+    if (sceneId) lines.push(`- 场景：\`${sceneId}\``);
+    if (scene.snapshot_id) lines.push(`- Snapshot：\`${scene.snapshot_id}\``);
+    if (scene.row_count !== undefined) lines.push(`- 返回行数：${scene.row_count}`);
+    if (scene.truncated !== undefined) lines.push(`- 是否截断：${scene.truncated ? '是' : '否'}`);
+    if (Array.isArray(scene.columns) && scene.columns.length) {
+      lines.push(`- 返回字段：${scene.columns.map((col: any) => `\`${col?.name || col?.key || col}\``).join('、')}`);
+    }
+    if (Array.isArray(scene.warnings) && scene.warnings.length) {
+      lines.push(`- 警告：${scene.warnings.map((item: any) => String(item)).join('；')}`);
+    }
+    const errorText = scene.error || scene.message || scene.error_message;
+    if (errorText) lines.push(`- 错误：${errorText}`);
+  }
+
+  const resultPayload = stage.resultPayload;
+  if (resultPayload && typeof resultPayload === 'object') {
+    if (resultPayload.query_id) lines.push(`- Query ID：\`${resultPayload.query_id}\``);
+    if (resultPayload.request_id) lines.push(`- Request ID：\`${resultPayload.request_id}\``);
+  }
+  return lines.join('\n');
+};
+
+const buildAskDataStageOutput = (stage: {
+  stage?: string;
+  title?: string;
+  detail?: string;
+  status?: string;
+  duration_ms?: number;
+  scene?: any;
+  resultPayload?: any;
+}): ExecutionOutput[] => [
+  {
+    output_type: 'markdown',
+    content: formatAskDataStageOutput(stage),
+  },
+];
+
+const formatStageDetailWithDuration = (detail?: string, durationMs?: number): string => {
+  const base = detail || 'AskData';
+  if (typeof durationMs !== 'number') return base;
+  return `${base} · 耗时 ${(durationMs / 1000).toFixed(2)} 秒`;
+};
+
+const getAskDataCallId = (payload: any): string =>
+  String(payload?.call_id || payload?.query_id || 'legacy').replace(/[^a-zA-Z0-9_-]/g, '_');
+
+const getAskDataStageId = (callId: string, stage: unknown): string => `ask-data-${callId}-${String(stage || 'query')}`;
+
+const normalizeAskDataActionInput = (value: unknown): string => {
+  if (value && typeof value === 'object') {
+    const question = (value as Record<string, unknown>).question;
+    if (typeof question === 'string') return question.trim().replace(/\s+/g, ' ');
+  }
+  if (typeof value !== 'string') return '';
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed && typeof parsed.question === 'string') return parsed.question.trim().replace(/\s+/g, ' ');
+  } catch {
+    return value.trim().replace(/\s+/g, ' ');
+  }
+  return value.trim().replace(/\s+/g, ' ');
+};
+
+const collapseDuplicateAskDataSteps = (rawSteps: any[]): any[] => {
+  const seenQuestions = new Set<string>();
+  return (Array.isArray(rawSteps) ? rawSteps : []).filter(step => {
+    if (String(step?.action || '').toLowerCase() !== 'ask_data_query') return true;
+    const question = normalizeAskDataActionInput(step?.action_input ?? step?.actionInput);
+    if (step?.ask_data_reused || (question && seenQuestions.has(question))) return false;
+    if (question) seenQuestions.add(question);
+    return true;
+  });
+};
+
+const buildAskDataFallbackSteps = (resultPayload: any): any[] => {
+  const scenes = getAskDataSceneResults(resultPayload);
+  if (!scenes.length) return [];
+
+  const callId = getAskDataCallId(resultPayload);
+  const sceneIds = scenes.map((scene: any) => scene?.scene_id || scene?.task_id || 'unknown');
+  return [
+    {
+      id: getAskDataStageId(callId, 'routing'),
+      title: '业务场景语义选择完成',
+      detail: '基于用户问题和场景 Snapshot 完成判断',
+      action: 'ask_data_stage',
+      status: 'done',
+      askDataCallId: callId,
+      parentId: `ask-data-${callId}`,
+      outputs: buildAskDataStageOutput({
+        stage: 'routing',
+        title: '业务场景语义选择完成',
+        detail: '基于用户问题和场景 Snapshot 完成判断',
+        status: resultPayload.status,
+        resultPayload,
+      }),
+    },
+    {
+      id: getAskDataStageId(callId, 'planning'),
+      title: '已选中业务场景',
+      detail: sceneIds.join('、'),
+      action: 'ask_data_stage',
+      status: 'done',
+      askDataCallId: callId,
+      parentId: `ask-data-${callId}`,
+      outputs: buildAskDataStageOutput({
+        stage: 'planning',
+        title: '已选中业务场景',
+        detail: sceneIds.join('、'),
+        status: resultPayload.status,
+        resultPayload,
+      }),
+    },
+    ...scenes.flatMap((scene: any) => {
+      const sceneId = scene?.scene_id || scene?.task_id || 'unknown';
+      const status = String(scene?.status || resultPayload.status || '').toLowerCase();
+      const failed = status === 'failed' || status === 'error';
+      return [
+        {
+          id: getAskDataStageId(callId, `subagent-${sceneId}`),
+          title: `场景子 Agent：${sceneId}`,
+          detail: '读取数据字典和业务语义文档',
+          action: 'ask_data_stage',
+          status: failed ? 'failed' : 'done',
+          askDataCallId: callId,
+          parentId: `ask-data-${callId}`,
+          outputs: buildAskDataStageOutput({
+            stage: `subagent-${sceneId}`,
+            title: `场景子 Agent：${sceneId}`,
+            detail: '读取数据字典和业务语义文档',
+            status: failed ? 'failed' : 'done',
+            scene,
+            resultPayload,
+          }),
+        },
+        {
+          id: getAskDataStageId(callId, `sql-gen-${sceneId}`),
+          title: `${failed ? 'SQL 生成失败' : 'SQL 生成成功'}：${sceneId}`,
+          detail: failed ? scene?.error || scene?.message || '查询失败' : '已通过绑定表/视图校验',
+          action: 'sql_query',
+          status: failed ? 'failed' : 'done',
+          askDataCallId: callId,
+          parentId: `ask-data-${callId}`,
+          outputs: buildAskDataStageOutput({
+            stage: `sql-gen-${sceneId}`,
+            title: `${failed ? 'SQL 生成失败' : 'SQL 生成成功'}：${sceneId}`,
+            detail: failed ? scene?.error || scene?.message || '查询失败' : '已通过绑定表/视图校验',
+            status: failed ? 'failed' : 'done',
+            scene,
+            resultPayload,
+          }),
+        },
+      ];
+    }),
+    {
+      id: getAskDataStageId(callId, 'querying'),
+      title: '场景 SQL 执行完成',
+      detail: `已执行 ${scenes.length} 个场景`,
+      action: 'sql_query',
+      status: 'done',
+      askDataCallId: callId,
+      parentId: `ask-data-${callId}`,
+      outputs: buildAskDataStageOutput({
+        stage: 'querying',
+        title: '场景 SQL 执行完成',
+        detail: `已执行 ${scenes.length} 个场景`,
+        status: resultPayload.status,
+        resultPayload,
+      }),
+    },
+    ...scenes.map((scene: any) => {
+      const sceneId = scene?.scene_id || scene?.task_id || 'unknown';
+      const status = String(scene?.status || resultPayload.status || '').toLowerCase();
+      const failed = status === 'failed' || status === 'error';
+      const detail = failed ? scene?.error || scene?.message || '查询失败' : `${scene?.row_count ?? 0} 行`;
+      return {
+        id: getAskDataStageId(callId, `sql-exec-${sceneId}`),
+        title: `${failed ? 'SQL 执行失败' : 'SQL 执行成功'}：${sceneId}`,
+        detail,
+        action: 'sql_query',
+        status: failed ? 'failed' : 'done',
+        askDataCallId: callId,
+        parentId: `ask-data-${callId}`,
+        outputs: buildAskDataStageOutput({
+          stage: `sql-exec-${sceneId}`,
+          title: `${failed ? 'SQL 执行失败' : 'SQL 执行成功'}：${sceneId}`,
+          detail,
+          status: failed ? 'failed' : 'done',
+          scene,
+          resultPayload,
+        }),
+      };
+    }),
+  ];
+};
+
+const mergeAskDataFallbackSteps = (rawSteps: any[], resultPayload: any): any[] => {
+  const safeRawSteps = Array.isArray(rawSteps) ? rawSteps : [];
+  const fallbackSteps = buildAskDataFallbackSteps(resultPayload);
+  if (!fallbackSteps.length) return safeRawSteps;
+
+  const rawById = new Map(safeRawSteps.map(step => [String(step?.id || ''), step]));
+  const fallbackIds = new Set(fallbackSteps.map(step => step.id));
+  const mergedFallbackSteps = fallbackSteps.map(step => {
+    const raw = rawById.get(step.id) || {};
+    return {
+      ...step,
+      ...raw,
+      id: step.id,
+      outputs: Array.isArray(raw.outputs) && raw.outputs.length ? raw.outputs : step.outputs,
+    };
+  });
+  const rawWithoutFallback = safeRawSteps.filter(step => !fallbackIds.has(String(step?.id || '')));
+  const callId = getAskDataCallId(resultPayload);
+  const askDataStepIndex = rawWithoutFallback.findIndex(
+    step =>
+      String(step?.action || '').toLowerCase() === 'ask_data_query' &&
+      (!step?.ask_data_call_id || String(step.ask_data_call_id) === callId),
+  );
+  if (askDataStepIndex < 0) {
+    return [...rawWithoutFallback, ...mergedFallbackSteps].map((step, idx) => ({ ...step, step: idx + 1 }));
+  }
+  const askDataStep = rawWithoutFallback[askDataStepIndex];
+  return [
+    ...rawWithoutFallback.slice(0, askDataStepIndex),
+    askDataStep,
+    ...mergedFallbackSteps,
+    ...rawWithoutFallback.slice(askDataStepIndex + 1),
+  ].map((step, idx) => ({ ...step, step: idx + 1 }));
+};
+
+const extractAskDataResultPayloadFromSteps = (rawSteps: any[]): any | null => {
+  if (!Array.isArray(rawSteps)) return null;
+  const askDataStepIndex = rawSteps.findIndex(step => String(step?.action || '').toLowerCase() === 'ask_data_query');
+  if (askDataStepIndex < 0) return null;
+
+  const askDataStep = rawSteps[askDataStepIndex];
+  const outputTexts = Array.isArray(askDataStep?.outputs)
+    ? askDataStep.outputs.map((item: any) => item?.content).filter((item: unknown) => typeof item === 'string')
+    : [];
+
+  for (const text of outputTexts) {
+    try {
+      const parsed = JSON.parse(text as string);
+      if (parsed && typeof parsed === 'object' && (Array.isArray(parsed.scenes) || parsed.status || parsed.query_id)) {
+        return parsed;
+      }
+    } catch {
+      /* ignore non-json tool output */
+    }
+  }
+  return null;
+};
+
+const expandAskDataHistorySteps = (rawSteps: any[]): any[] => {
+  const collapsedSteps = collapseDuplicateAskDataSteps(rawSteps);
+  const resultPayload = extractAskDataResultPayloadFromSteps(collapsedSteps);
+  return resultPayload ? mergeAskDataFallbackSteps(collapsedSteps, resultPayload) : collapsedSteps;
 };
 
 const _formatFileSize = (bytes: number): string => {
@@ -133,26 +399,6 @@ const _getFileIcon = (fileName: string, mimeType?: string) => {
   return <FileTextOutlined className='text-blue-500 text-lg' />;
 };
 
-interface DataSource {
-  id: number;
-  type: string;
-  params: Record<string, any>;
-  description?: string;
-  db_name: string; // derived from params.name
-  db_type: string; // alias for type
-  gmt_created?: string;
-  gmt_modified?: string;
-}
-
-// Define Knowledge Base Interface (Partial)
-interface KnowledgeSpace {
-  id: number;
-  name: string;
-  vector_type: string;
-  desc?: string;
-  owner?: string;
-}
-
 // Define file attachment type for user messages
 interface FileAttachment {
   name: string;
@@ -169,7 +415,13 @@ interface ChatMessage {
   order?: number;
   thinking?: boolean;
   attachedFile?: FileAttachment;
-  attachedKnowledge?: KnowledgeSpace;
+  attachedKnowledge?: {
+    id: number;
+    name: string;
+    vector_type: string;
+    desc?: string;
+    owner?: string;
+  };
   attachedSkill?: { name: string; id: string };
   attachedDb?: { db_name: string; db_type: string };
   taskPlan?: TaskItem[];
@@ -177,14 +429,99 @@ interface ChatMessage {
   askDataResult?: AskDataQueryResponse;
 }
 
+interface ContextStatus {
+  state: 'OK' | 'WARNING' | 'ERROR';
+  used_tokens: number;
+  max_tokens: number;
+  usage_percent: number;
+  layer: string | null;
+}
+
+const CONTEXT_STATUS_STORAGE_KEY = 'dataman:context-status';
+const DEFAULT_CONTEXT_STATUS: ContextStatus = {
+  state: 'OK',
+  used_tokens: 0,
+  max_tokens: 0,
+  usage_percent: 0,
+  layer: null,
+};
+
+function normalizeContextStatus(value: unknown): ContextStatus | null {
+  if (!value || typeof value !== 'object') return null;
+  const status = value as Partial<ContextStatus>;
+  const usedTokens = Number(status.used_tokens);
+  const maxTokens = Number(status.max_tokens);
+  const usagePercent = Number(status.usage_percent);
+  if (!Number.isFinite(usedTokens) || !Number.isFinite(maxTokens) || !Number.isFinite(usagePercent)) return null;
+  return {
+    state: status.state === 'WARNING' || status.state === 'ERROR' ? status.state : 'OK',
+    used_tokens: Math.max(0, usedTokens),
+    max_tokens: Math.max(0, maxTokens),
+    usage_percent: Math.min(Math.max(usagePercent, 0), 100),
+    layer: typeof status.layer === 'string' ? status.layer : null,
+  };
+}
+
+function getInitialContextStatus(): ContextStatus {
+  if (typeof window === 'undefined') return DEFAULT_CONTEXT_STATUS;
+  try {
+    const stored = window.localStorage.getItem(CONTEXT_STATUS_STORAGE_KEY);
+    return normalizeContextStatus(stored ? JSON.parse(stored) : null) || DEFAULT_CONTEXT_STATUS;
+  } catch {
+    return DEFAULT_CONTEXT_STATUS;
+  }
+}
+
+function persistContextStatus(status: ContextStatus) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(CONTEXT_STATUS_STORAGE_KEY, JSON.stringify(status));
+  } catch {
+    /* ignore localStorage failures */
+  }
+}
+
+const CHAT_DIALOGUE_UPSERT_EVENT = 'dataman:chat-dialogue-upsert';
+const CHAT_DIALOGUE_REFRESH_EVENT = 'dataman:chat-dialogue-refresh';
+
+function notifyChatDialogueUpsert(convUid: string, userInput: string) {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(
+    new CustomEvent(CHAT_DIALOGUE_UPSERT_EVENT, {
+      detail: {
+        conv_uid: convUid,
+        user_input: userInput,
+        user_name: '',
+        chat_mode: 'chat_react_agent',
+        select_param: '',
+        app_code: 'chat_react_agent',
+      },
+    }),
+  );
+}
+
+function notifyChatDialogueRefresh() {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent(CHAT_DIALOGUE_REFRESH_EVENT));
+}
+
+function getAskDataStageAction(stage: unknown, title: unknown): string {
+  const text = `${String(stage || '')} ${String(title || '')}`.toLowerCase();
+  if (text.includes('sql')) return 'sql_query';
+  return 'ask_data_stage';
+}
+
 interface ExecutionStep {
   id: string;
   step: number;
   title?: string;
   detail: string;
-  status: 'running' | 'done' | 'failed';
+  status: 'running' | 'done' | 'failed' | 'cancelled';
   action?: string;
   actionInput?: string;
+  askDataCallId?: string;
+  askDataReused?: boolean;
+  parentId?: string;
   todoMeta?: {
     state?: 'init' | 'progress' | 'done';
     done?: number;
@@ -196,6 +533,23 @@ interface ExecutionOutput {
   output_type: string;
   content: any;
 }
+
+interface ActiveRun {
+  controller: AbortController;
+  reader: ReadableStreamDefaultReader<Uint8Array> | null;
+  convUid: string;
+  responseId: string;
+  runId: string;
+  cancelled: boolean;
+  pendingQuestionRequestId?: string | null;
+}
+
+const CANCELLED_RESPONSE_TEXT = '任务已取消。';
+
+const cancelTaskItems = (tasks?: TaskItem[]): TaskItem[] =>
+  (tasks || []).map(task =>
+    task.status === 'pending' || task.status === 'in_progress' ? { ...task, status: 'cancelled' } : task,
+  );
 
 interface FilePreview {
   kind: 'table' | 'text';
@@ -286,6 +640,7 @@ const _convertExecutionToMessageParts = (
       running: 'running',
       done: 'completed',
       failed: 'error',
+      cancelled: 'error',
     };
 
     const actionLower = (step.action || '').toLowerCase();
@@ -359,6 +714,7 @@ const convertToManusFormat = (
       return 'skill';
     if (actionLower === 'shell_interpreter') return 'bash';
     if (actionLower === 'sql_query') return 'sql';
+    if (actionLower === 'ask_data_stage') return 'task';
     if (actionLower === 'question') return 'question';
 
     const lower = (title || '').toLowerCase();
@@ -387,10 +743,11 @@ const convertToManusFormat = (
   };
 
   // Get step status mapping
-  const getStepStatus = (status: string): 'pending' | 'running' | 'completed' | 'error' => {
+  const getStepStatus = (status: string): 'pending' | 'running' | 'completed' | 'error' | 'cancelled' => {
     if (status === 'running') return 'running';
     if (status === 'done' || status === 'completed') return 'completed';
     if (status === 'failed' || status === 'error') return 'error';
+    if (status === 'cancelled') return 'cancelled';
     return 'pending';
   };
 
@@ -428,7 +785,7 @@ const convertToManusFormat = (
         {
           id: 'section-execution',
           title: t ? t('execution_steps') : 'Execution Steps',
-          isCompleted: steps.every(s => s.status === 'completed'),
+          isCompleted: steps.every(s => s.status === 'completed' || s.status === 'cancelled'),
           steps,
         },
       ]
@@ -480,13 +837,7 @@ const Playground: NextPage = () => {
     }
   }, [router.query.q]);
 
-  // Selection State
-  const [isDbModalOpen, setIsDbModalOpen] = useState(false);
-  const [isKnowledgeModalOpen, setIsKnowledgeModalOpen] = useState(false);
-
   // Contexts
-  const [selectedDb, setSelectedDb] = useState<DataSource | null>(null);
-  const [selectedKnowledge, setSelectedKnowledge] = useState<KnowledgeSpace | null>(null);
   const [uploadedFile, setUploadedFile] = useState<any | null>(null);
 
   // Chat messages state
@@ -528,20 +879,10 @@ const Playground: NextPage = () => {
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
   const [skillSearchQuery, setSkillSearchQuery] = useState('');
 
-  const [isKnowledgePanelOpen, setIsKnowledgePanelOpen] = useState(false);
-  const [knowledgeSearchQuery, setKnowledgeSearchQuery] = useState('');
-
-  const [isDbPanelOpen, setIsDbPanelOpen] = useState(false);
-  const [dbSearchQuery, setDbSearchQuery] = useState('');
-
-  const [isConnectorPanelOpen, setIsConnectorPanelOpen] = useState(false);
-  const [selectedConnectors, setSelectedConnectors] = useState<ConnectorInstance[]>([]);
-  const [connectorSearchQuery, setConnectorSearchQuery] = useState('');
-  const [isScheduleOpen, setScheduleOpen] = useState(false);
-  const { connectors: connectorsList } = useConnectors();
+  const selectedConnectors: ConnectorInstance[] = [];
 
   // HITL 确认轮询临时关闭：当前不需要写操作前的人工确认能力。
-  // 恢复时把下一行改回 `loading && selectedConnectors.length > 0` 即可，
+  // 恢复连接器入口时把下一行改回 `loading && selectedConnectors.length > 0` 即可，
   // 后端 _PENDING_CONFIRMATIONS 通道 / ConfirmDialog 组件保持原样未删除。
   const isConfirmPollingActive = false;
   const { pendingConfirmation, approve, deny, dismiss } = useConfirmPolling({
@@ -549,7 +890,7 @@ const Playground: NextPage = () => {
   });
 
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
-  const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
+  const [rightPanelCollapsed, setRightPanelCollapsed] = useState(true);
   const [rightPanelView, setRightPanelView] = useState<PanelView>('execution');
   const [previewArtifact, setPreviewArtifact] = useState<Artifact | null>(null);
 
@@ -559,31 +900,52 @@ const Playground: NextPage = () => {
   // Track step IDs that belong to a terminate action so we can suppress them
   const terminatedStepIdsRef = useRef<Set<string>>(new Set());
   const preloadedFilePathRef = useRef<string | null>(null);
-  // Snapshot of the exact payload last sent to the agent, captured at send
-  // time so "保存定时任务" can replay the real execution (file / database /
-  // knowledge / skill / connectors) instead of a drifting UI state.
-  const lastSentPayloadRef = useRef<ChatReplayPayload | null>(null);
+  const historyLoadSeqRef = useRef(0);
+  const activeRunRef = useRef<ActiveRun | null>(null);
 
   const [historyLoading, setHistoryLoading] = useState(false);
-  const [contextStatus, setContextStatus] = useState<{
-    state: 'OK' | 'WARNING' | 'ERROR';
-    used_tokens: number;
-    max_tokens: number;
-    usage_percent: number;
-    layer: string | null;
-  } | null>(null);
+  const [contextStatus, setContextStatus] = useState<ContextStatus>(() => getInitialContextStatus());
   const [pendingQuestion, setPendingQuestion] = useState<{
     request_id: string;
     conv_id: string;
     questions: Array<{
       question: string;
-      header: string;
-      options: Array<{ label: string; description: string }>;
+      header?: string;
+      options?: Array<{ label: string; description?: string }>;
       multiple?: boolean;
       custom?: boolean;
     }>;
   } | null>(null);
   const [taskPlan, setTaskPlan] = useState<TaskItem[]>([]);
+
+  const resetConversationSurface = useCallback(() => {
+    const run = activeRunRef.current;
+    if (run) {
+      run.cancelled = true;
+      run.reader?.cancel().catch(() => undefined);
+      run.controller.abort();
+      activeRunRef.current = null;
+    }
+    setMessages([]);
+    setQuery('');
+    setExecutionMap({});
+    setActiveMessageId(null);
+    setActiveViewMsgId(null);
+    setUploadedFile(null);
+    setUploadedFilePath(null);
+    setFilePreview(null);
+    setFilePreviewError(null);
+    setChartPreview(null);
+    setArtifacts([]);
+    setRightPanelTab('preview');
+    setStreamingSummary('');
+    setSummaryComplete(false);
+    setDataAnalysis(null);
+    setPendingQuestion(null);
+    setTaskPlan([]);
+    setSelectedStepId(null);
+    setPreviewArtifact(null);
+  }, []);
 
   const replyQuestion = useCallback(async (requestId: string, answers: string[][]) => {
     const res = await fetch(`${process.env.API_BASE_URL ?? ''}/api/v1/chat/question/${requestId}/reply`, {
@@ -606,40 +968,76 @@ const Playground: NextPage = () => {
     }
   }, []);
 
-  // Fetch Data Sources
-  const { data: dataSources, loading: _loadingSources } = useRequest(async () => {
-    try {
-      const response: any = await axios.get('/api/v2/serve/datasources');
-      // ctx-axios interceptor returns response.data directly, so response is {success, data, ...}
-      const result = response?.success !== undefined ? response : response?.data;
-      if (result?.success) {
-        return (result.data || []).map((item: any) => ({
-          ...item,
-          db_name: item.db_name || item.params?.name || item.params?.database || `${item.type}-${item.id}`,
-          db_type: item.type,
-        })) as DataSource[];
-      }
-      return [];
-    } catch (e) {
-      console.error('Failed to fetch datasources', e);
-      return [];
-    }
-  });
+  const requestBackendRunCancel = useCallback((run: ActiveRun, questionRequestId?: string | null) => {
+    const baseUrl = process.env.API_BASE_URL ?? '';
+    fetch(`${baseUrl}/api/v1/chat/react-agent/cancel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conv_uid: run.convUid, run_id: run.runId }),
+    }).catch(() => undefined);
 
-  // Fetch Knowledge Bases
-  const { data: knowledgeSpaces, loading: _loadingKnowledge } = useRequest(async () => {
-    try {
-      const response = await sendSpacePostRequest('/knowledge/space/list', {});
-      // ctx-axios interceptor returns response.data directly, so response is {success, data, ...}
-      if (response?.success) {
-        return response.data || [];
-      }
-      return [];
-    } catch (e) {
-      console.error('Failed to fetch knowledge spaces', e);
-      return [];
+    if (questionRequestId) {
+      fetch(`${baseUrl}/api/v1/chat/question/${questionRequestId}/reject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      }).catch(() => undefined);
     }
-  });
+  }, []);
+
+  const markRunCancelled = useCallback((responseId: string | null) => {
+    if (responseId) {
+      setExecutionMap(prev => {
+        const current = prev[responseId];
+        if (!current) return prev;
+        const steps = current.steps.map<ExecutionStep>(step =>
+          step.status === 'running' ? { ...step, status: 'cancelled' } : step,
+        );
+        return { ...prev, [responseId]: { ...current, steps } };
+      });
+      setMessages(prev =>
+        prev.map(msg =>
+          msg.id === responseId && msg.role === 'view'
+            ? {
+                ...msg,
+                context: msg.context || CANCELLED_RESPONSE_TEXT,
+                thinking: false,
+                taskPlan: msg.taskPlan ? cancelTaskItems(msg.taskPlan) : msg.taskPlan,
+              }
+            : msg,
+        ),
+      );
+    }
+    setTaskPlan(prev => cancelTaskItems(prev));
+    setPendingQuestion(null);
+    setStreamingSummary('');
+    setSummaryComplete(true);
+    setLoading(false);
+  }, []);
+
+  const handleCancelRun = useCallback(() => {
+    const run = activeRunRef.current;
+    const questionRequestId = run?.pendingQuestionRequestId || pendingQuestion?.request_id;
+
+    if (!run) {
+      if (questionRequestId) {
+        fetch(`${process.env.API_BASE_URL ?? ''}/api/v1/chat/question/${questionRequestId}/reject`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        }).catch(() => undefined);
+      }
+      markRunCancelled(null);
+      return;
+    }
+
+    if (run.cancelled) return;
+    run.cancelled = true;
+    requestBackendRunCancel(run, questionRequestId);
+    run.reader?.cancel().catch(() => undefined);
+    run.controller.abort();
+    activeRunRef.current = null;
+    markRunCancelled(run.responseId);
+    notifyChatDialogueRefresh();
+  }, [markRunCancelled, pendingQuestion?.request_id, requestBackendRunCancel]);
 
   const normalizeText = (value: unknown): string => {
     if (typeof value === 'string') return value;
@@ -714,27 +1112,21 @@ const Playground: NextPage = () => {
   }, [messages]);
 
   useEffect(() => {
-    const convId = router.query.id as string | undefined;
+    if (!router.isReady) return;
+    const rawConvId = router.query.id;
+    const convId = Array.isArray(rawConvId) ? rawConvId[0] : rawConvId;
     if (convId && convId !== conversationId) {
-      loadConversation(convId);
+      void loadConversation(convId);
     } else if (!convId && conversationId) {
+      historyLoadSeqRef.current += 1;
+      setHistoryLoading(false);
       // URL 中 id 消失（如点击 new_task / 探索广场），清空当前会话状态
-      setMessages([]);
       setConversationId(null);
-      setQuery('');
-      setExecutionMap({});
-      setActiveMessageId(null);
-      setActiveViewMsgId(null);
-      setUploadedFilePath(null);
-      setFilePreview(null);
-      setFilePreviewError(null);
-      setArtifacts([]);
-      setRightPanelTab('preview');
-      setStreamingSummary('');
-      setSummaryComplete(false);
-      setTaskPlan([]);
+      resetConversationSurface();
     }
-  }, [router.query.id]);
+    // Only route-id changes should drive history switching; depending on conversationId would clear new chats created on `/`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router.isReady, router.query.id, resetConversationSurface]);
 
   useEffect(() => {
     const lastView = [...messages].reverse().find(msg => msg.role === 'view');
@@ -1410,16 +1802,14 @@ const Playground: NextPage = () => {
     return deduped;
   };
 
-  const handleStart = async (
-    inputQuery = query,
-    overrideFile?: File | null,
-    overrideSkill?: Skill | null,
-    overrideDb?: DataSource | null,
-  ) => {
+  const handleStart = async (inputQuery = query, overrideFile?: File | null, overrideSkill?: Skill | null) => {
     const effectiveFile = overrideFile !== undefined ? overrideFile : uploadedFile;
     const effectiveSkill = overrideSkill !== undefined ? overrideSkill : selectedSkill;
-    const effectiveDb = overrideDb !== undefined ? overrideDb : selectedDb;
-    if ((!inputQuery.trim() && !effectiveFile) || loading) return;
+    if (loading) {
+      handleCancelRun();
+      return;
+    }
+    if (!inputQuery.trim() && !effectiveFile) return;
 
     let finalQuery = inputQuery;
     const appCode = 'chat_react_agent';
@@ -1473,25 +1863,23 @@ const Playground: NextPage = () => {
         setUploadedFilePath(null);
         setFilePreview(null);
       }
-      // Construct context prefix for non-file queries
-      const contextParts = [];
-      if (effectiveDb) contextParts.push(`[Database: ${effectiveDb.db_name}]`);
-      if (selectedKnowledge) contextParts.push(`[Knowledge: ${selectedKnowledge.name}]`);
-      if (contextParts.length > 0) {
-        finalQuery = `${contextParts.join(' ')} ${inputQuery}`;
-      }
     }
 
     // Prepare conversation ID
     const currentConvId = conversationId || generateUUID();
+    const isNewConversation = !conversationId;
     if (!conversationId) {
       setConversationId(currentConvId);
+    }
+    if (isNewConversation) {
+      notifyChatDialogueUpsert(currentConvId, inputQuery);
     }
 
     // Calculate current order
     const currentOrder = Math.floor(messages.length / 2) + 1;
 
     const responseId = generateUUID();
+    const runId = generateUUID();
 
     const humanId = generateUUID();
 
@@ -1510,9 +1898,7 @@ const Playground: NextPage = () => {
               type: effectiveFile.type,
             }
           : undefined,
-        attachedKnowledge: selectedKnowledge ?? undefined,
         attachedSkill: effectiveSkill ? { name: effectiveSkill.name, id: effectiveSkill.id } : undefined,
-        attachedDb: effectiveDb ? { db_name: effectiveDb.db_name, db_type: effectiveDb.db_type } : undefined,
         attachedConnectors:
           selectedConnectors.length > 0
             ? selectedConnectors.map(c => ({
@@ -1537,6 +1923,18 @@ const Playground: NextPage = () => {
     setActiveViewMsgId(responseId); // Auto-switch right panel to new round
 
     const controller = new AbortController();
+    const activeRun: ActiveRun = {
+      controller,
+      reader: null,
+      convUid: currentConvId,
+      responseId,
+      runId,
+      cancelled: false,
+    };
+    activeRunRef.current = activeRun;
+
+    const isCurrentRun = () => activeRunRef.current?.runId === runId && !activeRunRef.current.cancelled;
+
     terminatedStepIdsRef.current.clear();
     setExecutionMap(prev => ({
       ...prev,
@@ -1550,7 +1948,9 @@ const Playground: NextPage = () => {
     }));
     setActiveMessageId(responseId);
 
-    const settleResponseState = (runningStepStatus: 'done' | 'failed' = 'done') => {
+    const settleResponseState = (runningStepStatus: 'done' | 'failed' | 'cancelled' = 'done') => {
+      const stillCurrent = activeRunRef.current?.runId === runId;
+      if (!stillCurrent && runningStepStatus !== 'cancelled') return;
       setExecutionMap(prev => {
         const current = prev[responseId];
         if (!current) return prev;
@@ -1563,35 +1963,20 @@ const Playground: NextPage = () => {
       setMessages(prev =>
         prev.map(msg => (msg.id === responseId && msg.role === 'view' ? { ...msg, thinking: false } : msg)),
       );
+      if (stillCurrent) {
+        activeRunRef.current = null;
+      }
       setLoading(false);
     };
 
-    // Build ext_info once and reuse it for both the live request and the
-    // snapshot captured for "保存定时任务", so a saved task replays the exact
-    // same context (file / database / knowledge / skill / connectors).
+    // Build ext_info once so file, skill, and connector context stays stable during this send.
     const extInfo: Record<string, any> = {
+      client_run_id: runId,
       ...(currentUploadedFilePath ? { file_path: currentUploadedFilePath } : {}),
       ...(effectiveSkill ? { skill_id: effectiveSkill.id, skill_name: effectiveSkill.name } : {}),
-      ...(effectiveDb ? { database_name: effectiveDb.db_name, database_type: effectiveDb.db_type } : {}),
-      ...(selectedKnowledge
-        ? { knowledge_space_name: selectedKnowledge.name, knowledge_space_id: selectedKnowledge.id }
-        : {}),
       ...(selectedConnectors.length > 0 ? { connector_ids: selectedConnectors.map(c => c.id) } : {}),
     };
     const selectParam = appCode === 'chat_react_agent' ? '' : appCode;
-
-    // Snapshot the exact payload being sent (minus the per-run conv_uid, which
-    // each scheduled run regenerates) so buildSnapshot replays this real run.
-    lastSentPayloadRef.current = {
-      version: 1,
-      user_input: finalQuery,
-      chat_mode: chatMode,
-      model_name: model,
-      select_param: selectParam,
-      temperature: 0.6,
-      max_new_tokens: 4000,
-      ext_info: extInfo,
-    };
 
     try {
       const response = await fetch(`${process.env.API_BASE_URL ?? ''}/api/v1/chat/react-agent`, {
@@ -1617,6 +2002,7 @@ const Playground: NextPage = () => {
       }
 
       const reader = response.body.getReader();
+      activeRun.reader = reader;
       const decoder = new TextDecoder('utf-8');
       let buffer = '';
 
@@ -1630,10 +2016,10 @@ const Playground: NextPage = () => {
         } catch (_err) {
           return;
         }
+        if (!isCurrentRun()) return;
         if (payload.type === 'context.status') {
           const budget = Number(payload.budget ?? 0);
           if (!Number.isFinite(budget) || budget <= 0) {
-            setContextStatus(null);
             return;
           }
           const stateMap: Record<string, 'OK' | 'WARNING' | 'ERROR'> = {
@@ -1643,23 +2029,34 @@ const Playground: NextPage = () => {
             critical: 'ERROR',
             overflow: 'ERROR',
           };
-          setContextStatus({
+          const nextContextStatus: ContextStatus = {
             state: stateMap[payload.state] || 'OK',
             used_tokens: payload.used ?? 0,
             max_tokens: budget,
             usage_percent: (payload.ratio ?? 0) * 100,
             layer: payload.compact_layer ?? null,
-          });
+          };
+          setContextStatus(nextContextStatus);
+          persistContextStatus(nextContextStatus);
           return;
         }
         if (payload.type === 'ask_data.stage') {
-          const id = `ask-data-${payload.stage || 'query'}`;
+          const callId = getAskDataCallId(payload);
+          const id = getAskDataStageId(callId, payload.stage);
           const stageStatus: ExecutionStep['status'] =
             payload.status === 'failed' || payload.status === 'error'
               ? 'failed'
               : payload.status === 'done' || payload.status === 'succeeded'
                 ? 'done'
                 : 'running';
+          const stageDetail = formatStageDetailWithDuration(payload.detail, payload.duration_ms);
+          const stageOutputs = buildAskDataStageOutput({
+            stage: payload.stage,
+            title: payload.title,
+            detail: payload.detail,
+            status: payload.status || stageStatus,
+            duration_ms: payload.duration_ms,
+          });
           setExecutionMap(prev => {
             const current = prev[responseId] || {
               steps: [],
@@ -1671,7 +2068,7 @@ const Playground: NextPage = () => {
             const steps = current.steps.some(step => step.id === id)
               ? current.steps.map(step =>
                   step.id === id
-                    ? { ...step, title: payload.title, detail: payload.detail || 'AskData', status: stageStatus }
+                    ? { ...step, title: payload.title, detail: stageDetail, status: stageStatus }
                     : step.status === 'running'
                       ? { ...step, status: 'done' as const }
                       : step,
@@ -1684,12 +2081,24 @@ const Playground: NextPage = () => {
                     id,
                     step: current.steps.length + 1,
                     title: payload.title || '正在查询业务数据',
-                    detail: payload.detail || 'AskData',
+                    detail: stageDetail,
                     status: stageStatus,
-                    action: 'ask_data_query',
+                    action: getAskDataStageAction(payload.stage, payload.title),
+                    askDataCallId: callId,
+                    parentId: `ask-data-${callId}`,
                   },
                 ];
-            return { ...prev, [responseId]: { ...current, steps } };
+            return {
+              ...prev,
+              [responseId]: {
+                ...current,
+                steps,
+                outputs: {
+                  ...current.outputs,
+                  [id]: stageOutputs,
+                },
+              },
+            };
           });
           return;
         }
@@ -1698,13 +2107,28 @@ const Playground: NextPage = () => {
           setExecutionMap(prev => {
             const current = prev[responseId];
             if (!current) return prev;
+            const stepsWithAskDataStages = mergeAskDataFallbackSteps(current.steps, askDataResult);
+            const outputsWithAskDataStages = stepsWithAskDataStages.reduce<Record<string, ExecutionOutput[]>>(
+              (acc, step: any) => {
+                if (
+                  String(step?.id || '').startsWith('ask-data-') &&
+                  Array.isArray(step.outputs) &&
+                  step.outputs.length
+                ) {
+                  acc[step.id] = step.outputs;
+                }
+                return acc;
+              },
+              { ...current.outputs },
+            );
             return {
               ...prev,
               [responseId]: {
                 ...current,
-                steps: current.steps.map(step =>
+                steps: stepsWithAskDataStages.map(step =>
                   step.action === 'ask_data_query' && step.status === 'running' ? { ...step, status: 'done' } : step,
                 ),
+                outputs: outputsWithAskDataStages,
               },
             };
           });
@@ -1718,10 +2142,12 @@ const Playground: NextPage = () => {
           return;
         }
         if (payload.type === 'question.asked') {
+          activeRun.pendingQuestionRequestId = payload.request_id;
           setPendingQuestion(payload);
           return;
         }
         if (payload.type === 'question.replied' || payload.type === 'question.rejected') {
+          activeRun.pendingQuestionRequestId = null;
           setPendingQuestion(null);
           return;
         }
@@ -1736,6 +2162,13 @@ const Playground: NextPage = () => {
               }),
             );
           }
+          return;
+        }
+        if (payload.type === 'run.cancelled') {
+          activeRun.cancelled = true;
+          activeRunRef.current = null;
+          markRunCancelled(responseId);
+          notifyChatDialogueRefresh();
           return;
         }
         if (payload.type === 'step.start') {
@@ -1767,13 +2200,13 @@ const Playground: NextPage = () => {
                       status: 'running' as const,
                     }
                   : step.status === 'running'
-                    ? { ...step, status: 'done' }
+                    ? { ...step, status: 'done' as const }
                     : step,
               );
             } else {
               // New step - mark running steps as done and add new step
               nextSteps = [
-                ...current.steps.map(item => (item.status === 'running' ? { ...item, status: 'done' } : item)),
+                ...current.steps.map(item => (item.status === 'running' ? { ...item, status: 'done' as const } : item)),
                 {
                   id,
                   step: payload.step,
@@ -1800,7 +2233,6 @@ const Playground: NextPage = () => {
             };
           });
           setActiveMessageId(responseId);
-          setRightPanelCollapsed(false);
         } else if (payload.type === 'step.meta') {
           if (payload.action && payload.action.toLowerCase() === 'terminate') {
             terminatedStepIdsRef.current.add(payload.id);
@@ -1824,7 +2256,7 @@ const Playground: NextPage = () => {
             const current = prev[responseId];
             if (!current) return prev;
             // Build detail from action only (thought goes to stepThoughts)
-            const nextSteps = current.steps.map(item => {
+            let nextSteps = current.steps.map(item => {
               if (item.id !== payload.id) return item;
               const parts = [] as string[];
               if (payload.action) {
@@ -1847,6 +2279,8 @@ const Playground: NextPage = () => {
                 detail: parts.join('\n') || item.detail,
                 action: payload.action || item.action,
                 actionInput: payload.action_input || item.actionInput,
+                askDataCallId: payload.ask_data_call_id || item.askDataCallId,
+                askDataReused: Boolean(payload.ask_data_reused || item.askDataReused),
                 todoMeta: payload.todo_meta || item.todoMeta,
               };
             });
@@ -1862,14 +2296,42 @@ const Playground: NextPage = () => {
                   [payload.id]: displayThought,
                 }
               : current.stepThoughts;
+            let nextActiveStepId = payload.action ? payload.id : current.activeStepId;
+            if (String(payload.action || '').toLowerCase() === 'ask_data_query') {
+              const question = normalizeAskDataActionInput(payload.action_input);
+              const existingAskDataStep = nextSteps.find(
+                item =>
+                  item.id !== payload.id &&
+                  String(item.action || '').toLowerCase() === 'ask_data_query' &&
+                  question &&
+                  normalizeAskDataActionInput(item.actionInput) === question,
+              );
+              if (payload.ask_data_reused || existingAskDataStep) {
+                nextSteps = nextSteps.filter(item => item.id !== payload.id);
+                nextActiveStepId = existingAskDataStep?.id || current.activeStepId;
+              } else if (payload.ask_data_call_id) {
+                const callId = getAskDataCallId({ call_id: payload.ask_data_call_id });
+                const stagePrefix = `ask-data-${callId}-`;
+                const parentStep = nextSteps.find(item => item.id === payload.id);
+                const stepsWithoutParent = nextSteps.filter(item => item.id !== payload.id);
+                const firstStageIndex = stepsWithoutParent.findIndex(item => item.id.startsWith(stagePrefix));
+                if (parentStep && firstStageIndex >= 0) {
+                  nextSteps = [
+                    ...stepsWithoutParent.slice(0, firstStageIndex),
+                    parentStep,
+                    ...stepsWithoutParent.slice(firstStageIndex),
+                  ];
+                }
+              }
+              nextSteps = nextSteps.map((item, index) => ({ ...item, step: index + 1 }));
+            }
             return {
               ...prev,
               [responseId]: {
                 ...current,
                 steps: nextSteps,
                 stepThoughts: nextThoughts,
-                // Focus right panel on this step when it receives action content
-                ...(payload.action ? { activeStepId: payload.id } : {}),
+                activeStepId: nextActiveStepId,
               },
             };
           });
@@ -1957,6 +2419,7 @@ const Playground: NextPage = () => {
           }
         } else if (payload.type === 'final') {
           settleResponseState();
+          notifyChatDialogueRefresh();
           setMessages(prev =>
             prev.map(msg => {
               if (msg.id !== responseId || msg.role !== 'view') return msg;
@@ -2001,13 +2464,11 @@ const Playground: NextPage = () => {
                       if (htmlArtifact) {
                         setPreviewArtifact(htmlArtifact as Artifact);
                         setRightPanelView('html-preview');
-                        setRightPanelCollapsed(false);
                       } else {
                         const imgArtifact = deduped.find(a => a.type === 'image');
                         if (imgArtifact) {
                           setPreviewArtifact(imgArtifact as Artifact);
                           setRightPanelView('image-preview');
-                          setRightPanelCollapsed(false);
                         }
                       }
 
@@ -2062,19 +2523,30 @@ const Playground: NextPage = () => {
 
       // eslint-disable-next-line no-constant-condition
       while (true) {
+        if (!isCurrentRun()) break;
         const { done, value } = await reader.read();
+        if (!isCurrentRun()) break;
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
         const parts = buffer.split('\n\n');
         buffer = parts.pop() || '';
         parts.forEach(processEvent);
       }
-      if (buffer.trim()) {
+      if (buffer.trim() && isCurrentRun()) {
         processEvent(buffer);
       }
-      settleResponseState();
+      if (isCurrentRun()) {
+        settleResponseState();
+        notifyChatDialogueRefresh();
+      }
     } catch (err: any) {
+      if (err?.name === 'AbortError' || activeRun.cancelled) {
+        markRunCancelled(responseId);
+        return;
+      }
+      if (!isCurrentRun()) return;
       settleResponseState('failed');
+      notifyChatDialogueRefresh();
       message.error(err?.message || 'Failed to get response');
       setMessages(prev => {
         const newMessages = [...prev];
@@ -2117,21 +2589,28 @@ const Playground: NextPage = () => {
         }
 
         if (payload && payload.version === 1 && payload.type === 'react-agent') {
-          const steps: ExecutionStep[] = (payload.steps || []).map((s: any, idx: number) => ({
+          const historyPayloadSteps = expandAskDataHistorySteps(payload.steps || []);
+          const steps: ExecutionStep[] = historyPayloadSteps.map((s: any, idx: number) => ({
             id: s.id || `history-step-${idx}`,
             step: idx + 1,
             title: s.title || s.action || `Step ${idx + 1}`,
             detail: s.detail || '',
-            status: (s.status === 'failed' ? 'failed' : 'done') as 'done' | 'failed',
+            status: (s.status === 'cancelled' ? 'cancelled' : s.status === 'failed' ? 'failed' : 'done') as
+              | 'done'
+              | 'failed'
+              | 'cancelled',
             action: s.action,
             actionInput: s.action_input || undefined,
+            askDataCallId: s.ask_data_call_id || undefined,
+            askDataReused: Boolean(s.ask_data_reused),
+            parentId: s.parent_id || undefined,
             todoMeta: s.todo_meta || undefined,
           }));
 
           const outputs: Record<string, ExecutionOutput[]> = {};
           const stepThoughts: Record<string, string> = {};
 
-          (payload.steps || []).forEach((s: any, idx: number) => {
+          historyPayloadSteps.forEach((s: any, idx: number) => {
             const stepId = s.id || `history-step-${idx}`;
             if (Array.isArray(s.outputs)) {
               outputs[stepId] = s.outputs.map((o: any) => ({
@@ -2254,10 +2733,14 @@ const Playground: NextPage = () => {
   };
 
   const loadConversation = async (convUid: string) => {
-    if (historyLoading) return;
+    const requestSeq = historyLoadSeqRef.current + 1;
+    historyLoadSeqRef.current = requestSeq;
     setHistoryLoading(true);
+    setConversationId(convUid);
+    resetConversationSurface();
     try {
       const res: any = await axios.get(`/api/v1/chat/dialogue/messages/history?con_uid=${convUid}`);
+      if (historyLoadSeqRef.current !== requestSeq) return;
       let msgList: any[] | null = null;
       if (res?.success && Array.isArray(res.data)) {
         msgList = res.data;
@@ -2268,72 +2751,23 @@ const Playground: NextPage = () => {
       } else if (Array.isArray(res)) {
         msgList = res;
       }
-      if (msgList && msgList.length > 0) {
-        setConversationId(convUid);
-        restoreFromHistory(
-          msgList.map((m: any) => ({
-            role: m.role,
-            context: m.context,
-            order: m.order,
-            model_name: m.model_name,
-          })),
-        );
-      }
+      restoreFromHistory(
+        (msgList || []).map((m: any) => ({
+          role: m.role,
+          context: m.context,
+          order: m.order,
+          model_name: m.model_name,
+        })),
+      );
     } catch (e) {
+      if (historyLoadSeqRef.current !== requestSeq) return;
       console.error('Failed to load conversation', e);
       message.error('加载历史对话失败');
     } finally {
-      setHistoryLoading(false);
+      if (historyLoadSeqRef.current === requestSeq) {
+        setHistoryLoading(false);
+      }
     }
-  };
-
-  // Share current conversation — create share link and copy to clipboard
-  const handleShare = async () => {
-    if (!conversationId) {
-      message.warning('请先开始一段对话再分享');
-      return;
-    }
-    try {
-      const res: any = await axios.post('/api/v1/chat/share', { conv_uid: conversationId });
-      const shareUrl = res?.data?.share_url;
-      if (!shareUrl) throw new Error('No share URL returned');
-      const fullUrl = `${window.location.origin}${shareUrl}`;
-      await navigator.clipboard.writeText(fullUrl);
-      message.success('分享链接已复制到剪贴板！');
-    } catch (e) {
-      console.error('Failed to create share link', e);
-      message.error('创建分享链接失败，请稍后重试');
-    }
-  };
-
-  // Build snapshot of current conversation state for scheduled task creation
-  const buildSnapshot = (): ChatReplayPayload => {
-    // Prefer the payload actually sent to the agent this session — it carries
-    // the real execution context (file_path / database / knowledge / skill /
-    // connectors) and is immune to UI state changed after sending.
-    if (lastSentPayloadRef.current) {
-      return lastSentPayloadRef.current;
-    }
-    // Fallback (e.g. conversation restored from history, where no send
-    // happened this session): reconstruct from the first question + current
-    // selections. Keeps the old behavior so this path never regresses.
-    const firstUserMsg = messages.find(m => m.role === 'human');
-    return {
-      version: 1,
-      user_input: firstUserMsg?.context ?? '',
-      chat_mode: 'chat_react_agent',
-      model_name: model,
-      select_param: '',
-      ext_info: {
-        ...(uploadedFilePath ? { file_path: uploadedFilePath } : {}),
-        ...(selectedSkill ? { skill_id: selectedSkill.id, skill_name: selectedSkill.name } : {}),
-        ...(selectedDb ? { database_name: selectedDb.db_name, database_type: selectedDb.db_type } : {}),
-        ...(selectedKnowledge
-          ? { knowledge_space_name: selectedKnowledge.name, knowledge_space_id: selectedKnowledge.id }
-          : {}),
-        ...(selectedConnectors.length > 0 ? { connector_ids: selectedConnectors.map(c => c.id) } : {}),
-      },
-    };
   };
 
   const _QuickAction = ({ icon, text, onClick }: { icon: any; text: string; onClick?: () => void }) => (
@@ -2345,15 +2779,6 @@ const Playground: NextPage = () => {
       <span>{text}</span>
     </div>
   );
-
-  const getDbIcon = (type: string) => {
-    const lowerType = type.toLowerCase();
-    if (lowerType.includes('mysql')) return <ConsoleSqlOutlined className='text-blue-500' />;
-    if (lowerType.includes('postgre')) return <DatabaseOutlined className='text-blue-400' />;
-    if (lowerType.includes('mongo')) return <CloudServerOutlined className='text-green-500' />;
-    if (lowerType.includes('sqlite')) return <DatabaseOutlined className='text-amber-500' />;
-    return <DatabaseOutlined className='text-gray-500' />;
-  };
 
   // Upload Props
   const uploadProps: any = {
@@ -2384,7 +2809,7 @@ const Playground: NextPage = () => {
 
           {/* Chat Messages or Hero Section */}
           {/* When from_task mode and loading history, show loading spinner instead of Hero */}
-          {router.query.from_task && historyLoading && messages.length === 0 ? (
+          {historyLoading && messages.length === 0 ? (
             <div className='flex-1 flex items-center justify-center'>
               <Spin size='large' tip='加载对话历史...' />
             </div>
@@ -2397,7 +2822,6 @@ const Playground: NextPage = () => {
                   {rounds.map((round, roundIndex) => {
                     const isLastRound = roundIndex === rounds.length - 1;
                     const isSelected = round.viewMsg?.id === selectedViewMsgId;
-                    const isCurrentRoundCollapsed = !isLastRound && !isSelected;
 
                     const execution = round.viewMsg?.id ? executionMap[round.viewMsg.id] : undefined;
                     const {
@@ -2482,10 +2906,7 @@ const Playground: NextPage = () => {
                             setRightPanelCollapsed(false);
                             setRightPanelView('files');
                           }}
-                          isCollapsed={isCurrentRoundCollapsed}
-                          onExpand={() => {
-                            if (round.viewMsg?.id) setActiveViewMsgId(round.viewMsg.id);
-                          }}
+                          isCollapsed={false}
                           createdSkillName={createdSkillNames[round.viewMsg?.id || '']}
                           onSkillCardClick={_skillName => {
                             if (round.viewMsg?.id) setActiveViewMsgId(round.viewMsg.id);
@@ -2538,11 +2959,6 @@ const Playground: NextPage = () => {
                             }
                           }}
                         />
-                        {round.viewMsg?.askDataResult && (
-                          <div className='mx-auto mb-6 max-w-5xl px-4'>
-                            <ResultDisplay response={round.viewMsg.askDataResult} />
-                          </div>
-                        )}
                       </div>
                     );
                   })}
@@ -2552,41 +2968,9 @@ const Playground: NextPage = () => {
                 {!router.query.from_task && (
                   <div className='chat-composer-region bg-white dark:bg-[#111217] p-4 md:p-6'>
                     <div className='max-w-[720px] mx-auto'>
-                      {/* Context Tags Area */}
-                      <div className='flex flex-wrap gap-2 mb-2'>
-                        {selectedDb && (
-                          <Tag
-                            closable
-                            onClose={() => setSelectedDb(null)}
-                            className='flex items-center gap-1 bg-blue-50 border-blue-200 text-blue-700 px-3 py-1 rounded-full'
-                          >
-                            {getDbIcon(selectedDb.type)} <span className='font-medium ml-1'>{selectedDb.db_name}</span>
-                          </Tag>
-                        )}
-                        {selectedKnowledge && (
-                          <Tag
-                            closable
-                            onClose={() => setSelectedKnowledge(null)}
-                            className='flex items-center gap-1 bg-orange-50 border-orange-200 text-orange-700 px-3 py-1 rounded-full'
-                          >
-                            <BookOutlined /> <span className='font-medium ml-1'>{selectedKnowledge.name}</span>
-                          </Tag>
-                        )}
-                        {selectedConnectors.length > 0 && (
-                          <>
-                            {selectedConnectors.map(c => (
-                              <Tag
-                                key={c.id}
-                                closable
-                                onClose={() => setSelectedConnectors(prev => prev.filter(s => s.id !== c.id))}
-                                className='flex items-center gap-1 bg-violet-50 border-violet-200 text-violet-700 px-3 py-1 rounded-full'
-                              >
-                                <ApiOutlined /> <span className='font-medium ml-1'>{c.display_name}</span>
-                              </Tag>
-                            ))}
-                          </>
-                        )}
-                        {uploadedFile && (
+                      {/* Uploaded File Tags */}
+                      {uploadedFile && (
+                        <div className='flex flex-wrap gap-2 mb-2'>
                           <Tag
                             closable
                             onClose={() => setUploadedFile(null)}
@@ -2594,8 +2978,8 @@ const Playground: NextPage = () => {
                           >
                             <FileExcelOutlined /> <span className='font-medium ml-1'>{uploadedFile.name}</span>
                           </Tag>
-                        )}
-                      </div>
+                        </div>
+                      )}
 
                       {/* Human-in-the-loop Question Dock */}
                       {pendingQuestion && (
@@ -2633,12 +3017,11 @@ const Playground: NextPage = () => {
                             onPressEnter={e => {
                               if (!e.shiftKey) {
                                 e.preventDefault();
-                                handleStart();
+                                if (!loading) handleStart();
                               }
                             }}
                             placeholder={
-                              t('ask_data_question') ||
-                              'Ask a question about your database, upload a CSV, or generate a report...'
+                              t('ask_data_question') || 'Ask a question, upload a CSV, or generate a report...'
                             }
                             autoSize={{ minRows: 2, maxRows: 6 }}
                             className='flex-1 resize-none !border-none !shadow-none !bg-transparent px-0 py-2'
@@ -2660,24 +3043,6 @@ const Playground: NextPage = () => {
                                         </Upload>
                                       ),
                                       icon: <UploadOutlined />,
-                                    },
-                                    {
-                                      key: 'database',
-                                      label: 'Select Data Source',
-                                      icon: <DatabaseOutlined />,
-                                      onClick: () => setIsDbModalOpen(true),
-                                    },
-                                    {
-                                      key: 'knowledge',
-                                      label: 'Select Knowledge Base',
-                                      icon: <BookOutlined />,
-                                      onClick: () => setIsKnowledgeModalOpen(true),
-                                    },
-                                    {
-                                      key: 'connector',
-                                      label: t('use_connector'),
-                                      icon: <ApiOutlined />,
-                                      onClick: () => setIsConnectorPanelOpen(true),
                                     },
                                   ],
                                 }}
@@ -2784,21 +3149,10 @@ const Playground: NextPage = () => {
                                         </div>
                                       )}
                                     </div>
-                                    <div className='border-t border-gray-100 dark:border-gray-700 px-3 py-2 flex items-center justify-between bg-gray-50/50 dark:bg-gray-900/50'>
+                                    <div className='border-t border-gray-100 dark:border-gray-700 px-3 py-2 flex items-center justify-end bg-gray-50/50 dark:bg-gray-900/50'>
                                       <span className='text-[10px] text-gray-400'>
                                         {t('picker_skill_count', { count: (skillsList || []).length })}
                                       </span>
-                                      <Button
-                                        type='link'
-                                        size='small'
-                                        onClick={() => {
-                                          router.push('/construct/skills');
-                                          setIsSkillPanelOpen(false);
-                                        }}
-                                        className='text-[10px] p-0 h-auto'
-                                      >
-                                        {t('picker_manage_skill')}
-                                      </Button>
                                     </div>
                                   </div>
                                 }
@@ -2825,157 +3179,6 @@ const Playground: NextPage = () => {
                                       {selectedSkill && (
                                         <span className='absolute -top-1.5 -right-1.5 bg-white text-[#7c3aed] text-[8px] rounded-full w-3.5 h-3.5 flex items-center justify-center font-bold shadow-sm ring-1 ring-[#7c3aed]/30'>
                                           1
-                                        </span>
-                                      )}
-                                    </div>
-                                  </Button>
-                                </Tooltip>
-                              </Popover>
-
-                              {/* Connector Selector Button */}
-                              <Popover
-                                trigger='click'
-                                placement='topLeft'
-                                open={isConnectorPanelOpen}
-                                onOpenChange={setIsConnectorPanelOpen}
-                                overlayClassName='manus-skill-menu'
-                                overlayInnerStyle={{ padding: 0, borderRadius: 12 }}
-                                content={
-                                  <div className='w-[320px] bg-white dark:bg-[#2c2d31] rounded-xl shadow-xl overflow-hidden'>
-                                    <div className='p-3 border-b border-gray-100 dark:border-gray-700'>
-                                      <Input
-                                        placeholder={t('search_connector')}
-                                        prefix={<SearchOutlined className='text-gray-400' />}
-                                        value={connectorSearchQuery}
-                                        onChange={e => setConnectorSearchQuery(e.target.value)}
-                                        className='rounded-lg'
-                                        allowClear
-                                        size='small'
-                                      />
-                                    </div>
-                                    <div className='max-h-[300px] overflow-y-auto'>
-                                      {(connectorsList || [])
-                                        .filter(
-                                          (c: ConnectorInstance) =>
-                                            c.status === 'active' &&
-                                            (!connectorSearchQuery ||
-                                              c.display_name
-                                                .toLowerCase()
-                                                .includes(connectorSearchQuery.toLowerCase()) ||
-                                              c.connector_type
-                                                .toLowerCase()
-                                                .includes(connectorSearchQuery.toLowerCase())),
-                                        )
-                                        .map((c: ConnectorInstance) => (
-                                          <div
-                                            key={c.id}
-                                            onClick={() => {
-                                              setSelectedConnectors(prev =>
-                                                prev.some(s => s.id === c.id)
-                                                  ? prev.filter(s => s.id !== c.id)
-                                                  : [...prev, c],
-                                              );
-                                              setConnectorSearchQuery('');
-                                            }}
-                                            className={`flex items-start gap-3 px-3 py-2.5 cursor-pointer transition-all hover:bg-gray-50 dark:hover:bg-gray-800 ${
-                                              selectedConnectors.some(s => s.id === c.id)
-                                                ? 'bg-violet-50 dark:bg-violet-900/20'
-                                                : ''
-                                            }`}
-                                          >
-                                            <div className='flex-shrink-0 w-7 h-7 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-500 flex items-center justify-center text-white text-xs'>
-                                              <ApiOutlined />
-                                            </div>
-                                            <div className='flex-1 min-w-0'>
-                                              <div className='flex items-center gap-2'>
-                                                <span className='font-medium text-sm text-gray-800 dark:text-gray-200'>
-                                                  {c.display_name}
-                                                </span>
-                                                <span className='text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400'>
-                                                  {t('picker_connector_active')}
-                                                </span>
-                                              </div>
-                                              <p
-                                                className='text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate'
-                                                title={(c.config?.description as string) || c.connector_type}
-                                              >
-                                                {(c.config?.description as string) || c.connector_type}
-                                              </p>
-                                            </div>
-                                            {selectedConnectors.some(s => s.id === c.id) && (
-                                              <CheckCircleFilled className='text-violet-500 flex-shrink-0 text-sm' />
-                                            )}
-                                          </div>
-                                        ))}
-                                      {(connectorsList || []).filter(
-                                        (c: ConnectorInstance) =>
-                                          c.status === 'active' &&
-                                          (!connectorSearchQuery ||
-                                            c.display_name.toLowerCase().includes(connectorSearchQuery.toLowerCase()) ||
-                                            c.connector_type
-                                              .toLowerCase()
-                                              .includes(connectorSearchQuery.toLowerCase())),
-                                      ).length === 0 && (
-                                        <div className='text-center py-8 text-gray-400'>
-                                          <ApiOutlined className='text-2xl mb-2 opacity-50' />
-                                          <div className='text-xs'>
-                                            {connectorSearchQuery
-                                              ? t('picker_connector_no_match')
-                                              : t('picker_connector_empty')}
-                                          </div>
-                                        </div>
-                                      )}
-                                    </div>
-                                    <div className='border-t border-gray-100 dark:border-gray-700 px-3 py-2 flex items-center justify-between bg-gray-50/50 dark:bg-gray-900/50'>
-                                      <span className='text-[10px] text-gray-400'>
-                                        {t('picker_connector_count', {
-                                          count: (connectorsList || []).filter(
-                                            (c: ConnectorInstance) => c.status === 'active',
-                                          ).length,
-                                        })}
-                                      </span>
-                                      <Button
-                                        type='link'
-                                        size='small'
-                                        onClick={() => {
-                                          router.push('/construct/connectors');
-                                          setIsConnectorPanelOpen(false);
-                                        }}
-                                        className='text-[10px] p-0 h-auto'
-                                      >
-                                        {t('picker_manage_connector')}
-                                      </Button>
-                                    </div>
-                                  </div>
-                                }
-                              >
-                                <Tooltip
-                                  title={
-                                    selectedConnectors.length === 0
-                                      ? t('select_mcp')
-                                      : selectedConnectors.length === 1
-                                        ? t('connector_selected', { name: selectedConnectors[0].display_name })
-                                        : t('connectors_selected', {
-                                            count: selectedConnectors.length,
-                                            names: selectedConnectors.map(c => c.display_name).join('、'),
-                                          })
-                                  }
-                                >
-                                  <Button
-                                    type='text'
-                                    shape='circle'
-                                    size='small'
-                                    className={`relative flex items-center justify-center flex-shrink-0 transition-all ${
-                                      selectedConnectors.length > 0
-                                        ? 'bg-gradient-to-br from-[#8b5cf6] to-[#6366f1] text-white border border-transparent shadow-[0_2px_4px_rgba(139,92,246,0.3),inset_0_1px_0_rgba(255,255,255,0.3)] hover:-translate-y-[0.5px] hover:shadow-[0_4px_8px_rgba(139,92,246,0.4),inset_0_1px_0_rgba(255,255,255,0.3)]'
-                                        : 'text-gray-500 hover:text-violet-600 bg-gradient-to-b from-white to-gray-50 dark:from-[#2a2b2f] dark:to-[#1e1f24] dark:text-gray-300 border border-gray-200/80 dark:border-white/10 shadow-[0_1px_2px_rgba(0,0,0,0.05),inset_0_1px_0_rgba(255,255,255,1)] dark:shadow-[0_1px_2px_rgba(0,0,0,0.2),inset_0_1px_0_rgba(255,255,255,0.05)] hover:-translate-y-[0.5px] hover:shadow-[0_2px_4px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,1)] dark:hover:border-white/20'
-                                    }`}
-                                  >
-                                    <div className='relative'>
-                                      <ApiOutlined className={selectedConnectors.length > 0 ? 'text-white' : ''} />
-                                      {selectedConnectors.length > 0 && (
-                                        <span className='absolute -top-1.5 -right-1.5 bg-white text-violet-600 text-[8px] rounded-full w-3.5 h-3.5 flex items-center justify-center font-bold shadow-sm ring-1 ring-violet-500/30'>
-                                          {selectedConnectors.length}
                                         </span>
                                       )}
                                     </div>
@@ -3012,17 +3215,15 @@ const Playground: NextPage = () => {
                             </div>
 
                             <div className='flex items-center gap-2.5'>
-                              {contextStatus && (
-                                <ContextUsageBar
-                                  used={contextStatus.used_tokens}
-                                  budget={contextStatus.max_tokens}
-                                  ratio={contextStatus.usage_percent / 100}
-                                  state={contextStatus.state}
-                                  compactLayer={contextStatus.layer}
-                                  variant='compact'
-                                  className='mr-0.5'
-                                />
-                              )}
+                              <ContextUsageBar
+                                used={contextStatus.used_tokens}
+                                budget={contextStatus.max_tokens}
+                                ratio={contextStatus.usage_percent / 100}
+                                state={contextStatus.state}
+                                compactLayer={contextStatus.layer}
+                                variant='compact'
+                                className='mr-0.5'
+                              />
 
                               {/* Voice Button */}
                               <Tooltip title={t('voice_input')}>
@@ -3039,22 +3240,25 @@ const Playground: NextPage = () => {
                               <Button
                                 type='primary'
                                 shape='circle'
-                                icon={<ArrowUpOutlined />}
-                                onClick={() => handleStart()}
-                                disabled={(!query.trim() && !uploadedFile) || loading}
-                                loading={loading}
+                                icon={loading ? <StopOutlined /> : <ArrowUpOutlined />}
+                                onClick={() => (loading ? handleCancelRun() : handleStart())}
+                                disabled={!loading && !query.trim() && !uploadedFile}
                                 className={`group/send relative overflow-hidden border-none shadow-lg flex-shrink-0 h-9 w-9 transition-all duration-200 ${
-                                  query.trim() || uploadedFile
-                                    ? 'bg-gradient-to-br from-[#3b82f6] to-[#2563eb] hover:shadow-blue-300/40 hover:shadow-xl hover:scale-105'
-                                    : 'bg-gray-200 text-gray-400'
+                                  loading
+                                    ? 'bg-gradient-to-br from-[#ef4444] to-[#dc2626] hover:shadow-red-300/40 hover:shadow-xl hover:scale-105'
+                                    : query.trim() || uploadedFile
+                                      ? 'bg-gradient-to-br from-[#3b82f6] to-[#2563eb] hover:shadow-blue-300/40 hover:shadow-xl hover:scale-105'
+                                      : 'bg-gray-200 text-gray-400'
                                 }`}
                                 style={
-                                  query.trim() || uploadedFile
-                                    ? { background: 'linear-gradient(135deg, #3b82f6, #2563eb)' }
-                                    : undefined
+                                  loading
+                                    ? { background: 'linear-gradient(135deg, #ef4444, #dc2626)' }
+                                    : query.trim() || uploadedFile
+                                      ? { background: 'linear-gradient(135deg, #3b82f6, #2563eb)' }
+                                      : undefined
                                 }
                               >
-                                {(query.trim() || uploadedFile) && (
+                                {(loading || query.trim() || uploadedFile) && (
                                   <span
                                     className='absolute inset-0 opacity-0 group-hover/send:opacity-100 transition-opacity duration-300 pointer-events-none'
                                     style={{
@@ -3113,18 +3317,7 @@ const Playground: NextPage = () => {
                     <ManusRightPanel
                       activeStep={activeStep}
                       outputs={outputs}
-                      databaseType={selectedDb?.db_type}
-                      databaseName={selectedDb?.db_name}
                       isRunning={isRunning}
-                      onCollapse={() => setRightPanelCollapsed(true)}
-                      onRerun={router.query.from_task ? undefined : () => {}}
-                      onShare={!loading && !!conversationId ? handleShare : undefined}
-                      onSchedule={
-                        !loading && !!conversationId && !router.query.from_task
-                          ? () => setScheduleOpen(true)
-                          : undefined
-                      }
-                      terminalTitle={t('db_gpt_computer')}
                       artifacts={artifacts.filter(a => a.messageId === activeViewMsg?.id)}
                       onArtifactClick={artifact => {
                         if (artifact.type === 'html') {
@@ -3170,12 +3363,23 @@ const Playground: NextPage = () => {
             <div className='industrial-welcome relative flex-1 flex flex-col items-center justify-center px-6 py-4 overflow-y-auto'>
               <div className='industrial-welcome-content w-full max-w-[860px] flex flex-col items-center animate-fade-in-up'>
                 <div className='industrial-hero-header w-full flex flex-col items-center'>
-                  <h1 className='industrial-hero-title text-4xl md:text-5xl font-serif text-gray-900 dark:text-gray-100 mb-4 text-center flex items-center gap-4'>
+                  <h1
+                    className={`industrial-hero-title text-4xl md:text-5xl text-gray-900 dark:text-gray-100 text-center flex items-center gap-4 ${
+                      conversationId ? 'mb-3' : 'mb-8'
+                    }`}
+                  >
                     <div className='w-14 h-14 rounded-xl bg-white dark:bg-[#1a1b1e] shadow-md flex items-center justify-center flex-shrink-0'>
                       <Image src='/datrix-brand.png' alt='Datrix' width={40} height={40} className='object-contain' />
                     </div>
-                    <span className='industrial-hero-name'>{t('home_title')}</span>
+                    <span className='industrial-hero-name'>
+                      {conversationId ? '当前对话暂无历史消息' : t('home_title')}
+                    </span>
                   </h1>
+                  {conversationId && (
+                    <p className='mb-6 text-center text-sm text-gray-400 dark:text-gray-500'>
+                      该会话已打开，可在下方继续输入。
+                    </p>
+                  )}
                 </div>
 
                 {/* Input Box Container - Premium Layered Style */}
@@ -3184,51 +3388,16 @@ const Playground: NextPage = () => {
                   <div className='industrial-command-frame w-full relative transition-all duration-500 rounded-[28px] shadow-[0_16px_48px_rgba(0,0,0,0.12),0_6px_20px_rgba(0,0,0,0.08)] hover:shadow-[0_24px_64px_rgba(0,0,0,0.2),0_12px_32px_rgba(0,0,0,0.1)] dark:shadow-[0_16px_48px_rgba(0,0,0,0.4)] dark:hover:shadow-[0_24px_64px_rgba(0,0,0,0.5)]'>
                     {/* White Inner Box - Clean Glass Card */}
                     <div className='industrial-command-shell bg-white/95 backdrop-blur-md dark:bg-[#1e1f24]/95 rounded-[28px] border border-gray-100 dark:border-[#33353b] shadow-[inset_0_1px_0_rgba(255,255,255,1)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-5 relative z-10'>
-                      {/* Uploaded File, Database, Knowledge, Connector Tags */}
-                      {(uploadedFile || selectedDb || selectedKnowledge || selectedConnectors.length > 0) && (
+                      {/* Uploaded File Tags */}
+                      {uploadedFile && (
                         <div className='flex flex-wrap gap-2 mb-2'>
-                          {uploadedFile && (
-                            <Tag
-                              closable
-                              onClose={() => setUploadedFile(null)}
-                              className='flex items-center gap-1 bg-green-50 border-green-200 text-green-700 px-3 py-1 rounded-full'
-                            >
-                              <FileExcelOutlined /> <span className='font-medium ml-1'>{uploadedFile.name}</span>
-                            </Tag>
-                          )}
-                          {selectedDb && (
-                            <Tag
-                              closable
-                              onClose={() => setSelectedDb(null)}
-                              className='flex items-center gap-1 bg-blue-50 border-blue-200 text-blue-700 px-3 py-1 rounded-full'
-                            >
-                              {getDbIcon(selectedDb.type)}{' '}
-                              <span className='font-medium ml-1'>{selectedDb.db_name}</span>
-                            </Tag>
-                          )}
-                          {selectedKnowledge && (
-                            <Tag
-                              closable
-                              onClose={() => setSelectedKnowledge(null)}
-                              className='flex items-center gap-1 bg-orange-50 border-orange-200 text-orange-700 px-3 py-1 rounded-full'
-                            >
-                              <BookOutlined /> <span className='font-medium ml-1'>{selectedKnowledge.name}</span>
-                            </Tag>
-                          )}
-                          {selectedConnectors.length > 0 && (
-                            <>
-                              {selectedConnectors.map(c => (
-                                <Tag
-                                  key={c.id}
-                                  closable
-                                  onClose={() => setSelectedConnectors(prev => prev.filter(s => s.id !== c.id))}
-                                  className='flex items-center gap-1 bg-violet-50 border-violet-200 text-violet-700 px-3 py-1 rounded-full'
-                                >
-                                  <ApiOutlined /> <span className='font-medium ml-1'>{c.display_name}</span>
-                                </Tag>
-                              ))}
-                            </>
-                          )}
+                          <Tag
+                            closable
+                            onClose={() => setUploadedFile(null)}
+                            className='flex items-center gap-1 bg-green-50 border-green-200 text-green-700 px-3 py-1 rounded-full'
+                          >
+                            <FileExcelOutlined /> <span className='font-medium ml-1'>{uploadedFile.name}</span>
+                          </Tag>
                         </div>
                       )}
 
@@ -3244,13 +3413,10 @@ const Playground: NextPage = () => {
                         onPressEnter={e => {
                           if (!e.shiftKey) {
                             e.preventDefault();
-                            handleStart();
+                            if (!loading) handleStart();
                           }
                         }}
-                        placeholder={
-                          t('ask_data_question') ||
-                          'Ask a question about your database, upload a CSV, or generate a report...'
-                        }
+                        placeholder={t('ask_data_question') || 'Ask a question, upload a CSV, or generate a report...'}
                         autoSize={{ minRows: 3, maxRows: 8 }}
                         className='industrial-command-input text-lg resize-none !border-none !shadow-none !bg-transparent px-2 py-2 mb-2'
                         style={{ backgroundColor: 'transparent' }}
@@ -3277,24 +3443,6 @@ const Playground: NextPage = () => {
                                   label: t('use_skill'),
                                   icon: <ThunderboltOutlined />,
                                   onClick: () => setIsSkillPanelOpen(true),
-                                },
-                                {
-                                  key: 'knowledge',
-                                  label: t('use_knowledge'),
-                                  icon: <BookOutlined />,
-                                  onClick: () => setIsKnowledgePanelOpen(true),
-                                },
-                                {
-                                  key: 'database',
-                                  label: t('use_database'),
-                                  icon: <DatabaseOutlined />,
-                                  onClick: () => setTimeout(() => setIsDbPanelOpen(true), 100),
-                                },
-                                {
-                                  key: 'connector',
-                                  label: t('use_connector'),
-                                  icon: <ApiOutlined />,
-                                  onClick: () => setIsConnectorPanelOpen(true),
                                 },
                               ],
                             }}
@@ -3401,21 +3549,10 @@ const Playground: NextPage = () => {
                                     </div>
                                   )}
                                 </div>
-                                <div className='border-t border-gray-100 dark:border-gray-700 px-3 py-2 flex items-center justify-between bg-gray-50/50 dark:bg-gray-900/50'>
+                                <div className='border-t border-gray-100 dark:border-gray-700 px-3 py-2 flex items-center justify-end bg-gray-50/50 dark:bg-gray-900/50'>
                                   <span className='text-[10px] text-gray-400'>
                                     {t('picker_skill_count', { count: (skillsList || []).length })}
                                   </span>
-                                  <Button
-                                    type='link'
-                                    size='small'
-                                    onClick={() => {
-                                      router.push('/construct/skills');
-                                      setIsSkillPanelOpen(false);
-                                    }}
-                                    className='text-[10px] p-0 h-auto'
-                                  >
-                                    {t('picker_manage_skill')}
-                                  </Button>
                                 </div>
                               </div>
                             }
@@ -3446,430 +3583,43 @@ const Playground: NextPage = () => {
                               </Button>
                             </Tooltip>
                           </Popover>
-
-                          {/* Connector Selector Button */}
-                          <Popover
-                            trigger='click'
-                            placement='topLeft'
-                            open={isConnectorPanelOpen}
-                            onOpenChange={setIsConnectorPanelOpen}
-                            overlayClassName='manus-skill-menu'
-                            overlayInnerStyle={{ padding: 0, borderRadius: 12 }}
-                            content={
-                              <div className='w-[320px] bg-white dark:bg-[#2c2d31] rounded-xl shadow-xl overflow-hidden'>
-                                <div className='p-3 border-b border-gray-100 dark:border-gray-700'>
-                                  <Input
-                                    placeholder={t('search_connector')}
-                                    prefix={<SearchOutlined className='text-gray-400' />}
-                                    value={connectorSearchQuery}
-                                    onChange={e => setConnectorSearchQuery(e.target.value)}
-                                    className='rounded-lg'
-                                    allowClear
-                                    size='small'
-                                  />
-                                </div>
-                                <div className='max-h-[300px] overflow-y-auto'>
-                                  {(connectorsList || [])
-                                    .filter(
-                                      (c: ConnectorInstance) =>
-                                        c.status === 'active' &&
-                                        (!connectorSearchQuery ||
-                                          c.display_name.toLowerCase().includes(connectorSearchQuery.toLowerCase()) ||
-                                          c.connector_type.toLowerCase().includes(connectorSearchQuery.toLowerCase())),
-                                    )
-                                    .map((c: ConnectorInstance) => (
-                                      <div
-                                        key={c.id}
-                                        onClick={() => {
-                                          setSelectedConnectors(prev =>
-                                            prev.some(s => s.id === c.id)
-                                              ? prev.filter(s => s.id !== c.id)
-                                              : [...prev, c],
-                                          );
-                                          setConnectorSearchQuery('');
-                                        }}
-                                        className={`flex items-start gap-3 px-3 py-2.5 cursor-pointer transition-all hover:bg-gray-50 dark:hover:bg-gray-800 ${
-                                          selectedConnectors.some(s => s.id === c.id)
-                                            ? 'bg-violet-50 dark:bg-violet-900/20'
-                                            : ''
-                                        }`}
-                                      >
-                                        <div className='flex-shrink-0 w-7 h-7 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-500 flex items-center justify-center text-white text-xs'>
-                                          <ApiOutlined />
-                                        </div>
-                                        <div className='flex-1 min-w-0'>
-                                          <div className='flex items-center gap-2'>
-                                            <span className='font-medium text-sm text-gray-800 dark:text-gray-200'>
-                                              {c.display_name}
-                                            </span>
-                                            <span className='text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400'>
-                                              {t('picker_connector_active')}
-                                            </span>
-                                          </div>
-                                          <p
-                                            className='text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate'
-                                            title={(c.config?.description as string) || c.connector_type}
-                                          >
-                                            {(c.config?.description as string) || c.connector_type}
-                                          </p>
-                                        </div>
-                                        {selectedConnectors.some(s => s.id === c.id) && (
-                                          <CheckCircleFilled className='text-violet-500 flex-shrink-0 text-sm' />
-                                        )}
-                                      </div>
-                                    ))}
-                                  {(connectorsList || []).filter(
-                                    (c: ConnectorInstance) =>
-                                      c.status === 'active' &&
-                                      (!connectorSearchQuery ||
-                                        c.display_name.toLowerCase().includes(connectorSearchQuery.toLowerCase()) ||
-                                        c.connector_type.toLowerCase().includes(connectorSearchQuery.toLowerCase())),
-                                  ).length === 0 && (
-                                    <div className='text-center py-8 text-gray-400'>
-                                      <ApiOutlined className='text-2xl mb-2 opacity-50' />
-                                      <div className='text-xs'>
-                                        {connectorSearchQuery
-                                          ? t('picker_connector_no_match')
-                                          : t('picker_connector_empty')}
-                                      </div>
-                                    </div>
-                                  )}
-                                </div>
-                                <div className='border-t border-gray-100 dark:border-gray-700 px-3 py-2 flex items-center justify-between bg-gray-50/50 dark:bg-gray-900/50'>
-                                  <span className='text-[10px] text-gray-400'>
-                                    {t('picker_connector_count', {
-                                      count: (connectorsList || []).filter(
-                                        (c: ConnectorInstance) => c.status === 'active',
-                                      ).length,
-                                    })}
-                                  </span>
-                                  <Button
-                                    type='link'
-                                    size='small'
-                                    onClick={() => {
-                                      router.push('/construct/connectors');
-                                      setIsConnectorPanelOpen(false);
-                                    }}
-                                    className='text-[10px] p-0 h-auto'
-                                  >
-                                    {t('picker_manage_connector')}
-                                  </Button>
-                                </div>
-                              </div>
-                            }
-                          >
-                            <Tooltip
-                              title={
-                                selectedConnectors.length === 0
-                                  ? t('select_mcp')
-                                  : selectedConnectors.length === 1
-                                    ? t('connector_selected', { name: selectedConnectors[0].display_name })
-                                    : t('connectors_selected', {
-                                        count: selectedConnectors.length,
-                                        names: selectedConnectors.map(c => c.display_name).join('、'),
-                                      })
-                              }
-                            >
-                              <Button
-                                type='text'
-                                shape='circle'
-                                size='small'
-                                className={`relative flex items-center justify-center flex-shrink-0 transition-all ${
-                                  selectedConnectors.length > 0
-                                    ? 'bg-gradient-to-br from-[#8b5cf6] to-[#6366f1] text-white border border-transparent shadow-[0_2px_4px_rgba(139,92,246,0.3),inset_0_1px_0_rgba(255,255,255,0.3)] hover:-translate-y-[0.5px] hover:shadow-[0_4px_8px_rgba(139,92,246,0.4),inset_0_1px_0_rgba(255,255,255,0.3)]'
-                                    : 'text-gray-500 hover:text-violet-600 bg-gradient-to-b from-white to-gray-50 dark:from-[#2a2b2f] dark:to-[#1e1f24] dark:text-gray-300 border border-gray-200/80 dark:border-white/10 shadow-[0_1px_2px_rgba(0,0,0,0.05),inset_0_1px_0_rgba(255,255,255,1)] dark:shadow-[0_1px_2px_rgba(0,0,0,0.2),inset_0_1px_0_rgba(255,255,255,0.05)] hover:-translate-y-[0.5px] hover:shadow-[0_2px_4px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,1)] dark:hover:border-white/20'
-                                }`}
-                              >
-                                <div className='relative'>
-                                  <ApiOutlined className={selectedConnectors.length > 0 ? 'text-white' : ''} />
-                                  {selectedConnectors.length > 0 && (
-                                    <span className='absolute -top-1.5 -right-1.5 bg-white text-violet-600 text-[8px] rounded-full w-3.5 h-3.5 flex items-center justify-center font-bold shadow-sm ring-1 ring-violet-500/30'>
-                                      {selectedConnectors.length}
-                                    </span>
-                                  )}
-                                </div>
-                              </Button>
-                            </Tooltip>
-                          </Popover>
-
-                          {/* Database Selector Popover - Blue themed */}
-                          <Popover
-                            trigger='click'
-                            placement='topLeft'
-                            open={isDbPanelOpen}
-                            onOpenChange={setIsDbPanelOpen}
-                            overlayClassName='manus-database-menu'
-                            overlayInnerStyle={{ padding: 0, borderRadius: 12 }}
-                            content={
-                              <div className='w-[320px] bg-white dark:bg-[#2c2d31] rounded-xl shadow-xl overflow-hidden'>
-                                <div className='p-3 border-b border-gray-100 dark:border-gray-700'>
-                                  <Input
-                                    placeholder={t('search_database')}
-                                    prefix={<SearchOutlined className='text-gray-400' />}
-                                    value={dbSearchQuery}
-                                    onChange={e => setDbSearchQuery(e.target.value)}
-                                    className='rounded-lg'
-                                    allowClear
-                                    size='small'
-                                  />
-                                </div>
-                                <div className='max-h-[300px] overflow-y-auto'>
-                                  {(dataSources || [])
-                                    .filter(
-                                      ds =>
-                                        !dbSearchQuery ||
-                                        ds.db_name.toLowerCase().includes(dbSearchQuery.toLowerCase()) ||
-                                        ds.type.toLowerCase().includes(dbSearchQuery.toLowerCase()) ||
-                                        (ds.description &&
-                                          ds.description.toLowerCase().includes(dbSearchQuery.toLowerCase())),
-                                    )
-                                    .map(ds => (
-                                      <div
-                                        key={ds.id}
-                                        onClick={() => {
-                                          setSelectedDb(ds);
-                                          setIsDbPanelOpen(false);
-                                          setDbSearchQuery('');
-                                        }}
-                                        className={`flex items-start gap-3 px-3 py-2.5 cursor-pointer transition-all hover:bg-gray-50 dark:hover:bg-gray-800 ${
-                                          selectedDb?.id === ds.id ? 'bg-blue-50 dark:bg-blue-900/20' : ''
-                                        }`}
-                                      >
-                                        <div className='flex-shrink-0 w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-white text-xs'>
-                                          {getDbIcon(ds.type)}
-                                        </div>
-                                        <div className='flex-1 min-w-0'>
-                                          <div className='flex items-center gap-2'>
-                                            <span className='font-medium text-sm text-gray-800 dark:text-gray-200'>
-                                              {ds.db_name}
-                                            </span>
-                                            <span className='text-[10px] text-gray-400 bg-gray-100 dark:bg-gray-700 rounded px-1.5 py-0.5'>
-                                              {ds.type}
-                                            </span>
-                                          </div>
-                                          {ds.description && (
-                                            <p className='text-xs text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-2'>
-                                              {ds.description}
-                                            </p>
-                                          )}
-                                        </div>
-                                        {selectedDb?.id === ds.id && (
-                                          <CheckCircleFilled className='text-blue-500 flex-shrink-0 text-sm' />
-                                        )}
-                                      </div>
-                                    ))}
-                                  {(dataSources || []).filter(
-                                    ds =>
-                                      !dbSearchQuery ||
-                                      ds.db_name.toLowerCase().includes(dbSearchQuery.toLowerCase()) ||
-                                      ds.type.toLowerCase().includes(dbSearchQuery.toLowerCase()) ||
-                                      (ds.description &&
-                                        ds.description.toLowerCase().includes(dbSearchQuery.toLowerCase())),
-                                  ).length === 0 && (
-                                    <div className='text-center py-8 text-gray-400'>
-                                      <DatabaseOutlined className='text-2xl mb-2 opacity-50' />
-                                      <div className='text-xs'>
-                                        {dbSearchQuery ? t('picker_database_no_match') : t('picker_database_empty')}
-                                      </div>
-                                    </div>
-                                  )}
-                                </div>
-                                <div className='border-t border-gray-100 dark:border-gray-700 px-3 py-2 flex items-center justify-between bg-gray-50/50 dark:bg-gray-900/50'>
-                                  <span className='text-[10px] text-gray-400'>
-                                    {t('picker_database_count', { count: (dataSources || []).length })}
-                                  </span>
-                                  <Button
-                                    type='link'
-                                    size='small'
-                                    onClick={() => {
-                                      router.push('/construct/database');
-                                      setIsDbPanelOpen(false);
-                                    }}
-                                    className='text-[10px] p-0 h-auto'
-                                  >
-                                    {t('picker_manage_database')}
-                                  </Button>
-                                </div>
-                              </div>
-                            }
-                          >
-                            <Tooltip
-                              title={
-                                selectedDb ? t('database_selected', { name: selectedDb.db_name }) : t('select_database')
-                              }
-                            >
-                              <Button
-                                type='text'
-                                shape='circle'
-                                size='small'
-                                className={`relative flex items-center justify-center flex-shrink-0 transition-all ${
-                                  selectedDb
-                                    ? 'bg-gradient-to-br from-blue-400 to-blue-600 text-white border border-transparent shadow-[0_2px_4px_rgba(59,130,246,0.3),inset_0_1px_0_rgba(255,255,255,0.3)] hover:-translate-y-[0.5px] hover:shadow-[0_4px_8px_rgba(59,130,246,0.4),inset_0_1px_0_rgba(255,255,255,0.3)]'
-                                    : 'text-gray-500 hover:text-blue-600 bg-gradient-to-b from-white to-gray-50 dark:from-[#2a2b2f] dark:to-[#1e1f24] dark:text-gray-300 border border-gray-200/80 dark:border-white/10 shadow-[0_1px_2px_rgba(0,0,0,0.05),inset_0_1px_0_rgba(255,255,255,1)] dark:shadow-[0_1px_2px_rgba(0,0,0,0.2),inset_0_1px_0_rgba(255,255,255,0.05)] hover:-translate-y-[0.5px] hover:shadow-[0_2px_4px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,1)] dark:hover:border-white/20'
-                                }`}
-                              >
-                                <div className='relative'>
-                                  <DatabaseOutlined className={selectedDb ? 'text-white' : ''} />
-                                  {selectedDb && (
-                                    <span className='absolute -top-1.5 -right-1.5 bg-white text-blue-600 text-[8px] rounded-full w-3.5 h-3.5 flex items-center justify-center font-bold shadow-sm ring-1 ring-blue-400/30'>
-                                      1
-                                    </span>
-                                  )}
-                                </div>
-                              </Button>
-                            </Tooltip>
-                          </Popover>
-
-                          {/* Knowledge Base Selector - Orange themed */}
-                          <Popover
-                            trigger='click'
-                            placement='topLeft'
-                            open={isKnowledgePanelOpen}
-                            onOpenChange={setIsKnowledgePanelOpen}
-                            overlayClassName='manus-knowledge-menu'
-                            overlayInnerStyle={{ padding: 0, borderRadius: 12 }}
-                            content={
-                              <div className='w-[320px] bg-white dark:bg-[#2c2d31] rounded-xl shadow-xl overflow-hidden'>
-                                <div className='p-3 border-b border-gray-100 dark:border-gray-700'>
-                                  <Input
-                                    placeholder={t('search_knowledge')}
-                                    prefix={<SearchOutlined className='text-gray-400' />}
-                                    value={knowledgeSearchQuery}
-                                    onChange={e => setKnowledgeSearchQuery(e.target.value)}
-                                    className='rounded-lg'
-                                    allowClear
-                                    size='small'
-                                  />
-                                </div>
-                                <div className='max-h-[300px] overflow-y-auto'>
-                                  {(knowledgeSpaces || [])
-                                    .filter(
-                                      space =>
-                                        !knowledgeSearchQuery ||
-                                        space.name.toLowerCase().includes(knowledgeSearchQuery.toLowerCase()) ||
-                                        (space.desc &&
-                                          space.desc.toLowerCase().includes(knowledgeSearchQuery.toLowerCase())),
-                                    )
-                                    .map(space => (
-                                      <div
-                                        key={space.id}
-                                        onClick={() => {
-                                          setSelectedKnowledge(space);
-                                          setIsKnowledgePanelOpen(false);
-                                          setKnowledgeSearchQuery('');
-                                        }}
-                                        className={`flex items-start gap-3 px-3 py-2.5 cursor-pointer transition-all hover:bg-gray-50 dark:hover:bg-gray-800 ${
-                                          selectedKnowledge?.id === space.id ? 'bg-orange-50 dark:bg-orange-900/20' : ''
-                                        }`}
-                                      >
-                                        <div className='flex-shrink-0 w-7 h-7 rounded-lg bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center text-white text-xs'>
-                                          <BookOutlined />
-                                        </div>
-                                        <div className='flex-1 min-w-0'>
-                                          <div className='flex items-center gap-2'>
-                                            <span className='font-medium text-sm text-gray-800 dark:text-gray-200'>
-                                              {space.name}
-                                            </span>
-                                          </div>
-                                          {space.desc && (
-                                            <p className='text-xs text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-2'>
-                                              {space.desc}
-                                            </p>
-                                          )}
-                                        </div>
-                                        {selectedKnowledge?.id === space.id && (
-                                          <CheckCircleFilled className='text-orange-500 flex-shrink-0 text-sm' />
-                                        )}
-                                      </div>
-                                    ))}
-                                  {(knowledgeSpaces || []).filter(
-                                    space =>
-                                      !knowledgeSearchQuery ||
-                                      space.name.toLowerCase().includes(knowledgeSearchQuery.toLowerCase()) ||
-                                      (space.desc &&
-                                        space.desc.toLowerCase().includes(knowledgeSearchQuery.toLowerCase())),
-                                  ).length === 0 && (
-                                    <div className='text-center py-8 text-gray-400'>
-                                      <BookOutlined className='text-2xl mb-2 opacity-50' />
-                                      <div className='text-xs'>
-                                        {knowledgeSearchQuery
-                                          ? t('picker_knowledge_no_match')
-                                          : t('picker_knowledge_empty')}
-                                      </div>
-                                    </div>
-                                  )}
-                                </div>
-                                <div className='border-t border-gray-100 dark:border-gray-700 px-3 py-2 flex items-center justify-between bg-gray-50/50 dark:bg-gray-900/50'>
-                                  <span className='text-[10px] text-gray-400'>
-                                    {t('picker_knowledge_count', { count: (knowledgeSpaces || []).length })}
-                                  </span>
-                                  <Button
-                                    type='link'
-                                    size='small'
-                                    onClick={() => {
-                                      router.push('/knowledge');
-                                      setIsKnowledgePanelOpen(false);
-                                    }}
-                                    className='text-[10px] p-0 h-auto'
-                                  >
-                                    {t('picker_manage_knowledge')}
-                                  </Button>
-                                </div>
-                              </div>
-                            }
-                          >
-                            <Tooltip
-                              title={
-                                selectedKnowledge
-                                  ? t('knowledge_selected', { name: selectedKnowledge.name })
-                                  : t('select_knowledge')
-                              }
-                            >
-                              <Button
-                                type='text'
-                                shape='circle'
-                                size='small'
-                                className={`relative flex items-center justify-center flex-shrink-0 transition-all ${
-                                  selectedKnowledge
-                                    ? 'bg-gradient-to-br from-orange-400 to-orange-600 text-white border border-transparent shadow-[0_2px_4px_rgba(249,115,22,0.3),inset_0_1px_0_rgba(255,255,255,0.3)] hover:-translate-y-[0.5px] hover:shadow-[0_4px_8px_rgba(249,115,22,0.4),inset_0_1px_0_rgba(255,255,255,0.3)]'
-                                    : 'text-gray-500 hover:text-orange-600 bg-gradient-to-b from-white to-gray-50 dark:from-[#2a2b2f] dark:to-[#1e1f24] dark:text-gray-300 border border-gray-200/80 dark:border-white/10 shadow-[0_1px_2px_rgba(0,0,0,0.05),inset_0_1px_0_rgba(255,255,255,1)] dark:shadow-[0_1px_2px_rgba(0,0,0,0.2),inset_0_1px_0_rgba(255,255,255,0.05)] hover:-translate-y-[0.5px] hover:shadow-[0_2px_4px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,1)] dark:hover:border-white/20'
-                                }`}
-                              >
-                                <div className='relative'>
-                                  <BookOutlined className={selectedKnowledge ? 'text-white' : ''} />
-                                  {selectedKnowledge && (
-                                    <span className='absolute -top-1.5 -right-1.5 bg-white text-orange-600 text-[8px] rounded-full w-3.5 h-3.5 flex items-center justify-center font-bold shadow-sm ring-1 ring-orange-400/30'>
-                                      1
-                                    </span>
-                                  )}
-                                </div>
-                              </Button>
-                            </Tooltip>
-                          </Popover>
                         </div>
 
                         <div className='flex items-center gap-3'>
+                          <ContextUsageBar
+                            used={contextStatus.used_tokens}
+                            budget={contextStatus.max_tokens}
+                            ratio={contextStatus.usage_percent / 100}
+                            state={contextStatus.state}
+                            compactLayer={contextStatus.layer}
+                            variant='compact'
+                            className='mr-0.5'
+                          />
+
                           {/* Send Button with blue gradient + gloss */}
                           <Button
                             type='primary'
                             shape='circle'
                             size='large'
-                            icon={<ArrowUpOutlined />}
-                            onClick={() => handleStart()}
-                            disabled={(!query.trim() && !uploadedFile) || loading}
-                            loading={loading}
+                            icon={loading ? <StopOutlined /> : <ArrowUpOutlined />}
+                            onClick={() => (loading ? handleCancelRun() : handleStart())}
+                            disabled={!loading && !query.trim() && !uploadedFile}
                             className={`group/send relative overflow-hidden border-none shadow-lg transition-all duration-200 ${
-                              query.trim() || uploadedFile
-                                ? 'bg-gradient-to-br from-[#3b82f6] to-[#2563eb] hover:shadow-blue-300/40 hover:shadow-xl hover:scale-105'
-                                : 'bg-gray-200 text-gray-400'
+                              loading
+                                ? 'bg-gradient-to-br from-[#ef4444] to-[#dc2626] hover:shadow-red-300/40 hover:shadow-xl hover:scale-105'
+                                : query.trim() || uploadedFile
+                                  ? 'bg-gradient-to-br from-[#3b82f6] to-[#2563eb] hover:shadow-blue-300/40 hover:shadow-xl hover:scale-105'
+                                  : 'bg-gray-200 text-gray-400'
                             }`}
                             style={
-                              query.trim() || uploadedFile
-                                ? { background: 'linear-gradient(135deg, #3b82f6, #2563eb)' }
-                                : undefined
+                              loading
+                                ? { background: 'linear-gradient(135deg, #ef4444, #dc2626)' }
+                                : query.trim() || uploadedFile
+                                  ? { background: 'linear-gradient(135deg, #3b82f6, #2563eb)' }
+                                  : undefined
                             }
                           >
-                            {(query.trim() || uploadedFile) && (
+                            {(loading || query.trim() || uploadedFile) && (
                               <span
                                 className='absolute inset-0 opacity-0 group-hover/send:opacity-100 transition-opacity duration-300 pointer-events-none'
                                 style={{
@@ -3897,97 +3647,6 @@ const Playground: NextPage = () => {
             </div>
           )}
         </div>
-
-        {/* Database Selection Modal */}
-        <Modal
-          title={
-            <div className='flex items-center gap-2'>
-              <DatabaseOutlined />
-              Select Data Source
-            </div>
-          }
-          open={isDbModalOpen}
-          onCancel={() => setIsDbModalOpen(false)}
-          footer={null}
-          width={500}
-        >
-          <List
-            itemLayout='horizontal'
-            dataSource={dataSources || []}
-            renderItem={(item: DataSource) => (
-              <List.Item
-                className={`cursor-pointer hover:bg-gray-50 rounded-lg px-2 transition-colors ${selectedDb?.id === item.id ? 'bg-blue-50' : ''}`}
-                onClick={() => {
-                  setSelectedDb(item);
-                  setIsDbModalOpen(false);
-                }}
-                actions={[selectedDb?.id === item.id && <CheckCircleFilled className='text-blue-500' />]}
-              >
-                <List.Item.Meta
-                  avatar={<div className='mt-1 bg-gray-100 p-2 rounded-lg'>{getDbIcon(item.type)}</div>}
-                  title={item.db_name}
-                  description={<span className='text-xs text-gray-400'>{item.type}</span>}
-                />
-              </List.Item>
-            )}
-            locale={{ emptyText: 'No data sources found' }}
-          />
-          <div className='mt-4 pt-4 border-t border-gray-100 text-center'>
-            <Button type='dashed' block icon={<PlusOutlined />} onClick={() => router.push('/construct/database')}>
-              Add New Data Source
-            </Button>
-          </div>
-        </Modal>
-
-        {/* Knowledge Base Selection Modal */}
-        <Modal
-          title={
-            <div className='flex items-center gap-2'>
-              <BookOutlined />
-              Select Knowledge Base
-            </div>
-          }
-          open={isKnowledgeModalOpen}
-          onCancel={() => setIsKnowledgeModalOpen(false)}
-          footer={null}
-          width={500}
-        >
-          <List
-            itemLayout='horizontal'
-            dataSource={knowledgeSpaces || []}
-            renderItem={(item: KnowledgeSpace) => (
-              <List.Item
-                className={`cursor-pointer hover:bg-gray-50 rounded-lg px-2 transition-colors ${selectedKnowledge?.id === item.id ? 'bg-orange-50' : ''}`}
-                onClick={() => {
-                  setSelectedKnowledge(item);
-                  setIsKnowledgeModalOpen(false);
-                }}
-                actions={[selectedKnowledge?.id === item.id && <CheckCircleFilled className='text-orange-500' />]}
-              >
-                <List.Item.Meta
-                  avatar={
-                    <div className='mt-1 bg-gray-100 p-2 rounded-lg'>
-                      <ReadOutlined className='text-orange-500' />
-                    </div>
-                  }
-                  title={item.name}
-                  description={<span className='text-xs text-gray-400'>{item.vector_type}</span>}
-                />
-              </List.Item>
-            )}
-            locale={{ emptyText: 'No knowledge bases found' }}
-          />
-          <div className='mt-4 pt-4 border-t border-gray-100 text-center'>
-            <Button type='dashed' block icon={<PlusOutlined />} onClick={() => router.push('/construct/knowledge')}>
-              Add New Knowledge Base
-            </Button>
-          </div>
-        </Modal>
-        <SaveAsScheduledTaskDrawer
-          open={isScheduleOpen}
-          onClose={() => setScheduleOpen(false)}
-          snapshot={buildSnapshot()}
-        />
         <ConfirmDialog confirmation={pendingConfirmation} onApprove={approve} onDeny={deny} onDismiss={dismiss} />
       </div>
     </ConfigProvider>

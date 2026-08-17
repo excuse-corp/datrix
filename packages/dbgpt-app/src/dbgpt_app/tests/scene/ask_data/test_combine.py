@@ -14,7 +14,7 @@ from dbgpt_app.scene.ask_data.schemas.snapshot import (
 from dbgpt_app.scene.ask_data.visualization import ChartSpecBuilder
 
 
-def _snapshot(scene_id: str, *, common_keys=None, derived=None) -> Snapshot:
+def _snapshot(scene_id: str) -> Snapshot:
     return Snapshot(
         snapshot_id=f"snap_{scene_id}",
         scene_id=scene_id,
@@ -28,9 +28,11 @@ def _snapshot(scene_id: str, *, common_keys=None, derived=None) -> Snapshot:
         ),
         routing_projection={},
         runtime_config={
-            "common_keys": common_keys or ["department"],
-            "metrics": [{"key": "amount", "name": "Amount", "unit": "元"}],
-            "derived_metrics": derived or [],
+            "query_model": {
+                "metrics": [{"key": "amount", "name": "Amount", "unit": "元"}],
+                "dimensions": [{"key": "department", "field": "department"}],
+                "time": {},
+            },
         },
         created_at=datetime.now(timezone.utc),
     )
@@ -92,22 +94,11 @@ def test_incompatible_results_fall_back_to_separate():
     assert any(item["code"] == "TRUNCATED_RESULT" for item in result.warnings)
 
 
-def test_derived_ratio_uses_decimal_and_zero_division_returns_null():
+def test_scene_snapshots_do_not_drive_derived_metric_calculation():
     first = _result("contracts", [{"department": "D1", "amount": Decimal("100")}])
     second = _result("receipts", [{"department": "D1", "amount": Decimal("40")}])
     snapshots = {
-        "contracts": _snapshot(
-            "contracts",
-            derived=[
-                {
-                    "key": "rate",
-                    "operation": "ratio",
-                    "numerator": "amount",
-                    "denominator": "amount",
-                    "unit": "%",
-                }
-            ],
-        ),
+        "contracts": _snapshot("contracts"),
         "receipts": _snapshot("receipts"),
     }
     result = ResultCombiner().combine(
@@ -118,8 +109,8 @@ def test_derived_ratio_uses_decimal_and_zero_division_returns_null():
         derived_metrics=["rate"],
     )
 
-    assert result.rows[0]["rate"] == Decimal("1")
-    assert result.columns[-1].type == "derived_metric"
+    assert "rate" not in result.rows[0]
+    assert any(item["code"] == "DERIVED_METRIC_SKIPPED" for item in result.warnings)
 
 
 def test_chart_builder_selects_metric_bar_and_table_fallback():

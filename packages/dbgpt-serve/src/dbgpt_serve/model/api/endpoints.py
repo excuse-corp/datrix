@@ -6,7 +6,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security.http import HTTPAuthorizationCredentials, HTTPBearer
 
 from dbgpt.component import SystemApp
+from dbgpt.model.base import WorkerApplyType
 from dbgpt.model.cluster import (
+    WorkerApplyRequest,
     WorkerManager,
     WorkerManagerFactory,
     WorkerStartupRequest,
@@ -140,9 +142,16 @@ async def model_params(worker_manager: WorkerManager = Depends(get_worker_manage
 
 
 @router.get("/models")
-async def model_list(controller: BaseModelController = Depends(get_model_controller)):
+async def model_list(
+    controller: BaseModelController = Depends(get_model_controller),
+):
     try:
         responses = []
+        model_storage = None
+        try:
+            model_storage = get_model_storage()
+        except Exception as e:
+            logger.debug("Model storage is unavailable when listing models: %s", e)
         managers = await controller.get_all_instances(
             model_name="WorkerManager@service", healthy_only=True
         )
@@ -151,6 +160,30 @@ async def model_list(controller: BaseModelController = Depends(get_model_control
         for model in models:
             worker_name, worker_type = model.model_name.split("@")
             if worker_type in WorkerType.values():
+                stored_params = None
+                provider = None
+                if model_storage:
+                    try:
+                        stored_models = model_storage.query_models(
+                            worker_name,
+                            worker_type,
+                            host=model.host,
+                            port=model.port,
+                        )
+                        if not stored_models:
+                            stored_models = model_storage.query_models(
+                                worker_name, worker_type
+                            )
+                        if len(stored_models) == 1:
+                            stored_params = stored_models[0].params
+                            provider = stored_params.get("provider")
+                    except Exception as e:
+                        logger.debug(
+                            "Fetch stored params for model %s@%s failed: %s",
+                            worker_name,
+                            worker_type,
+                            e,
+                        )
                 manager_host = model.host if manager_map.get(model.host) else ""
                 manager_port = (
                     manager_map[model.host].port if manager_map.get(model.host) else -1
@@ -166,6 +199,8 @@ async def model_list(controller: BaseModelController = Depends(get_model_control
                     check_healthy=model.check_healthy,
                     last_heartbeat=model.str_last_heartbeat,
                     prompt_template=model.prompt_template,
+                    provider=provider,
+                    params=stored_params,
                 )
                 responses.append(response)
         return Result.succ(responses)
@@ -203,6 +238,48 @@ async def create_model(
     except Exception as e:
         logger.error(f"model start failed {e}")
         return Result.failed(err_code="E000X", msg=f"model start failed {e}")
+
+
+@router.put("/models")
+async def update_model(
+    request: WorkerStartupRequest,
+    worker_manager: WorkerManager = Depends(get_worker_manager),
+    model_storage: ModelStorage = Depends(get_model_storage),
+):
+    """Update an existing model's startup params.
+
+    If the model is running, apply the new params and restart only when the worker
+    indicates a restart is required. The persisted startup config is updated in
+    both running and stopped cases.
+    """
+    try:
+        worker_type = request.worker_type.value
+        stored_models = model_storage.query_models(request.model, worker_type)
+        existing_workers = await worker_manager.get_model_instances(
+            worker_type, request.model, healthy_only=False
+        )
+        if not stored_models and not existing_workers:
+            return Result.failed(err_code="E000X", msg="model not found")
+
+        if existing_workers:
+            apply_req = WorkerApplyRequest(
+                model=request.model,
+                apply_type=WorkerApplyType.UPDATE_PARAMS,
+                worker_type=request.worker_type,
+                params=request.params,
+            )
+            out = await worker_manager.worker_apply(apply_req)
+            if not out.success:
+                return Result.failed(err_code="E000X", msg=out.message)
+
+        if existing_workers:
+            request.host = existing_workers[0].host
+            request.port = existing_workers[0].port
+        model_storage.save_or_update(request)
+        return Result.succ(True)
+    except Exception as e:
+        logger.error(f"model update failed {e}")
+        return Result.failed(err_code="E000X", msg=f"model update failed {e}")
 
 
 @router.post("/models/start")

@@ -12,6 +12,7 @@ from dbgpt_app.scene.ask_data.snapshot import (
     SceneAgentRegistry,
     SnapshotBuilder,
 )
+from dbgpt_app.scene.ask_data.query.capabilities import query_dimensions, query_metrics
 
 DOCUMENT = """---
 schema_version: "1"
@@ -102,7 +103,23 @@ def test_snapshot_build_is_deterministic_and_redacts_physical_fields_from_routin
     assert "field" not in str(first.routing_projection)
     assert "metrics" not in first.routing_projection
     assert "dimensions" not in first.routing_projection
-    assert first.runtime_config["metrics"][0]["field"] == "contract_amount"
+    assert first.schema_version == "2"
+    assert first.runtime_config["schema_version"] == "2"
+    assert first.runtime_config["documents"]["semantic_md"] == DOCUMENT
+    assert first.runtime_config["documents"]["semantic_md_hash"] == (
+        first.source_hashes.semantic_hash
+    )
+    assert query_metrics(first)[0]["field"] == "contract_amount"
+    for legacy_key in (
+        "query_model",
+        "dimensions",
+        "metrics",
+        "time",
+        "grain",
+        "common_keys",
+        "derived_metrics",
+    ):
+        assert legacy_key not in first.runtime_config
 
 
 def test_snapshot_keeps_both_full_scene_documents_in_runtime_context():
@@ -137,7 +154,7 @@ Contract amount excludes tax.
     )
 
 
-def test_snapshot_derives_query_capabilities_from_schema_without_query_model():
+def test_snapshot_derives_query_capabilities_from_schema_without_structured_yaml():
     snapshot = SnapshotBuilder().build(
         scene_id="contracts",
         revision_id="rev-pure-semantics",
@@ -145,12 +162,12 @@ def test_snapshot_derives_query_capabilities_from_schema_without_query_model():
         view_schema=_schema(),
     )
 
-    assert {item["key"] for item in snapshot.runtime_config["dimensions"]} >= {
+    assert {item["key"] for item in query_dimensions(snapshot)} >= {
         "department_id",
         "contract_amount",
         "signed_date",
     }
-    assert {item["key"] for item in snapshot.runtime_config["metrics"]} >= {
+    assert {item["key"] for item in query_metrics(snapshot)} >= {
         "count_rows",
         "sum_contract_amount",
         "count_distinct_contract_amount",

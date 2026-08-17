@@ -196,11 +196,22 @@ def configure_sql_ask_data_services(
     # Keep the global Ontology in the same metadata database as Scene and run
     # records.  This also makes the RouterAgent created below use its active
     # immutable Snapshot rather than the process-local fallback.
-    from .ontology import configure_ontology_service
     from ..ontology.repository import SqlOntologyRepository
-    from ..ontology.service import OntologyLifecycleService
+    from ..ontology.service import (
+        OntologyLifecycleService,
+        _default_ontology_llm_generator,
+    )
+    from .ontology import configure_ontology_service, get_ontology_service
 
-    configure_ontology_service(OntologyLifecycleService(SqlOntologyRepository(db_manager)))
+    configure_ontology_service(
+        OntologyLifecycleService(
+            SqlOntologyRepository(db_manager),
+            llm_generator=_default_ontology_llm_generator(),
+        )
+    )
+    bundle.orchestrator.ontology_snapshot_provider = (
+        get_ontology_service().active_snapshot
+    )
     return bundle
 
 
@@ -267,11 +278,13 @@ def get_run_service():
         from ..query_service import SceneQueryService
         from ..run_service import RunExecutionService
         from ..snapshot.registry import SceneAgentRegistry
+        from .ontology import get_ontology_service
 
         registry = SceneAgentRegistry(_snapshot_service)
         orchestrator = AskDataOrchestrator(
             PlanValidator(registry),
             SceneQueryService(),
+            ontology_snapshot_provider=get_ontology_service().active_snapshot,
         )
         _run_service = RunExecutionService(orchestrator)
     return _run_service
@@ -281,8 +294,8 @@ def get_router_agent():
     global _router_agent
     if _router_agent is None:
         from ..agents.router import RouterAgent
-        from .ontology import get_ontology_service
         from ..snapshot.registry import SceneAgentRegistry
+        from .ontology import get_ontology_service
 
         _router_agent = RouterAgent(
             SceneAgentRegistry(_snapshot_service),
@@ -306,6 +319,12 @@ class SceneSummary(BaseModel):
     updated_at: str
 
 
+class ActiveSnapshotRebuildRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scene_ids: list[str] = Field(default_factory=list)
+
+
 def get_scene_service() -> SceneLifecycleService:
     return _service
 
@@ -325,7 +344,9 @@ def _default_engine_resolver(data_source: str):
             engine = getattr(connector, attr, None)
             if engine is not None:
                 return engine
-        errors.append(f"connector {type(connector).__name__} exposes no SQLAlchemy engine")
+        errors.append(
+            f"connector {type(connector).__name__} exposes no SQLAlchemy engine"
+        )
     except Exception as exc:
         errors.append(f"{type(exc).__name__}: {exc}")
     suffix = f": {'; '.join(errors)}" if errors else ""
@@ -1141,12 +1162,16 @@ async def reply_query(
         )
     from ..schemas.plan import MainAgentPlan
 
+    reply_question = f"{existing.question}\n补充信息：{request.answer or request.question}"
+    sql_by_task = None
     try:
         if request.plan is not None:
             plan = MainAgentPlan.model_validate(request.plan)
         else:
-            plan = get_router_agent().route(
-                f"{existing.question}\n补充信息：{request.answer or request.question}"
+            plan, sql_by_task = await _build_sql_agent_plan(
+                question=reply_question,
+                principal=principal,
+                max_agents=10,
             )
     except ValueError as exc:
         raise HTTPException(
@@ -1155,15 +1180,14 @@ async def reply_query(
         ) from exc
     try:
         query, result = await service.execute(
-            question=(
-                f"{existing.question}\n补充信息："
-                f"{request.answer or request.question}"
-            ),
+            question=reply_question,
             plan=plan,
             user_id=principal.user_id,
             request_id=request_id_header or _request_id(),
             engine_resolver=_default_engine_resolver,
             query_id=query_id,
+            max_agents=10,
+            sql_by_task=sql_by_task,
         )
     except ValueError as exc:
         raise _execution_http_error(exc) from exc
@@ -1533,6 +1557,35 @@ def list_routing_projections(
             "registry_version": f"reg_{service.snapshot_service.registry_version}",
             "max_agents_per_query": 10,
             "items": [item.routing_projection for item in projections],
+        },
+    }
+
+
+@router.post("/snapshots/rebuild-active")
+def rebuild_active_snapshots(
+    request: ActiveSnapshotRebuildRequest | None = None,
+    service: ScenePublishService = Depends(get_publish_service),
+    principal: AskDataPrincipal = Depends(get_principal),
+):
+    _require_admin(principal)
+    scene_ids = request.scene_ids if request is not None else []
+    for scene_id in scene_ids:
+        _require_scene_access(principal, scene_id)
+    results, registry_version = service.rebuild_active_snapshots(scene_ids or None)
+    failed = [item for item in results if item.get("status") == "failed"]
+    return {
+        "request_id": _request_id(),
+        "status": "partial_succeeded" if failed else "succeeded",
+        "data": {
+            "items": results,
+            "rebuilt_count": sum(
+                1 for item in results if item.get("status") == "rebuilt"
+            ),
+            "unchanged_count": sum(
+                1 for item in results if item.get("status") == "unchanged"
+            ),
+            "failed_count": len(failed),
+            "registry_version": f"reg_{registry_version}",
         },
     }
 

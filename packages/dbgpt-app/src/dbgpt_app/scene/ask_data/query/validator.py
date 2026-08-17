@@ -5,6 +5,7 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict
 
 from ..schemas.snapshot import Snapshot
+from .capabilities import build_query_capabilities
 from .query_spec import QuerySpec
 
 
@@ -24,10 +25,10 @@ class QuerySpecValidationError(ValueError):
 
 class QuerySpecValidator:
     def validate(self, spec: QuerySpec, snapshot: Snapshot) -> None:
-        runtime = snapshot.runtime_config
-        dimensions = {item["key"]: item for item in runtime.get("dimensions", [])}
-        metrics = {item["key"]: item for item in runtime.get("metrics", [])}
-        named_filters = {item["key"]: item for item in runtime.get("named_filters", [])}
+        capabilities = build_query_capabilities(snapshot)
+        dimensions = {item["key"]: item for item in capabilities.dimensions}
+        metrics = {item["key"]: item for item in capabilities.metrics}
+        filters = {item["key"]: item for item in capabilities.named_filters}
         issues: list[QuerySpecIssue] = []
 
         def issue(code: str, path: str, message: str) -> None:
@@ -53,7 +54,7 @@ class QuerySpecValidator:
                 issue(
                     "METRIC_NOT_ALLOWED", f"metrics[{index}]", f"Unknown metric: {key}"
                 )
-        time_config = runtime.get("time", {})
+        time_config = capabilities.time
         if spec.time_grain and spec.time_grain not in time_config.get(
             "granularities", []
         ):
@@ -65,7 +66,7 @@ class QuerySpecValidator:
         if time_config.get("required") and spec.time_range is None:
             issue("TIME_RANGE_REQUIRED", "time_range", "A time range is required")
         for index, key in enumerate(spec.named_filters):
-            if key not in named_filters:
+            if key not in filters:
                 issue(
                     "FILTER_NOT_ALLOWED",
                     f"named_filters[{index}]",
@@ -99,7 +100,7 @@ class QuerySpecValidator:
                     f"order_by[{index}].direction",
                     "Direction must be asc or desc",
                 )
-        max_rows = runtime.get("query_limits", {}).get("max_rows", 1000)
+        max_rows = capabilities.query_limits.get("max_rows", 1000)
         if spec.limit > max_rows:
             issue("LIMIT_EXCEEDED", "limit", f"Limit cannot exceed {max_rows}")
         if issues:

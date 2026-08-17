@@ -9,6 +9,7 @@ from typing import Any
 from sqlalchemy import MetaData, Table, asc, bindparam, column, desc, func, select
 
 from ..schemas.snapshot import Snapshot
+from .capabilities import build_query_capabilities
 from .query_spec import QuerySpec
 from .validator import QuerySpecValidator
 
@@ -39,11 +40,12 @@ class QuerySpecCompiler:
     def compile(self, spec: QuerySpec, snapshot: Snapshot) -> CompiledQuery:
         self.validator.validate(spec, snapshot)
         runtime = snapshot.runtime_config
+        capabilities = build_query_capabilities(snapshot)
         view_name = runtime["view"]
         schema, _, table_name = view_name.rpartition(".")
         table = Table(table_name or schema, MetaData(), schema=schema or None)
-        dimensions = {item["key"]: item for item in runtime.get("dimensions", [])}
-        metrics = {item["key"]: item for item in runtime.get("metrics", [])}
+        dimensions = {item["key"]: item for item in capabilities.dimensions}
+        metrics = {item["key"]: item for item in capabilities.metrics}
         selected_keys: list[str] = []
         selections = []
         for key in spec.dimensions:
@@ -72,7 +74,7 @@ class QuerySpecCompiler:
         statement = select(*selections).select_from(table)
         parameters: dict[str, Any] = {}
         conditions = []
-        time_config = runtime.get("time", {})
+        time_config = capabilities.time
         if spec.time_range and time_config.get("field"):
             time_field = column(time_config["field"], _selectable=table)
             start_name, end_name = "p_time_start", "p_time_end"
@@ -125,7 +127,7 @@ class QuerySpecCompiler:
                 if item.direction.lower() == "desc"
                 else asc(expression)
             )
-        max_rows = runtime.get("query_limits", {}).get("max_rows", spec.limit)
+        max_rows = capabilities.query_limits.get("max_rows", spec.limit)
         fetch_limit = min(spec.limit + 1, max_rows + 1)
         statement = statement.limit(bindparam("p_limit", value=fetch_limit))
         parameters["p_limit"] = fetch_limit

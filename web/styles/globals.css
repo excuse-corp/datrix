@@ -273,6 +273,10 @@ table {
 }
 
 /* Industrial Archive interface mode */
+.industrial-hero-title {
+  font-family: Geist, "Noto Sans SC", "Microsoft YaHei", sans-serif;
+}
+
 [data-interface-style='industrial'] {
   --archive-surface: #fcf9f8;
   --archive-surface-dim: #dcd9d9;
@@ -671,7 +675,7 @@ table {
   max-width: 960px !important;
   margin: 0 auto;
   align-items: stretch !important;
-  gap: 28px;
+  gap: 40px;
 }
 
 [data-interface-style='industrial'] .industrial-hero-header {
@@ -692,7 +696,7 @@ table {
   justify-content: flex-start;
   border-bottom: 0;
   color: var(--archive-outline) !important;
-  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace !important;
+  font-family: Geist, "Noto Sans SC", "Microsoft YaHei", sans-serif !important;
   font-size: 24px !important;
   text-transform: none;
 }

@@ -23,7 +23,7 @@ import 'moment/locale/zh-cn';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 type RouteItem = {
@@ -35,6 +35,9 @@ type RouteItem = {
   path: string;
   isActive?: boolean;
 };
+
+const CHAT_DIALOGUE_UPSERT_EVENT = 'dataman:chat-dialogue-upsert';
+const CHAT_DIALOGUE_REFRESH_EVENT = 'dataman:chat-dialogue-refresh';
 
 function smallMenuItemStyle(active?: boolean) {
   return `flex items-center justify-center mx-auto rounded w-14 h-14 text-xl hover:bg-blue-50/50 dark:hover:bg-blue-900/10 transition-colors cursor-pointer ${
@@ -60,27 +63,33 @@ function SidebarPictureIcon({
 
 function SideBar() {
   const { isMenuExpand, setIsMenuExpand, mode, setMode } = useContext(ChatContext);
-  const { pathname } = useRouter();
+  const router = useRouter();
+  const { pathname, query } = router;
+  const activeDialogueId = Array.isArray(query.id) ? query.id[0] : query.id;
   const isSettingsActive =
     pathname.startsWith('/settings') ||
-    pathname.startsWith('/construct/app') ||
-    pathname.startsWith('/construct/flow') ||
     pathname.startsWith('/construct/prompt') ||
-    pathname.startsWith('/construct/dbgpts') ||
-    pathname.startsWith('/construct/models') ||
-    pathname.startsWith('/construct/scheduled-tasks') ||
-    pathname === '/models_evaluation';
+    pathname.startsWith('/construct/models');
   const { t, i18n } = useTranslation();
   const logo = '/datrix-brand.png';
   const [dialogueList, setDialogueList] = useState<IChatDialogueSchema[]>([]);
   const [loadingDialogues, setLoadingDialogues] = useState(false);
+  const optimisticDialoguesRef = useRef<Record<string, IChatDialogueSchema>>({});
 
   const fetchDialogueList = useCallback(async () => {
     setLoadingDialogues(true);
     try {
       const [, data] = await apiInterceptors(getDialogueList());
       if (data && Array.isArray(data)) {
-        setDialogueList(data.filter(item => item.chat_mode === 'chat_react_agent'));
+        const fetched = data.filter(item => item.chat_mode === 'chat_react_agent');
+        const fetchedIds = new Set(fetched.map(item => item.conv_uid));
+        fetchedIds.forEach(convUid => {
+          delete optimisticDialoguesRef.current[convUid];
+        });
+        const optimistic = Object.values(optimisticDialoguesRef.current).filter(
+          item => item.chat_mode === 'chat_react_agent' && !fetchedIds.has(item.conv_uid),
+        );
+        setDialogueList([...optimistic, ...fetched]);
       }
     } catch (e) {
       console.error('Failed to fetch dialogue list', e);
@@ -89,12 +98,22 @@ function SideBar() {
     }
   }, []);
 
+  const upsertDialogue = useCallback((dialogue: IChatDialogueSchema) => {
+    if (!dialogue.conv_uid) return;
+    optimisticDialoguesRef.current[dialogue.conv_uid] = dialogue;
+    setDialogueList(prev => {
+      const rest = prev.filter(item => item.conv_uid !== dialogue.conv_uid);
+      return [dialogue, ...rest];
+    });
+  }, []);
+
   const handleDeleteDialogue = useCallback(async (e: React.MouseEvent, convUid: string) => {
     e.stopPropagation();
     e.preventDefault();
     try {
       const [err] = await apiInterceptors(delDialogue(convUid));
       if (!err) {
+        delete optimisticDialoguesRef.current[convUid];
         setDialogueList(prev => prev.filter(d => d.conv_uid !== convUid));
         message.success('已删除');
       }
@@ -137,14 +156,6 @@ function SideBar() {
         activeIconSrc: '/pictures/skills_active.svg',
         path: '/construct/skills',
       },
-      {
-        key: 'knowledge',
-        name: t('knowledge'),
-        isActive: pathname.startsWith('/construct/knowledge'),
-        iconSrc: '/pictures/knowledge_sidebar.svg',
-        activeIconSrc: '/pictures/knowledge_sidebar_active.svg',
-        path: '/construct/knowledge',
-      },
     ];
     return items;
   }, [t, pathname]);
@@ -158,6 +169,32 @@ function SideBar() {
   useEffect(() => {
     fetchDialogueList();
   }, [fetchDialogueList]);
+
+  useEffect(() => {
+    const handleUpsert = (event: Event) => {
+      const detail = (event as CustomEvent<Partial<IChatDialogueSchema>>).detail;
+      if (!detail?.conv_uid) return;
+      upsertDialogue({
+        conv_uid: detail.conv_uid,
+        user_input: detail.user_input || 'New Conversation',
+        user_name: detail.user_name || '',
+        chat_mode: detail.chat_mode || 'chat_react_agent',
+        select_param: detail.select_param || '',
+        app_code: detail.app_code || 'chat_react_agent',
+        gmt_created: detail.gmt_created,
+        gmt_modified: detail.gmt_modified,
+      });
+    };
+    const handleRefresh = () => {
+      void fetchDialogueList();
+    };
+    window.addEventListener(CHAT_DIALOGUE_UPSERT_EVENT, handleUpsert);
+    window.addEventListener(CHAT_DIALOGUE_REFRESH_EVENT, handleRefresh);
+    return () => {
+      window.removeEventListener(CHAT_DIALOGUE_UPSERT_EVENT, handleUpsert);
+      window.removeEventListener(CHAT_DIALOGUE_REFRESH_EVENT, handleRefresh);
+    };
+  }, [fetchDialogueList, upsertDialogue]);
 
   // ============ COLLAPSED SIDEBAR ============
   if (!isMenuExpand) {
@@ -290,7 +327,12 @@ function SideBar() {
               <Link
                 key={conv.conv_uid}
                 href={`/?id=${conv.conv_uid}`}
-                className='flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer text-sm transition-colors group hover:bg-[#F1F5F9] dark:hover:bg-theme-dark'
+                className={cls(
+                  'flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer text-sm transition-colors group hover:bg-[#F1F5F9] dark:hover:bg-theme-dark',
+                  {
+                    'bg-[#F1F5F9] dark:bg-theme-dark': activeDialogueId === conv.conv_uid,
+                  },
+                )}
               >
                 <MessageOutlined className='text-gray-400 flex-shrink-0 text-xs' />
                 <div className='flex-1 min-w-0'>

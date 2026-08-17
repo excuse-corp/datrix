@@ -69,16 +69,19 @@ const ContextUsageBar: React.FC<ContextUsageBarProps> = ({
   const colors = STATE_COLORS[state] || STATE_COLORS.OK;
   const safeRatio = Number.isFinite(ratio) ? ratio : 0;
   const pct = Math.min(Math.max(safeRatio * 100, 0), 100);
+  const budgetLabel = budget > 0 ? formatTokens(budget) : 'unknown';
+  const hasBudget = budget > 0;
   const radius = 8;
   const circumference = 2 * Math.PI * radius;
-  const strokeOffset = circumference * (1 - pct / 100);
+  const visiblePct = hasBudget ? pct : 100;
+  const strokeOffset = circumference * (1 - visiblePct / 100);
 
   if (variant === 'compact') {
     return (
       <div className={`group relative inline-flex items-center justify-center ${className}`}>
         <button
           type='button'
-          aria-label={`Context window ${Math.round(pct)}% full`}
+          aria-label={budget > 0 ? `Context window ${Math.round(pct)}% full` : 'Context window status unavailable'}
           className='relative flex h-8 w-8 items-center justify-center rounded-full border border-slate-200/80 bg-white/90 text-slate-500 shadow-[0_8px_24px_rgba(15,23,42,0.08)] backdrop-blur transition-all duration-200 hover:-translate-y-0.5 hover:border-slate-300 dark:border-white/10 dark:bg-[#202124]/90 dark:text-slate-300'
         >
           <svg width='22' height='22' viewBox='0 0 22 22' className='-rotate-90'>
@@ -102,6 +105,7 @@ const ContextUsageBar: React.FC<ContextUsageBarProps> = ({
               strokeDasharray={circumference}
               strokeDashoffset={strokeOffset}
               className='transition-[stroke-dashoffset] duration-500'
+              opacity={hasBudget ? 1 : 0.35}
             />
           </svg>
         </button>
@@ -109,7 +113,7 @@ const ContextUsageBar: React.FC<ContextUsageBarProps> = ({
           <div className='text-[13px] font-medium leading-5 text-white/55'>Context window:</div>
           <div className='mt-1 text-[17px] leading-6 text-white/70'>{Math.round(pct)}% full</div>
           <div className='mt-2 text-[15px] font-medium leading-5 tabular-nums text-white'>
-            {formatTokens(used)} / {formatTokens(budget)} tokens used
+            {formatTokens(used)} / {budgetLabel} tokens used
           </div>
           {compactLayer && <div className='mt-1 text-[11px] text-white/40'>{compactLayer}</div>}
         </div>
@@ -129,7 +133,7 @@ const ContextUsageBar: React.FC<ContextUsageBarProps> = ({
         />
       </div>
       <span className={`${colors.text} whitespace-nowrap tabular-nums`}>
-        {formatTokens(used)}/{formatTokens(budget)}
+        {formatTokens(used)}/{budgetLabel}
       </span>
       {compactLayer && <span className={`${colors.text} opacity-60 whitespace-nowrap`}>L{compactLayer}</span>}
     </div>

@@ -38,12 +38,13 @@ const TaskPlanCard: React.FC<TaskPlanCardProps> = ({ tasks, defaultCollapsed = t
   const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
 
-  const { total, done, currentTask } = useMemo(() => {
+  const { total, done, currentTask, allCancelled } = useMemo(() => {
     const active = tasks.filter(t => t.status !== 'cancelled');
     return {
       total: active.length,
       done: active.filter(t => t.status === 'completed').length,
       currentTask: active.find(t => t.status === 'in_progress') || active.find(t => t.status === 'pending'),
+      allCancelled: tasks.length > 0 && active.length === 0,
     };
   }, [tasks]);
 
@@ -70,7 +71,11 @@ const TaskPlanCard: React.FC<TaskPlanCardProps> = ({ tasks, defaultCollapsed = t
           </span>
           <div className='min-w-0'>
             <div className='font-semibold leading-5 tracking-tight'>
-              {allDone ? t('task_plan_all_done', { total }) : t('task_plan_progress_summary', { total, done })}
+              {allCancelled
+                ? '任务已取消'
+                : allDone
+                  ? t('task_plan_all_done', { total })
+                  : t('task_plan_progress_summary', { total, done })}
             </div>
             {collapsed && currentTask && !allDone && (
               <div className='truncate text-[11px] leading-4 text-slate-400 dark:text-slate-500'>
@@ -83,7 +88,7 @@ const TaskPlanCard: React.FC<TaskPlanCardProps> = ({ tasks, defaultCollapsed = t
       </div>
 
       {/* Progress bar */}
-      {total > 0 && (
+      {total > 0 && !allCancelled && (
         <div className='h-px bg-slate-100 dark:bg-white/10'>
           <div
             className={`h-full transition-all duration-500 ease-out ${
@@ -97,25 +102,25 @@ const TaskPlanCard: React.FC<TaskPlanCardProps> = ({ tasks, defaultCollapsed = t
       {/* Task list */}
       {!collapsed && (
         <ul className='max-h-[220px] space-y-1 overflow-y-auto overscroll-contain px-3.5 py-2.5'>
-          {tasks
-            .filter(t => t.status !== 'cancelled')
-            .map((task, i) => (
-              <li
-                key={i}
-                className={`flex items-start gap-2.5 rounded-md px-1.5 py-1 leading-5 ${
-                  task.status === 'completed'
-                    ? 'text-slate-400 dark:text-slate-500'
-                    : task.status === 'in_progress'
-                      ? 'bg-sky-50/70 font-semibold text-slate-900 dark:bg-sky-500/10 dark:text-slate-100'
+          {tasks.map((task, i) => (
+            <li
+              key={i}
+              className={`flex items-start gap-2.5 rounded-md px-1.5 py-1 leading-5 ${
+                task.status === 'completed'
+                  ? 'text-slate-400 dark:text-slate-500'
+                  : task.status === 'in_progress'
+                    ? 'bg-sky-50/70 font-semibold text-slate-900 dark:bg-sky-500/10 dark:text-slate-100'
+                    : task.status === 'cancelled'
+                      ? 'text-slate-400 dark:text-slate-500'
                       : 'text-slate-600 dark:text-slate-400'
-                }`}
-              >
-                <span className='mt-1 flex-shrink-0'>{statusIcon(task.status)}</span>
-                <span className={task.status === 'completed' ? 'line-through' : ''}>
-                  {i + 1}. {task.content}
-                </span>
-              </li>
-            ))}
+              }`}
+            >
+              <span className='mt-1 flex-shrink-0'>{statusIcon(task.status)}</span>
+              <span className={task.status === 'completed' || task.status === 'cancelled' ? 'line-through' : ''}>
+                {i + 1}. {task.content}
+              </span>
+            </li>
+          ))}
         </ul>
       )}
     </div>

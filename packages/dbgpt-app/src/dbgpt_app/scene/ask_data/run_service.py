@@ -154,6 +154,9 @@ class RunExecutionService:
                 "errors": result.errors,
                 "warnings": warnings,
                 "result_json": result.model_dump(mode="json"),
+                "ontology_snapshot_id": (
+                    result.ontology_snapshot_id or plan.ontology_snapshot_id
+                ),
                 "finished_at": finished,
                 "duration_ms": duration_ms,
                 "clarification": result.clarification,

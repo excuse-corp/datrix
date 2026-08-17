@@ -1,13 +1,7 @@
 import {
-  ApartmentOutlined,
-  ApiOutlined,
-  AppstoreOutlined,
-  ClockCircleOutlined,
   ControlOutlined,
   EditOutlined,
-  GlobalOutlined,
   HistoryOutlined,
-  LineChartOutlined,
   RightOutlined,
   RobotOutlined,
   SettingOutlined,
@@ -23,14 +17,8 @@ type SettingItem = {
 };
 
 const items: SettingItem[] = [
-  { href: '/construct/app', icon: <AppstoreOutlined />, label: '应用管理' },
   { href: '/construct/models', icon: <RobotOutlined />, label: '模型管理' },
-  { href: '/construct/flow', icon: <ApartmentOutlined />, label: '工作流' },
   { href: '/construct/prompt', icon: <EditOutlined />, label: '提示词' },
-  { href: '/construct/connectors', icon: <ApiOutlined />, label: '连接器' },
-  { href: '/construct/scheduled-tasks', icon: <ClockCircleOutlined />, label: '定时任务' },
-  { href: '/construct/dbgpts', icon: <GlobalOutlined />, label: '智能体社区' },
-  { href: '/models_evaluation', icon: <LineChartOutlined />, label: '模型评测' },
 ];
 
 const askDataItems: SettingItem[] = [

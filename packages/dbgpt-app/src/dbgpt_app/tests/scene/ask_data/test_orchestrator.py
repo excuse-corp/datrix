@@ -5,11 +5,12 @@ import asyncio
 import pytest
 
 from dbgpt_app.scene.ask_data.agents.orchestrator import AskDataOrchestrator
+from dbgpt_app.scene.ask_data.ontology.schemas import OntologySnapshot
 from dbgpt_app.scene.ask_data.planning.validator import (
     PlanValidationError,
     PlanValidator,
 )
-from dbgpt_app.scene.ask_data.query.query_spec import SceneResult
+from dbgpt_app.scene.ask_data.query.query_spec import ResultColumn, SceneResult
 from dbgpt_app.scene.ask_data.schemas.plan import (
     Clarification,
     CombinePlan,
@@ -38,6 +39,51 @@ def _task(task_id: str = "task-1") -> PlanTask:
     )
 
 
+def _ontology_snapshot() -> OntologySnapshot:
+    return OntologySnapshot(
+        snapshot_id="onto_contracts",
+        ontology_id="global_business",
+        revision=3,
+        status="active",
+        content_hash="sha256:ontology",
+        graph_json={
+            "nodes": [
+                {
+                    "id": "contract",
+                    "type": "entity",
+                    "name": "合同",
+                    "aliases": [],
+                    "description": "合同业务对象",
+                    "data": {},
+                    "provenance": [],
+                },
+                {
+                    "id": "contract_amount",
+                    "type": "metric",
+                    "name": "合同金额",
+                    "aliases": [],
+                    "description": "",
+                    "data": {"source_scene": "contracts"},
+                    "provenance": [],
+                },
+            ],
+            "edges": [
+                {
+                    "id": "belongs_to_contract_amount_contract",
+                    "source": "contract_amount",
+                    "target": "contract",
+                    "type": "belongs_to",
+                    "name": "属于实体",
+                    "description": "",
+                    "data": {},
+                    "provenance": [],
+                }
+            ],
+        },
+        prompt_projection_json={},
+    )
+
+
 class _FakeQueryService:
     def __init__(self, failures: set[str] | None = None):
         self.failures = failures or set()
@@ -56,6 +102,7 @@ class _FakeQueryService:
                 scene_revision="1",
                 snapshot_id="snap_contracts_1",
                 status="succeeded",
+                columns=[ResultColumn(key="contract_amount", type="metric", unit="元")],
                 query_spec_hash="sha256:query",
                 compiler_version="1.0",
                 sql_hash="sha256:sql",
@@ -81,6 +128,7 @@ class _SlowQueryService(_FakeQueryService):
                 scene_revision="1",
                 snapshot_id="snap_contracts_1",
                 status="succeeded",
+                columns=[ResultColumn(key="contract_amount", type="metric", unit="元")],
                 query_spec_hash="sha256:query",
                 compiler_version="1.0",
                 sql_hash="sha256:sql",
@@ -201,3 +249,28 @@ def test_orchestrator_limits_concurrent_requests():
 
     assert all(item.status == "succeeded" for item in results)
     assert service.max_active == 2
+
+
+def test_orchestrator_uses_active_ontology_only_after_scene_queries():
+    registry = _registry()
+    validator = PlanValidator(registry)
+    service = _FakeQueryService()
+    orchestrator = AskDataOrchestrator(
+        validator,
+        service,
+        ontology_snapshot_provider=_ontology_snapshot,
+    )
+    plan = MainAgentPlan(action="execute", tasks=[_task()], combine=CombinePlan())
+
+    result = asyncio.run(
+        orchestrator.execute(plan=plan, engine_resolver=lambda _: object())
+    )
+
+    assert result.status == "succeeded"
+    assert result.ontology_snapshot_id == "onto_contracts"
+    assert result.bundle["ontology_context"]["ontology_snapshot_id"] == "onto_contracts"
+    assert result.bundle["ontology_context"]["matched_scene_ids"] == ["contracts"]
+    assert result.bundle["ontology_context"]["matched_column_keys"] == [
+        "contract_amount"
+    ]
+    assert "Ontology v3" in result.bundle["answer"]

@@ -21,14 +21,3 @@ persist_path = "pilot/data"
 # Replace the environment variables with a real compatible model endpoint before
 # using natural-language queries in production.
 [models]
-[[models.llms]]
-name = "${env:LLM_MODEL_NAME:-gpt-4o}"
-provider = "${env:LLM_MODEL_PROVIDER:-proxy/openai}"
-api_base = "${env:OPENAI_API_BASE:-https://api.openai.com/v1}"
-api_key = "${env:OPENAI_API_KEY:-not-configured}"
-
-[[models.embeddings]]
-name = "${env:EMBEDDING_MODEL_NAME:-text-embedding-3-small}"
-provider = "${env:EMBEDDING_MODEL_PROVIDER:-proxy/openai}"
-api_url = "${env:EMBEDDING_MODEL_API_URL:-https://api.openai.com/v1/embeddings}"
-api_key = "${env:OPENAI_API_KEY:-not-configured}"

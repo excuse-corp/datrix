@@ -43,6 +43,7 @@ if TYPE_CHECKING:
 
 REACT_AGENT_MEMORY_CACHE: Dict[str, "GptsMemory"] = {}
 REACT_ASK_DATA_PENDING: Dict[str, Dict[str, str]] = {}
+REACT_AGENT_RUNS: Dict[str, Dict[str, Any]] = {}
 
 DEFAULT_SKILLS_DIR = SKILLS_DIR
 AUTO_DATA_MARKER_PATTERN = re.compile(
@@ -136,6 +137,131 @@ async def _load_context_budget_config(
             "Failed to load agent context config; using defaults", exc_info=True
         )
         return defaults
+
+
+def _json_load_object(value: str) -> Any:
+    text = (value or "").strip()
+    if not text:
+        return None
+    try:
+        return json.loads(text)
+    except Exception:
+        start = text.find("{")
+        if start < 0:
+            return None
+        try:
+            payload, _ = json.JSONDecoder().raw_decode(text[start:])
+            return payload
+        except Exception:
+            return None
+
+
+def _extract_ask_data_payload(value: Any, *, depth: int = 0) -> Optional[Dict[str, Any]]:
+    if depth > 5 or value is None:
+        return None
+    if isinstance(value, str):
+        parsed = _json_load_object(value)
+        if parsed is None:
+            return None
+        return _extract_ask_data_payload(parsed, depth=depth + 1)
+    if not isinstance(value, dict):
+        return None
+    if (
+        value.get("status")
+        and (
+            isinstance(value.get("scenes"), list)
+            or isinstance(value.get("results"), list)
+            or isinstance(value.get("scene_summaries"), list)
+        )
+    ):
+        return value
+    chunks = value.get("chunks")
+    if isinstance(chunks, list):
+        for chunk in reversed(chunks):
+            if isinstance(chunk, dict):
+                nested = _extract_ask_data_payload(chunk.get("content"), depth=depth + 1)
+                if nested:
+                    return nested
+    for key in ("content", "data", "payload", "result"):
+        nested = _extract_ask_data_payload(value.get(key), depth=depth + 1)
+        if nested:
+            return nested
+    return None
+
+
+def _compact_recent_ask_data_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        compact = json.loads(json.dumps(payload, ensure_ascii=False, default=str))
+    except Exception:
+        return payload
+    for key in ("scenes", "results"):
+        items = compact.get(key)
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            rows = item.get("rows")
+            if isinstance(rows, list) and len(rows) > 80:
+                item["rows"] = rows[:80]
+                item["truncated_for_recent_context"] = True
+                item["original_row_count"] = len(rows)
+    return compact
+
+
+def _render_recent_ask_data_context(messages: List[Any], *, max_chars: int = 24000) -> str:
+    """Render the latest AskData result from stored view history for reuse."""
+
+    for message in reversed(messages or []):
+        if getattr(message, "type", None) != "view":
+            continue
+        content = getattr(message, "content", "")
+        content_text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False, default=str)
+        payload = _json_load_object(content_text)
+        if not isinstance(payload, dict):
+            continue
+
+        candidates: List[Any] = []
+        if payload.get("type") == "react-agent":
+            steps = payload.get("steps") or []
+            if isinstance(steps, list):
+                for step in reversed(steps):
+                    if not isinstance(step, dict):
+                        continue
+                    action = str(step.get("action") or "")
+                    step_id = str(step.get("id") or "")
+                    title = str(step.get("title") or "")
+                    if action != "ask_data_query" and "ask-data" not in step_id and "AskData" not in title:
+                        continue
+                    outputs = step.get("outputs") or []
+                    if isinstance(outputs, list):
+                        for output in reversed(outputs):
+                            if isinstance(output, dict):
+                                candidates.append(output.get("content"))
+            candidates.append(payload.get("final_content"))
+        else:
+            candidates.append(payload)
+
+        for candidate in candidates:
+            ask_payload = _extract_ask_data_payload(candidate)
+            if not ask_payload:
+                continue
+            compact = _compact_recent_ask_data_payload(ask_payload)
+            data = json.dumps(compact, ensure_ascii=False, default=str)
+            if len(data) > max_chars:
+                data = data[:max_chars] + "\n...<truncated recent AskData context>"
+            return f"""
+## Recent AskData Result From This Session
+The following data was produced by a previous `ask_data_query` in this same conversation.
+- This block has higher priority than the general business-data query rule for report/visualization/formatting follow-ups.
+- If the latest user request asks to create an HTML report, visualization, summary, or formatted deliverable based on already queried data, use this data directly.
+- Do not call `ask_data_query` again unless the user asks for refreshed data, changes filters/scope, or this data is insufficient.
+
+```json
+{data}
+```
+""".strip()
+    return ""
 
 
 def _extract_auto_data_markers(text: str) -> tuple[str, Dict[str, str]]:
@@ -1077,6 +1203,7 @@ async def _react_agent_stream(
     knowledge_space = None
     skill_name = None
     database_name = None
+    run_id = None
     if dialogue.ext_info and isinstance(dialogue.ext_info, dict):
         file_path = dialogue.ext_info.get("file_path")
         skill_name = dialogue.ext_info.get("skill_name")
@@ -1087,6 +1214,11 @@ async def _react_agent_stream(
             or dialogue.ext_info.get("knowledge_space_id")
         )
         database_name = dialogue.ext_info.get("database_name")
+        run_id = dialogue.ext_info.get("client_run_id") or dialogue.ext_info.get(
+            "run_id"
+        )
+    run_id = str(run_id or uuid.uuid4().hex)
+    cancel_event = asyncio.Event()
 
     # Connector selection (Task C): only inject user-selected connectors.
     connector_ids: List[str] = _parse_connector_ids(dialogue.ext_info)
@@ -1137,6 +1269,8 @@ async def _react_agent_stream(
         action_intention: Optional[str] = None,
         action_reason: Optional[str] = None,
         todo_meta: Optional[Dict[str, Any]] = None,
+        ask_data_call_id: Optional[str] = None,
+        ask_data_reused: bool = False,
     ):
         payload = {
             "type": "step.meta",
@@ -1150,6 +1284,10 @@ async def _react_agent_stream(
         }
         if todo_meta:
             payload["todo_meta"] = todo_meta
+        if ask_data_call_id:
+            payload["ask_data_call_id"] = ask_data_call_id
+        if ask_data_reused:
+            payload["ask_data_reused"] = True
         return _sse_event(payload)
 
     def chunk_text(text: str, max_len: int = 800) -> List[str]:
@@ -1292,38 +1430,13 @@ async def _react_agent_stream(
     except Exception:
         pass  # If no business tools, continue with empty list
 
-    # Step 3: Load knowledge space resource if specified in ext_info
-    knowledge_resources: List[Any] = []
+    # Step 3: Knowledge retrieval tool is temporarily disabled.
     knowledge_context = ""
     if knowledge_space:
-        try:
-            from dbgpt_serve.agent.resource.knowledge import (
-                KnowledgeSpaceRetrieverResource,
-            )
-
-            knowledge_resource = KnowledgeSpaceRetrieverResource(
-                name=f"knowledge_space_{knowledge_space}",
-                space_name=knowledge_space,
-                top_k=4,
-                system_app=CFG.SYSTEM_APP,
-            )
-            knowledge_resources.append(knowledge_resource)
-            knowledge_context = f"""
-## Knowledge Base
-- Knowledge space: {knowledge_resource.retriever_name or knowledge_space}
-- Description: {knowledge_resource.retriever_desc or "Knowledge retrieval available"}
-- You can use the 'knowledge_retrieve' tool to search this knowledge base.
-"""
-            logger.info(
-                f"Loaded knowledge space resource: {knowledge_space} "
-                f"(name: {knowledge_resource.retriever_name})"
-            )
-        except Exception as e:
-            logger.warning(f"Failed to load knowledge space resource: {e}", exc_info=e)
-            knowledge_context = f"""
-## Knowledge Base
-- Warning: Failed to load knowledge space '{knowledge_space}'. Error: {str(e)}
-"""
+        logger.info(
+            "Knowledge space '%s' was provided but knowledge retrieval is disabled",
+            knowledge_space,
+        )
 
     # Step 4: Load database connector if specified in ext_info
     database_connector = None
@@ -1360,6 +1473,9 @@ async def _react_agent_stream(
         "skill_prompt": None,
         "file_path": file_path,
         "ask_data_sql_guard": False,
+        "run_id": run_id,
+        "cancel_event": cancel_event,
+        "turn_id": uuid.uuid4().hex,
     }
 
     # Pre-select skill if skill_name provided in ext_info
@@ -1817,25 +1933,6 @@ print(json.dumps(summary, ensure_ascii=False))
                 ensure_ascii=False,
             )
 
-    @tool(
-        description="Retrieve relevant information from the knowledge base. "
-        "Use this tool when the user question involves content that may be "
-        'in the knowledge base. Parameters: {{"query": "search query"}}'
-    )
-    async def knowledge_retrieve(query: str) -> str:
-        if not knowledge_resources:
-            return json.dumps(
-                {
-                    "chunks": [
-                        {
-                            "output_type": "text",
-                            "content": "No knowledge base available",
-                        }
-                    ]
-                },
-                ensure_ascii=False,
-            )
-
     # ── Import built-in tools from tools/ directory ──
     from dbgpt_app.openapi.api_v1.tools import (
         ask_data_capability_summary,
@@ -1845,7 +1942,6 @@ print(json.dumps(summary, ensure_ascii=False))
         make_execute_skill_script_file,
         make_execute_tool,
         make_html_interpreter,
-        make_knowledge_retrieve,
         make_load_file,
         make_load_skill,
         make_load_tools,
@@ -1871,7 +1967,6 @@ print(json.dumps(summary, ensure_ascii=False))
     execute_analysis_tool = make_execute_analysis(react_state)
     load_tools_tool = make_load_tools(react_state)
     execute_tool_tool = make_execute_tool(react_state)
-    knowledge_retrieve_tool = make_knowledge_retrieve(react_state, knowledge_resources)
     sql_query_tool = make_sql_query(react_state, database_connector)
     code_interpreter_tool = make_code_interpreter(react_state)
     shell_interpreter_tool = make_shell_interpreter(react_state)
@@ -1941,6 +2036,9 @@ print(json.dumps(summary, ensure_ascii=False))
                 "- `ask_data_query` Action Input MUST be `{\"question\": \"<natural-language business question>\"}`.",
                 "- Never call `ask_data_query` with `{\"query\": ...}`; `query` is not a valid parameter name.",
                 "- Do not pass SQL, table names, field names, data-source names, or Snapshot IDs to `ask_data_query`.",
+                "- After `ask_data_query` returns `query_complete: true`, answer from that result and do not call it again with the same question in the current turn.",
+                "- A broader follow-up query is allowed only when the user's explicit request cannot be answered by the returned columns.",
+                "- If a Recent AskData Result block is available and the latest request only asks to report, visualize, summarize, or format already queried data, do not call `ask_data_query` again.",
             ],
         )
         business_markers = ("合同", "项目", "部门", "金额", "统计", "汇总", "指标")
@@ -1954,11 +2052,14 @@ print(json.dumps(summary, ensure_ascii=False))
         ask_data_prompt_context = f"""
 ## Trusted Business Data Query
 {capability_summary}
-- For covered business metrics, statistics, contracts, projects, departments, or time-based aggregation, you MUST call `ask_data_query`.
+- For covered business metrics, statistics, contracts, projects, departments, or time-based aggregation, you MUST call `ask_data_query` unless a Recent AskData Result block already answers the data scope and the latest request only asks for reporting, visualization, summarization, or formatting.
 - Never use `sql_query` as a substitute for a covered business-data question.
 - `ask_data_query` accepts only a natural-language question. Never pass SQL, table names, fields, views, data-source names, or Snapshot IDs.
 - Before calling `ask_data_query`, rewrite the user's latest request into a self-contained natural-language business question if chat history is needed for pronouns, ellipses, or follow-up references.
 - When AskData returns data JSON, use it as the evidence for your final answer. You may call other built-in tools afterwards when the user asked for formatting or visualization.
+- When an AskData Observation contains `query_complete: true`, the query requirement is satisfied. The next action must answer/format the returned data or terminate; never call `ask_data_query` again with the same question in this turn.
+- Do not broaden a successful query merely to add fields, rankings, or analysis that the user did not request.
+- If a "Recent AskData Result From This Session" block is provided and the latest user request asks for a report, visualization, summary, or formatting based on already queried data, this rule overrides the general `ask_data_query` rule: reuse that block directly and do NOT call `ask_data_query` again unless the user requests refreshed data, changes filters/scope, or the provided data is insufficient.
 
 {ask_data_tool_schema_context}
 """
@@ -2141,6 +2242,10 @@ print(json.dumps(summary, ensure_ascii=False))
 
     conv_id = dialogue.conv_uid or str(uuid.uuid4())
     react_state["conv_id"] = conv_id
+    REACT_AGENT_RUNS[run_id] = {
+        "conv_uid": conv_id,
+        "cancel_event": cancel_event,
+    }
     pending_ask_data = REACT_ASK_DATA_PENDING.get(conv_id)
     if pending_ask_data and pending_ask_data.get("user_id") == (dialogue.user_name or "anonymous"):
         from dbgpt_app.openapi.api_v1.tools import reply_to_ask_data_query
@@ -2183,6 +2288,7 @@ print(json.dumps(summary, ensure_ascii=False))
         yield _sse_event({"type": "ask_data.result", **payload})
         yield _sse_event({"type": "final", "content": payload.get("answer") or "业务查询已处理。"})
         yield _sse_event({"type": "done"})
+        REACT_AGENT_RUNS.pop(run_id, None)
         return
     if conv_id in REACT_AGENT_MEMORY_CACHE:
         gpt_memory = REACT_AGENT_MEMORY_CACHE[conv_id]
@@ -2206,6 +2312,7 @@ print(json.dumps(summary, ensure_ascii=False))
         conv_storage=conv_serve.conv_storage,
         message_storage=conv_serve.message_storage,
     )
+    recent_ask_data_context = _render_recent_ask_data_context(storage_conv.messages)
     storage_conv.save_to_storage()
     storage_conv.start_new_round()
     storage_conv.add_user_message(user_input)
@@ -2420,6 +2527,7 @@ Example flow for 3 tasks:
 {knowledge_context}
 {database_context}
 {ask_data_prompt_context}
+{recent_ask_data_context}
 ## ReAct Output Format
 Must output for each interaction round:
 Thought: Analyze current task status and think about what to do next
@@ -2541,37 +2649,36 @@ Parameters: {{"code": "python code string"}}
 7. **load_file**: Load uploaded file info. Parameters: none.
 8. **execute_analysis**: Execute quick analysis on uploaded Excel/CSV file.
 Parameters: none.
-9. **knowledge_retrieve**: Retrieve relevant info from knowledge base.
-Parameters: {{"query": "search query"}}
-10. **sql_query**: Execute a read-only SQL query against the selected database.
+9. **sql_query**: Execute a read-only SQL query against the selected database.
 Parameters: {{"sql": "SELECT statement"}}
-11. **load_tools**: Resolve required tools for the selected skill. Parameters: none.
-12. **execute_tool**: Execute a tool by name with JSON args.
+10. **load_tools**: Resolve required tools for the selected skill. Parameters: none.
+11. **execute_tool**: Execute a tool by name with JSON args.
 Parameters: {{"tool_name": "tool name", "args": {{parameters}}}}
-13. **html_interpreter**: Render HTML as an interactive web report (the ONLY way
+12. **html_interpreter**: Render HTML as an interactive web report (the ONLY way
 to display reports on the right panel). Default usage:
 {{"html": "<html>complete HTML code</html>", "title": "title"}}. Template mode:
 {{"template_path": "skill/templates/xxx.html", "data": {{...}}, "title": "title"}}.
 File mode: {{"file_path": "/path/to/report.html"}}
-14. **todowrite**: Create and manage a structured task list. Use for complex tasks
+13. **todowrite**: Create and manage a structured task list. Use for complex tasks
 (3+ steps) to plan and track progress. Pass the FULL list every time. Each item:
 {{"content": "description", "status": "pending|in_progress|completed|cancelled",
 "priority": "high|medium|low"}}. Only ONE task in_progress at a time.
 IMPORTANT: You MUST call todowrite again after EACH task completes to update status.
 The user sees progress in real time — never skip an update.
 Parameters: {{"todos": [{{...}}]}}
-15. **question**: Ask the user a question and wait for their response. Use this tool
+14. **question**: Ask the user a question and wait for their response. Use this tool
    when you need user input, clarification, or a decision to proceed. The tool blocks
    until the user answers.
    Parameters: {{"questions": [{{"question": "...", "header": "...", "options": [
    {{"label": "...", "description": "..."}}, ...]}}]}}. Set multiple=true to allow
    multiple selections. The tool returns the user's selected answers.
-16. **terminate**: Finish the task. Parameters: {{"result": "final answer"}}
+15. **terminate**: Finish the task. Parameters: {{"result": "final answer"}}
 
 {file_context}
 {knowledge_context}
 {database_context}
 {ask_data_prompt_context}
+{recent_ask_data_context}
 
 ## ReAct Output Format
 Must output for each interaction round:
@@ -2590,7 +2697,6 @@ Action Input: The JSON format of tool parameters
             [
                 load_skill_tool,
                 load_tools_tool,
-                knowledge_retrieve_tool,
                 execute_skill_script,
                 get_skill_resource,
                 execute_skill_script_file_tool,
@@ -2614,11 +2720,6 @@ Action Input: The JSON format of tool parameters
     logger.info(f"ToolPack resources: {list(tool_pack._resources.keys())}")
     if "execute_skill_script" not in tool_pack._resources:
         logger.error("execute_skill_script NOT in ToolPack!")
-
-    # Combine tool_pack and knowledge_resources into a single ResourcePack
-    all_resources = [tool_pack]
-    if knowledge_resources:
-        all_resources.extend(knowledge_resources)
 
     # --- Connector system prompt injection (T11) ---
     try:
@@ -2755,6 +2856,46 @@ Action Input: The JSON format of tool parameters
     history_steps: List[Dict[str, Any]] = []
     current_history_step: Optional[Dict[str, Any]] = None
 
+    def record_ask_data_stage_for_history(event: Dict[str, Any]) -> None:
+        stage = str(event.get("stage") or "query")
+        call_id = str(event.get("call_id") or "legacy")
+        title = str(event.get("title") or "AskData")
+        detail = str(event.get("detail") or "")
+        duration_ms = event.get("duration_ms")
+        status_raw = str(event.get("status") or "").lower()
+        status = "failed" if status_raw in {"failed", "error"} else "done"
+        action = "sql_query" if "sql" in f"{stage} {title}".lower() else "ask_data_stage"
+        step_id = f"ask-data-{call_id}-{stage}"
+        output_lines = [f"### {title}", f"- 阶段：`{stage}`", f"- 状态：`{status}`"]
+        if isinstance(duration_ms, (int, float)):
+            output_lines.append(f"- 耗时：{duration_ms / 1000:.2f} 秒")
+        if detail:
+            output_lines.append(f"- 说明：{detail}")
+        payload = {
+            "id": step_id,
+            "title": title,
+            "detail": detail,
+            "thought": None,
+            "action_intention": None,
+            "action_reason": None,
+            "action": action,
+            "action_input": None,
+            "ask_data_call_id": call_id,
+            "parent_id": f"ask-data-{call_id}",
+            "outputs": [
+                {
+                    "output_type": "markdown",
+                    "content": "\n".join(output_lines),
+                }
+            ],
+            "status": status,
+        }
+        for idx, item in enumerate(history_steps):
+            if item.get("id") == step_id:
+                history_steps[idx] = payload
+                return
+        history_steps.append(payload)
+
     # Emit pre-loaded skill as an SSE step before agent starts processing
     if pre_matched_skill:
         skill_step_id, skill_step_event = build_step(
@@ -2797,10 +2938,18 @@ Action Input: The JSON format of tool parameters
         current_history_step = None
 
     while True:
+        if cancel_event.is_set():
+            break
         if agent_task.done() and stream_queue.empty():
             break
         try:
             event = await asyncio.wait_for(stream_queue.get(), timeout=0.1)
+        except asyncio.CancelledError:
+            cancel_event.set()
+            if not agent_task.done():
+                agent_task.cancel()
+            REACT_AGENT_RUNS.pop(run_id, None)
+            raise
         except asyncio.TimeoutError:
             continue
 
@@ -2809,6 +2958,8 @@ Action Input: The JSON format of tool parameters
             # Forward context-management status to frontend as-is.
             yield _sse_event(event)
         elif event_type.startswith("ask_data."):
+            if event_type == "ask_data.stage":
+                record_ask_data_stage_for_history(event)
             yield _sse_event(event)
         elif event_type in ("question.asked", "question.replied", "question.rejected"):
             # Forward human-in-the-loop question events to frontend as-is.
@@ -3104,6 +3255,23 @@ Action Input: The JSON format of tool parameters
                         {"output_type": "code", "content": code_payload}
                     )
 
+            observation_text = action_output.get("observations") or action_output.get(
+                "content"
+            )
+            ask_data_result_payload = (
+                _extract_ask_data_payload(observation_text)
+                if action and action.lower() == "ask_data_query"
+                else None
+            )
+            ask_data_call_id = (
+                str(ask_data_result_payload.get("call_id"))
+                if ask_data_result_payload and ask_data_result_payload.get("call_id")
+                else None
+            )
+            ask_data_reused = bool(
+                ask_data_result_payload and ask_data_result_payload.get("reused")
+            )
+
             # Emit thinking metadata
             if thoughts or action or action_input:
                 step_action_input = (
@@ -3117,12 +3285,11 @@ Action Input: The JSON format of tool parameters
                     action_title,
                     action_intention=action_intention,
                     action_reason=action_reason,
+                    ask_data_call_id=ask_data_call_id,
+                    ask_data_reused=ask_data_reused,
                 )
 
             # Emit observation (action execution result)
-            observation_text = action_output.get("observations") or action_output.get(
-                "content"
-            )
             if observation_text:
                 raw_chunks = emit_tool_chunks(react_step_id, observation_text)
                 if raw_chunks:
@@ -3175,8 +3342,53 @@ Action Input: The JSON format of tool parameters
             # --- History: finalize step ---
             if current_history_step is not None:
                 current_history_step["status"] = status
+                if ask_data_call_id:
+                    current_history_step["ask_data_call_id"] = ask_data_call_id
+                if ask_data_reused:
+                    current_history_step["ask_data_reused"] = True
                 history_steps.append(current_history_step)
                 current_history_step = None
+
+    if cancel_event.is_set():
+        if current_history_step is not None:
+            current_history_step["status"] = "cancelled"
+            history_steps.append(current_history_step)
+            current_history_step = None
+        for item in history_steps:
+            if item.get("status") == "running":
+                item["status"] = "cancelled"
+        for item in _todo_list:
+            if item.get("status") in {"pending", "in_progress"}:
+                item["status"] = "cancelled"
+        if not agent_task.done():
+            agent_task.cancel()
+        try:
+            await agent_task
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.debug("Cancelled react agent task ended with error", exc_info=True)
+
+        final_content = "任务已取消。"
+        history_payload = json.dumps(
+            {
+                "version": 1,
+                "type": "react-agent",
+                "final_content": final_content,
+                "steps": history_steps,
+                "task_plan": list(_todo_list),
+                "generated_images": react_state.get("generated_images", []),
+            },
+            ensure_ascii=False,
+        )
+        storage_conv.add_view_message(history_payload)
+        storage_conv.end_current_round()
+        storage_conv.save_to_storage()
+        REACT_AGENT_RUNS.pop(run_id, None)
+        yield _sse_event({"type": "run.cancelled", "run_id": run_id})
+        yield _sse_event({"type": "final", "content": final_content})
+        yield _sse_event({"type": "done"})
+        return
 
     try:
         reply = await agent_task
@@ -3196,6 +3408,7 @@ Action Input: The JSON format of tool parameters
         storage_conv.add_view_message(error_payload)
         storage_conv.end_current_round()
         storage_conv.save_to_storage()
+        REACT_AGENT_RUNS.pop(run_id, None)
         yield _sse_event({"type": "final", "content": err_msg})
         yield _sse_event({"type": "done"})
         return
@@ -3272,6 +3485,7 @@ Action Input: The JSON format of tool parameters
     storage_conv.add_view_message(history_payload)
     storage_conv.end_current_round()
     storage_conv.save_to_storage()
+    REACT_AGENT_RUNS.pop(run_id, None)
 
     yield _sse_event({"type": "final", "content": final_content})
     yield _sse_event({"type": "done"})
@@ -3518,6 +3732,47 @@ async def chat_react_agent(
 
 
 # ── Human-in-the-Loop Question API ──────────────────────────────────────────
+
+
+class _ReactAgentCancelBody(_BaseModel):
+    conv_uid: Optional[str] = None
+    run_id: Optional[str] = None
+
+
+@router.post("/v1/chat/react-agent/cancel", response_model=Result)
+async def chat_react_agent_cancel(
+    body: _ReactAgentCancelBody = Body(),
+    user_token: UserRequest = Depends(get_user_from_headers),
+):
+    """Cancel an active ReAct run and release pending HITL questions.
+
+    The endpoint is intentionally idempotent: the frontend may call it after the
+    stream has already closed or after a previous cancel request.
+    """
+    cancelled_run = False
+    if body.run_id:
+        run_state = REACT_AGENT_RUNS.get(body.run_id)
+        if run_state:
+            cancel_event = run_state.get("cancel_event")
+            if cancel_event is not None:
+                cancel_event.set()
+                cancelled_run = True
+
+    rejected_questions = 0
+    if body.conv_uid:
+        from dbgpt_app.openapi.api_v1.tools.question_manager import question_manager
+
+        rejected_questions = question_manager.reject_by_conv(body.conv_uid)
+
+    return Result.succ(
+        {
+            "success": True,
+            "run_id": body.run_id,
+            "conv_uid": body.conv_uid,
+            "cancelled_run": cancelled_run,
+            "rejected_questions": rejected_questions,
+        }
+    )
 
 
 class _QuestionReplyBody(_BaseModel):

@@ -14,6 +14,8 @@ export type IModelData = {
   last_heartbeat: string;
   stream_api: string;
   nostream_api: string;
+  provider?: string;
+  params?: ModelParams;
 };
 
 export type BaseModelParams = {
@@ -26,7 +28,7 @@ export type BaseModelParams = {
 };
 
 export type ModelParams = {
-  [key: string]: string | number | boolean;
+  [key: string]: string | number | boolean | Record<string, any> | null | undefined;
 };
 
 export type StartModelParams = {
@@ -45,7 +47,7 @@ export type SupportModel = {
   enabled: boolean;
   host: string;
   port: number;
-  params: ConfigurableParams;
+  params: ConfigurableParams | ConfigurableParams[];
   provider: string;
   description: string;
 };

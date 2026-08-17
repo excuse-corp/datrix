@@ -23,11 +23,13 @@ def build_test_snapshot(scene_id: str, revision_id: str) -> Snapshot:
         runtime_config={
             "data_source": "ecology",
             "view": "dbo.vw_contracts",
-            "dimensions": [],
-            "metrics": [
-                {"key": "contract_amount", "aggregation": "sum", "field": "amount"}
-            ],
-            "time": {"required": False, "granularities": []},
+            "query_model": {
+                "dimensions": [],
+                "metrics": [
+                    {"key": "contract_amount", "aggregation": "sum", "field": "amount"}
+                ],
+                "time": {"required": False, "granularities": []},
+            },
             "named_filters": [],
             "query_limits": {"max_rows": 2},
         },

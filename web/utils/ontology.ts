@@ -2,7 +2,7 @@ export type OntologyIssue = { code: string; message: string; line?: number; path
 
 export type OntologyNode = {
   id: string;
-  type: 'entity' | 'metric' | 'scene' | 'rule';
+  type: 'entity' | 'metric' | 'scene' | 'rule' | 'analysis_dimension' | 'analysis_path' | 'analysis_rule';
   name: string;
   aliases?: string[];
   description?: string;
@@ -23,12 +23,21 @@ export type OntologyEdge = {
 
 export type OntologyGraph = { nodes: OntologyNode[]; edges: OntologyEdge[] };
 
+export type OntologySourceRef = {
+  scene_id: string;
+  scene_name?: string;
+  snapshot_id: string;
+  revision_id: string;
+  semantic_md_hash: string;
+};
+
 export type OntologyRevision = {
   ontology_id: string;
   revision: number;
   status: string;
   markdown: string;
   content_hash?: string | null;
+  source_scene_snapshots: OntologySourceRef[];
   validation_issues: OntologyIssue[];
   created_by: string;
   created_at: string;
@@ -41,7 +50,7 @@ export type OntologySnapshot = {
   revision: number;
   status: string;
   content_hash: string;
-  source_scene_snapshots: Array<Record<string, string>>;
+  source_scene_snapshots: OntologySourceRef[];
   created_at: string;
   activated_at?: string | null;
 };
@@ -58,17 +67,32 @@ export type OntologyGraphResponse = {
 export type OntologySceneChange = {
   scene_id: string;
   kind: 'added' | 'changed' | 'removed';
-  before?: Record<string, string>;
-  after?: Record<string, string>;
+  before?: Partial<OntologySourceRef>;
+  after?: Partial<OntologySourceRef>;
 };
 
-export type OntologySceneSync = {
+export type OntologySourceRefresh = {
   pending_count: number;
   changes: OntologySceneChange[];
+  generation?: {
+    mode: 'llm' | 'rules';
+    source_count: number;
+    entity_count: number;
+    metric_count: number;
+    relation_count: number;
+    analysis_rule_count: number;
+    warnings: string[];
+  } | null;
   revision: OntologyRevision;
 };
 
-type Envelope<T> = { status: string; data: T; detail?: { code?: string; message?: string } };
+type Envelope<T> = {
+  status: string;
+  data: T;
+  detail?: { code?: string; message?: string } | string | Array<Record<string, unknown>>;
+  err_msg?: string;
+  message?: string;
+};
 
 const base = '/api/v1/ask-data/ontology';
 
@@ -91,16 +115,30 @@ async function request<T>(path = '', init?: RequestInit): Promise<T> {
     },
   });
   const payload = (await response.json().catch(() => undefined)) as Envelope<T> | undefined;
-  if (!response.ok)
-    throw new OntologyRequestError(response.status, payload?.detail?.message ?? `请求失败（HTTP ${response.status}）`);
+  if (!response.ok) throw new OntologyRequestError(response.status, errorMessage(payload, response.status));
   return payload?.data as T;
+}
+
+function errorMessage(payload: Envelope<unknown> | undefined, status: number) {
+  if (!payload) return `请求失败（HTTP ${status}）`;
+  if (typeof payload.detail === 'string') return payload.detail;
+  if (Array.isArray(payload.detail)) {
+    const first = payload.detail[0];
+    if (first?.msg) return String(first.msg);
+  }
+  if (payload.detail && typeof payload.detail === 'object' && 'message' in payload.detail) {
+    return String(payload.detail.message);
+  }
+  if (payload.err_msg) return payload.err_msg;
+  if (payload.message) return payload.message;
+  return `请求失败（HTTP ${status}）`;
 }
 
 export const getOntology = () =>
   request<{
     draft: OntologyRevision;
     active_snapshot: OntologySnapshot | null;
-    source_scenes: Array<Record<string, string>>;
+    source_scenes: OntologySourceRef[];
   }>();
 
 export const getOntologyGraph = (revision?: number) =>
@@ -131,13 +169,17 @@ export const activateOntologySnapshot = (snapshotId: string) =>
 
 export const listOntologyRevisions = () => request<{ items: OntologyRevision[] }>('/revisions');
 
-export const syncOntologyScenes = (expected_revision: number, apply = false) =>
-  request<OntologySceneSync>('/sync-scenes', {
+export const generateOntologyFromScenes = (expected_revision: number, apply = false, mode?: 'llm' | 'rules') => {
+  const payload: { expected_revision: number; apply: boolean; mode?: 'llm' | 'rules' } = { expected_revision, apply };
+  if (mode) payload.mode = mode;
+  return request<OntologySourceRefresh>('/draft/from-active-scenes', {
     method: 'POST',
-    body: JSON.stringify({ expected_revision, apply }),
+    body: JSON.stringify(payload),
   });
+};
 
-export const getOntologyRevisionDiff = (revision: number) => request<OntologySceneSync>(`/revisions/${revision}/diff`);
+export const getOntologyRevisionDiff = (revision: number) =>
+  request<OntologySourceRefresh>(`/revisions/${revision}/diff`);
 
 export const saveOntologyLayout = (revision: number, layout: Record<string, unknown>) =>
   request<{ layout: Record<string, unknown> }>(`/revisions/${revision}/layout`, {

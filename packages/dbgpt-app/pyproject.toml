@@ -72,9 +72,6 @@ exclude = [
 # Builtin skills
 "../../skills/csv-data-analysis" = "skills/csv-data-analysis"
 "../../skills/skill-creator" = "skills/skill-creator"
-"../../skills/financial-report-analyzer" = "skills/financial-report-analyzer"
-"../../skills/walmart-sales-analyzer" = "skills/walmart-sales-analyzer"
-"../../skills/agent-browser" = "skills/agent-browser"
 # Builtin example files
 "../../docker/examples/excel/Walmart_Sales.csv" = "examples/excel/Walmart_Sales.csv"
 "../../docker/examples/fin_report/pdf/2020-01-23__浙江海翔药业股份有限公司__002099__海翔药业__2019年__年度报告.pdf" = "examples/fin_report/pdf/2020-01-23__浙江海翔药业股份有限公司__002099__海翔药业__2019年__年度报告.pdf"

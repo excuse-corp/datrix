@@ -33,6 +33,7 @@ class ResultBundle(BaseModel):
     charts: list[ChartSpec] = Field(default_factory=list)
     warnings: list[dict[str, str]] = Field(default_factory=list)
     rag_references: list[str] = Field(default_factory=list)
+    ontology_context: dict[str, Any] | None = None
 
 
 __all__ = ["ResultBundle", "SceneResultSummary"]
