@@ -14,11 +14,11 @@ cd models
 git lfs clone https://huggingface.co/GanymedeNil/text2vec-large-chinese
 ```
 
-### Q2:How to change Vector DB Type in DB-GPT.
+### Q2:How to change Vector DB Type in Datrix.
 
 Update .env file and set VECTOR_STORE_TYPE.
 
-DB-GPT currently support Chroma(Default), Milvus(>2.1), Weaviate, OceanBase vector database.
+Datrix currently support Chroma(Default), Milvus(>2.1), Weaviate, OceanBase vector database.
 If you want to change vector db, Update your .env, set your vector store type, VECTOR_STORE_TYPE=Chroma (now only support Chroma and Milvus(>2.1), if you set Milvus, please set MILVUS_URL and MILVUS_PORT).
 
 If you want to use OceanBase, please first start a docker container via the following command:
@@ -93,7 +93,7 @@ mysql> ALTER TABLE knowledge_space ADD COLUMN context TEXT COMMENT "arguments co
 
 4.restart dbgpt serve
 
-### Q5:Use Mysql, how to use DB-GPT KBQA
+### Q5:Use Mysql, how to use Datrix KBQA
 
 build Mysql KBQA system database schema.
 

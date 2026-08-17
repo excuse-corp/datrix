@@ -33,7 +33,7 @@ As shown in the figure below, clicking on the "Knowledge" will trigger a pop-up 
 :::tip Prompt Arguments
 * scene:A contextual parameter used to define the setting or environment in which the prompt is being used.
 * template:A pre-defined structure or format for the prompt, which can help ensure that the AI system generates responses that are consistent with the desired style or tone.
-* max_token:The maximum number of tokens or words allowed in a prompt. 
+* max_token:The maximum number of tokens or words allowed in a prompt.
 :::
 
  </TabItem>
@@ -83,7 +83,7 @@ VECTOR_STORE_TYPE=Chroma
  </TabItem>
 
 <TabItem value="Milvus" label="Milvus">
-    
+
 
 set ``VECTOR_STORE_TYPE`` in ``.env`` file
 

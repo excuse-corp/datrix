@@ -1,4 +1,4 @@
-import { Advice, AdvisorConfig, ChartId, Datum, FieldInfo, PureChartKnowledge } from '@antv/ava';
+import type { Advice, AdvisorConfig, ChartId, Datum, FieldInfo, PureChartKnowledge } from '@antv/ava';
 
 export type ChartType = ChartId | string;
 

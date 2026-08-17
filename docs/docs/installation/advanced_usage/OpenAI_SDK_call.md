@@ -1,5 +1,5 @@
 # OpenAI SDK Calls Local Multi-model
-The call of multi-model services is compatible with the OpenAI interface, and the models deployed in DB-GPT can be directly called through the OpenAI SDK. 
+The call of multi-model services is compatible with the OpenAI interface, and the models deployed in Datrix can be directly called through the OpenAI SDK.
 
 :::info note
 
@@ -39,7 +39,7 @@ curl http://127.0.0.1:8100/api/v1/chat/completions \
 -H "Authorization: Bearer EMPTY" \
 -H "Content-Type: application/json" \
 -d '{
-  "model": "Qwen/Qwen2.5-Coder-32B-Instruct", 
+  "model": "Qwen/Qwen2.5-Coder-32B-Instruct",
   "messages": [{"role": "user", "content": "hello"}]
 }'
 ```
@@ -52,7 +52,7 @@ curl http://127.0.0.1:8100/api/v1/chat/completions \
 -H "Authorization: Bearer EMPTY" \
 -H "Content-Type: application/json" \
 -d '{
-  "model": "Qwen/Qwen2.5-Coder-32B-Instruct", 
+  "model": "Qwen/Qwen2.5-Coder-32B-Instruct",
   "stream": true,
   "messages": [{"role": "user", "content": "hello"}]
 }'
@@ -60,7 +60,7 @@ curl http://127.0.0.1:8100/api/v1/chat/completions \
 
 
 :::tip
-Embedding 
+Embedding
 :::
 ```bash
 curl http://127.0.0.1:8100/api/v1/embeddings \
@@ -93,7 +93,7 @@ print(completion.choices[0].message.content)
 
 ## (Experimental) Rerank Open API
 
-The rerank API is an experimental feature that can be used to rerank the candidate list. 
+The rerank API is an experimental feature that can be used to rerank the candidate list.
 
 1. Use cURL to verify the rerank API.
 ```bash
@@ -118,7 +118,7 @@ from dbgpt.rag.embedding import OpenAPIRerankEmbeddings
 
 rerank = OpenAPIRerankEmbeddings(api_key="EMPTY", model_name="bge-reranker-base")
 rerank.predict(
-    query="what is awel talk about?", 
+    query="what is awel talk about?",
     candidates=[
         "Agentic Workflow Expression Language(AWEL) is a set of intelligent agent workflow expression language specially designed for large model application development.",
         "Autonomous agents have long been a research focus in academic and industry communities",

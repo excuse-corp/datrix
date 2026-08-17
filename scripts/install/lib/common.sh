@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# common.sh - Shared utility functions for DB-GPT installer
+# common.sh - Shared utility functions for Datrix installer
 # shellcheck disable=SC2034
 
 # ── Colors ────────────────────────────────────────────────────────────────────
@@ -87,4 +87,3 @@ confirm() {
   prompt_input "${prompt} [y/N]: " answer
   [[ "${answer}" =~ ^[Yy]$ ]]
 }
-

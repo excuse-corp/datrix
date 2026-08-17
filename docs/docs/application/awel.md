@@ -5,7 +5,7 @@
 > Agentic Workflow Expression Language(AWEL) is a set of intelligent agent workflow expression language specially designed for large model application
 development.
 
-You can found more information about AWEL in [AWEL](../awel/awel.md) and 
+You can found more information about AWEL in [AWEL](../awel/awel.md) and
 [AWEL Tutorial](../awel/tutorial/) if you want to know more about AWEL.
 
 In short, you can use AWEL to develop LLM applications with AWEL Python API.
@@ -30,7 +30,7 @@ In the `AWEL Flow` page, you can see all the AWEL flows you have created. You ca
 ### Build Your RAG Application
 
 To build your RAG application, you need to create a knowledge space according to [Chat Knowledge Base](./apps/chat_knowledge.md) first.
-Then, click the `Create Flow` button to create a new flow. 
+Then, click the `Create Flow` button to create a new flow.
 
 In the flow editor, you can drag and drop the nodes to build your RAG application.
 
@@ -48,7 +48,7 @@ In the flow editor, you can drag and drop the nodes to build your RAG applicatio
 
 3. Drag a `Knowledge Operator` node to the flow editor.
 
-You can click the "+" button in the `Streaming LLM Operator` node's second input(`"HOContext"`), 
+You can click the "+" button in the `Streaming LLM Operator` node's second input(`"HOContext"`),
 it will show a list of nodes that can be connected to current node of input, then you can select the `Knowledge Operator` node.
 
 <p align="left">

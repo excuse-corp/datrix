@@ -20,7 +20,7 @@ Data_Manus多智能体应用是针对表格（如Excel、CSV等）文件进行�
             prompt: Optional[str] = None,
         ) -> Tuple[Optional[str], Optional[str]]:
         #your_directory_path中包含你需要进行分析的所有Excel、CSV等文件
-            excel_files = find_excel_files(your_directory_path) 
+            excel_files = find_excel_files(your_directory_path)
 
             all_file_data = []
             for excel_file in excel_files:
@@ -91,23 +91,23 @@ Data_Manus多智能体应用具备对表格文件进行多表格协同分析的�
 
 3.基于后台代码实现并应用
 
-为了方便用户进一步了解DB-GPT社区多智能体应用构建过程，方便对Data_manus中各个子Agent进行优化，我们在examples目录下提供多个开发示例以供学习：
+为了方便用户进一步了解Datrix社区多智能体应用构建过程，方便对Data_manus中各个子Agent进行优化，我们在examples目录下提供多个开发示例以供学习：
 **db_create**
 
 ```python
 def read_excel_headers_and_data(file_path: str) -> Tuple[List[str], List[Dict[str, Any]]]:
     if not Path(file_path).exists():
         raise FileNotFoundError(f"文件不存在: {file_path}")
-    
+
     if Path(file_path).suffix.lower() != '.xlsx':
         raise ValueError(f"不支持的文件格式: {Path(file_path).suffix}，仅支持.xlsx")
-    
+
     try:
         df = pd.read_excel(
             file_path,
-            sheet_name=0,  
+            sheet_name=0,
             engine='openpyxl',
-            keep_default_na=False 
+            keep_default_na=False
         )
     except Exception as e:
         raise RuntimeError(f"读取Excel失败: {str(e)}")
@@ -123,7 +123,7 @@ def read_excel_headers_and_data(file_path: str) -> Tuple[List[str], List[Dict[st
             value = row[header]
             row_data[header] = value if value != "" else None
         data.append(row_data)
-    
+
     return headers, data
 
 
@@ -137,7 +137,7 @@ def data2md(headers, table_data):
         values = []
         for h in headers:
             val = row.get(h, "")
-            if hasattr(val, "strftime"): 
+            if hasattr(val, "strftime"):
                 values.append(val.strftime("%Y-%m-%d"))
             else:
                 values.append(str(val))

@@ -25,6 +25,13 @@ def _ensure_pilot_workspace(dest_root: str) -> None:
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "pilot_template",
     )
+    if not os.path.isdir(template_dir):
+        template_dir = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "../../../../../pilot")
+        )
+    if not os.path.isdir(template_dir):
+        logger.warning("Pilot workspace template is unavailable: %s", template_dir)
+        return
     for src_dir, dirs, files in os.walk(template_dir):
         dirs[:] = [d for d in dirs if d not in ("__pycache__", "versions")]
         for filename in files:

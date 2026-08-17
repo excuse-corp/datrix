@@ -15,7 +15,7 @@ The steps to use Chat Excel are relatively simple and are mainly divided into th
 - 2.Upload Excel document
 - 3.Start chat
 
-### Select `Chat Excel` 
+### Select `Chat Excel`
 
 <p align="center">
   <img src={'/img/app/chat_excel_v0.6.jpg'} width="800px" />

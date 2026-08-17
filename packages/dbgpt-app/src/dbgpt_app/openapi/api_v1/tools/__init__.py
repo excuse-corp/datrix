@@ -1,5 +1,10 @@
 """Built-in tools for the ReAct agent in agentic_data_api."""
 
+from .ask_data import (
+    ask_data_capability_summary,
+    make_ask_data_tools,
+    reply_to_ask_data_query,
+)
 from .code_interpreter import make_code_interpreter
 from .execute_analysis import make_execute_analysis
 from .execute_tool import make_execute_tool
@@ -16,6 +21,9 @@ from .todowrite import make_todowrite
 
 __all__ = [
     "make_code_interpreter",
+    "ask_data_capability_summary",
+    "make_ask_data_tools",
+    "reply_to_ask_data_query",
     "make_execute_analysis",
     "make_execute_tool",
     "make_html_interpreter",

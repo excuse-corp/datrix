@@ -5,23 +5,23 @@ title: MCP Protocol
 
 # MCP Protocol
 
-The **Model Context Protocol (MCP)** enables DB-GPT agents to connect with external tools and services through a standardized interface.
+The **Model Context Protocol (MCP)** enables Datrix agents to connect with external tools and services through a standardized interface.
 
 :::info What is MCP?
-MCP is an open protocol that provides a standard way for AI applications to connect with external data sources and tools. DB-GPT supports MCP as both a **client** (consuming MCP tools) and a **server** (exposing DB-GPT capabilities as MCP tools).
+MCP is an open protocol that provides a standard way for AI applications to connect with external data sources and tools. Datrix supports MCP as both a **client** (consuming MCP tools) and a **server** (exposing Datrix capabilities as MCP tools).
 :::
 
 ## Architecture
 
 ```mermaid
 graph TB
-  Agent[DB-GPT Agent] --> MCPClient[MCP Client]
+  Agent[Datrix Agent] --> MCPClient[MCP Client]
   MCPClient --> MCP1[MCP Server A<br/>e.g. File System]
   MCPClient --> MCP2[MCP Server B<br/>e.g. Web Search]
   MCPClient --> MCP3[MCP Server C<br/>e.g. Custom API]
 
-  ExtClient[External MCP Client] --> MCPServer[DB-GPT MCP Server]
-  MCPServer --> DBGPT[DB-GPT Capabilities]
+  ExtClient[External MCP Client] --> MCPServer[Datrix MCP Server]
+  MCPServer --> DBGPT[Datrix Capabilities]
 ```
 
 ## Using MCP tools in agents
@@ -78,9 +78,9 @@ When chatting with an MCP-enabled agent, the agent automatically selects and inv
 Browse the growing ecosystem of MCP servers at the [MCP Servers Directory](https://github.com/modelcontextprotocol/servers).
 :::
 
-## DB-GPT as an MCP server
+## Datrix as an MCP server
 
-DB-GPT can also expose its capabilities as an MCP server, allowing other MCP-compatible applications to use DB-GPT features like:
+Datrix can also expose its capabilities as an MCP server, allowing other MCP-compatible applications to use Datrix features like:
 
 - Knowledge base queries
 - Database access (Text2SQL)

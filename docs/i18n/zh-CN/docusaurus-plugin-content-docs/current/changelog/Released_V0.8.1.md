@@ -1,10 +1,10 @@
-# 🚀 DB-GPT V0.8.1 — 让 AI 数据助理走向生产：定时、连接与长程 Agent
+# 🚀 Datrix V0.8.1 — 让 AI 数据助理走向生产：定时、连接与长程 Agent
 
 V0.8.1 延续 V0.8.0 AI 数据助理的方向，把“一次性完成分析”的能力进一步沉淀为**可调度、可连接、可观察、可运维**的生产化工作流。
 
 ## 简介
 
-DB-GPT V0.8.0 完成了从“对话问答”到“任务交付”的范式跃迁。V0.8.1 则面向真实团队的持续使用场景，回答几个更偏生产化的问题：
+Datrix V0.8.0 完成了从“对话问答”到“任务交付”的范式跃迁。V0.8.1 则面向真实团队的持续使用场景，回答几个更偏生产化的问题：
 
 - 一次成功的数据分析很有价值，如何**按周期重复执行**，而不必每次重新对话？
 - 只连接数据库的 Agent 能力有限，如何让它**安全接入外部系统与业务工具**？
@@ -30,7 +30,7 @@ V0.8.1 的核心价值可以概括为：让 AI 数据助理从“能完成一次
 
 很多数据分析工作天然是周期性的：每日经营日报、每周风险检查、月度财务摘要，或基于最新数据库快照反复执行的诊断分析。V0.8.1 引入**定时任务（Scheduled Tasks）**，让一次成功的分析对话可以沉淀为可重复执行的任务。
 
-你只需先完成一次数据分析，再将该对话保存为任务。DB-GPT 会按 Cron 计划重放完整的 ReAct Agent 流程，每次运行都会生成新的对话与报告，并保留完整执行历史，方便审计、复盘和团队共享。
+你只需先完成一次数据分析，再将该对话保存为任务。Datrix 会按 Cron 计划重放完整的 ReAct Agent 流程，每次运行都会生成新的对话与报告，并保留完整执行历史，方便审计、复盘和团队共享。
 
 #### 将对话保存为周期性任务
 
@@ -51,7 +51,7 @@ V0.8.1 的核心价值可以概括为：让 AI 数据助理从“能完成一次
 
 ### 🔌 MCP 连接器：让 Agent 安全接入外部工具
 
-V0.8.1 通过 **MCP 连接器（MCP Connectors）** 将 DB-GPT Agent 的能力从数据库和本地 Skill 扩展到外部服务。Agent 现在可以通过 Model Context Protocol 接入外部工具，同时由用户掌控每次会话到底挂载哪些连接器。
+V0.8.1 通过 **MCP 连接器（MCP Connectors）** 将 Datrix Agent 的能力从数据库和本地 Skill 扩展到外部服务。Agent 现在可以通过 Model Context Protocol 接入外部工具，同时由用户掌控每次会话到底挂载哪些连接器。
 
 当前内置连接器模板包括飞书、钉钉、语雀、GitHub、Notion、Linear、Tavily 和 DeepWiki。你也可以接入任意支持 SSE 或 Streamable HTTP 的自定义 MCP Server。
 
@@ -64,7 +64,7 @@ V0.8.1 通过 **MCP 连接器（MCP Connectors）** 将 DB-GPT Agent 的能力�
 | 按会话选择连接器 | Agent 只会获得当前任务相关的工具，减少干扰与 Token 消耗 |
 | 工具透明可见 | 可查看每个连接器暴露的工具名称、描述和输入参数 |
 | 人工确认机制 | 内置连接器中的写操作会先弹出确认，再真正执行 |
-| 凭据加密存储 | 连接器凭据加密保存在 DB-GPT 元数据库中，并在服务重启后自动恢复 |
+| 凭据加密存储 | 连接器凭据加密保存在 Datrix 元数据库中，并在服务重启后自动恢复 |
 
 <img alt="MCP 连接器列表" src="/img/mcp/mcp_list_zh.png" width="720px" />
 
@@ -88,15 +88,15 @@ Agentic 数据分析往往不是一个短对话，而是需要多步探索、反
 
 在底层，`ContextManager` 编排一套由 Token 预算状态驱动的**渐进式多层压缩**机制。随着用量越过警告与错误阈值，压缩力度逐级增强：从截断早期 Observation，到丢弃早期轮次，再到由 LLM 生成结构化摘要；若模型仍报 `context_too_long`，还有应急兜底层。
 
-这些改进让 DB-GPT 更适合承接需要多步推理、反复尝试和中间产物管理的复杂数据分析工作流。
+这些改进让 Datrix 更适合承接需要多步推理、反复尝试和中间产物管理的复杂数据分析工作流。
 
 ### 🧱 模型、数据源与存储生态扩展
 
-V0.8.1 进一步扩展了 DB-GPT 周边生态，让团队可以更方便地复用已有模型、数据库、向量存储和缓存基础设施。
+V0.8.1 进一步扩展了 Datrix 周边生态，让团队可以更方便地复用已有模型、数据库、向量存储和缓存基础设施。
 
 #### LiteLLM 嵌入式 AI Gateway
 
-DB-GPT 新增 **LiteLLM** 作为嵌入式代理 Provider，注册名为 `proxy/litellm`。它不是一个额外的代理服务，而是 DB-GPT 进程内直接调用 LiteLLM，让你通过统一入口访问 OpenAI、Anthropic、Vertex AI、Bedrock、Azure、Cohere、Mistral、Groq、Ollama 等 LiteLLM 支持的众多后端。
+Datrix 新增 **LiteLLM** 作为嵌入式代理 Provider，注册名为 `proxy/litellm`。它不是一个额外的代理服务，而是 Datrix 进程内直接调用 LiteLLM，让你通过统一入口访问 OpenAI、Anthropic、Vertex AI、Bedrock、Azure、Cohere、Mistral、Groq、Ollama 等 LiteLLM 支持的众多后端。
 
 ```toml
 [[models.llms]]
@@ -110,7 +110,7 @@ provider = "proxy/litellm"
 - **Valkey 向量存储**：支持使用 Valkey 和 `valkey-search` 构建向量检索链路。
 - **Valkey 缓存存储**：支持 LLM 响应缓存和 Embedding 缓存场景。
 - **可配置距离度量**：向量检索的距离度量可按需配置。
-- **Valkey 向量客户端 `CLIENT SETNAME`**：使 DB-GPT 的连接在 Valkey 监控工具中可被清晰识别。
+- **Valkey 向量客户端 `CLIENT SETNAME`**：使 Datrix 的连接在 Valkey 监控工具中可被清晰识别。
 
 #### 新增数据源与模型支持
 
@@ -236,9 +236,9 @@ uv sync --all-packages --extra "storage_qdrant"
 uv sync --all-packages --extra "storage_valkey"
 ```
 
-### 重启 DB-GPT
+### 重启 Datrix
 
-使用你原来的启动方式重启 DB-GPT 服务。启动后建议验证：
+使用你原来的启动方式重启 Datrix 服务。启动后建议验证：
 
 - 历史对话可以正常加载。
 - MCP 连接器页面可以正常展示、激活和测试连接器。
@@ -247,7 +247,7 @@ uv sync --all-packages --extra "storage_valkey"
 
 ## 参考链接
 
-- [DB-GPT V0.8.0 发版说明](http://docs.dbgpt.cn/docs/next/changelog/Released_V0.8.0)
+- [Datrix V0.8.0 发版说明](http://docs.dbgpt.cn/docs/next/changelog/Released_V0.8.0)
 - [快速开始](http://docs.dbgpt.cn/docs/overview/)
 - [安装指南](http://docs.dbgpt.cn/docs/next/installation/)
 - [定时任务](http://docs.dbgpt.cn/docs/next/application/scheduled_tasks)

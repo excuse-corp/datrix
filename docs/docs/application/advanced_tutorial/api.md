@@ -1,12 +1,12 @@
 # API Interface Usage
 
-The DB-GPT project currently also provides various APIs for use. Currently APIs are mainly divided into two categories. 1. Model API 2. Application service layer AP
+The Datrix project currently also provides various APIs for use. Currently APIs are mainly divided into two categories. 1. Model API 2. Application service layer AP
 
-Model API mainly means that DB-GPT adapts to various models and is uniformly packaged into models compatible with OpenAI SDK output. The service layer API refers to the API exposed by the DB-GPT service layer. The following is a brief introduction to the use of both.
+Model API mainly means that Datrix adapts to various models and is uniformly packaged into models compatible with OpenAI SDK output. The service layer API refers to the API exposed by the Datrix service layer. The following is a brief introduction to the use of both.
 
 ## Model API
 
-In the DB-GPT project, we defined a service-oriented multi-model management framework (SMMF). Through the capabilities of SMMF, we can deploy multiple models, and these models provide external services through services. In order to allow clients to achieve seamless switching, we uniformly support the OpenAI SDK standards.
+In the Datrix project, we defined a service-oriented multi-model management framework (SMMF). Through the capabilities of SMMF, we can deploy multiple models, and these models provide external services through services. In order to allow clients to achieve seamless switching, we uniformly support the OpenAI SDK standards.
 - Detail usage tutorial: [OpenAI SDK calls local multi-model ](../../installation/advanced_usage/OpenAI_SDK_call.md)
 
 **Example:** The following is an example of calling through openai sdk
@@ -48,7 +48,7 @@ Regarding the service layer API, in terms of strategy in the early days, we main
 Due to the rapid development of the entire field, different versions of the API will not be considered fully compatible in terms of compatibility. In subsequent new versions of the API, we will provide instructions in the documentation for incompatible APIs.
 :::
 
-## API Description 
+## API Description
 
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
@@ -63,7 +63,7 @@ import TabItem from '@theme/TabItem';
     {label: 'Agent API', value: 'agentapi'},
     {label: 'AWEL API', value: 'awelapi'},
   ]}>
-  <TabItem value="chatapi">    
+  <TabItem value="chatapi">
 
   Chat API Lists
 
@@ -86,10 +86,10 @@ import TabItem from '@theme/TabItem';
     api/v1/chat/completions
   ```
   </TabItem>
-  <TabItem value="editorapi">   
+  <TabItem value="editorapi">
 
   Editor API Lists
-  
+
   ```python
     api/v1/editor/db/tables
     api/v1/editor/sql/rounds
@@ -102,8 +102,8 @@ import TabItem from '@theme/TabItem';
     api/v1/chart/editor/submit
   ```
   </TabItem>
-  <TabItem value="modelapi">   
-    
+  <TabItem value="modelapi">
+
   Model API Lists
 
   ```python
@@ -111,8 +111,8 @@ import TabItem from '@theme/TabItem';
     api/v1/model/supports
   ```
   </TabItem>
-  <TabItem value="llmanageapi">   
-    
+  <TabItem value="llmanageapi">
+
   LLM Manage API Lists
 
   ```python
@@ -132,8 +132,8 @@ import TabItem from '@theme/TabItem';
     api/controller/heartbeat
   ```
   </TabItem>
-  <TabItem value="agentapi">   
-    
+  <TabItem value="agentapi">
+
   Agent API Lists
 
   ```python
@@ -145,8 +145,8 @@ import TabItem from '@theme/TabItem';
     api/v1/personal/agent/upload
   ```
   </TabItem>
-  <TabItem value="awelapi">   
-    
+  <TabItem value="awelapi">
+
   AWEL API Lists
 
   ```python

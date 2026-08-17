@@ -18,6 +18,7 @@ i18n.use(initReactI18next).init({
     },
   },
   lng: 'en',
+  defaultNS: 'translation',
   interpolation: {
     escapeValue: false,
   },
@@ -27,6 +28,7 @@ export default i18n;
 
 declare module 'i18next' {
   interface CustomTypeOptions {
+    defaultNS: 'translation';
     resources: Resources;
   }
 }

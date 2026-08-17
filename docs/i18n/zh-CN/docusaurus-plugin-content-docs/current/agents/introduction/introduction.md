@@ -2,16 +2,16 @@
 
 ## Introduction
 
-DB-GPT agent is a data-driven multi-agent system that aims to provide a production-level 
-agent development framework. We believe that production-level agent applications need 
+Datrix agent is a data-driven multi-agent system that aims to provide a production-level
+agent development framework. We believe that production-level agent applications need
 to be based on data-driven decisions and can be orchestrated in a controllable agentic workflow.
 
 ### Multi-Level API Design
 
 - Python agent API: Build an agents application with Python code, you just need install `dbgpt` package with `pip install "dbgpt[agent]"`
-- Application API: Build an agents application in DB-GPT project, you can use all the capabilities of other modules in DB-GPT project.
+- Application API: Build an agents application in Datrix project, you can use all the capabilities of other modules in Datrix project.
 
-Most of the time, you can use the Python agent API to build your agents application in 
+Most of the time, you can use the Python agent API to build your agents application in
 a simple way, only a little change to the code when you need to deploy your agents to production.
 
 ## Quick Start
@@ -31,7 +31,7 @@ pip install openai
 ### Write Your First Calculator With Agent
 
 The LLM is the "brain" of the agent, now we use the OpenAI LLM.
-In DB-GPT agents, you can use all models then supported by DB-GPT, whether they are 
+In Datrix agents, you can use all models then supported by Datrix, whether they are
 locally deployed LLMs or proxy models, whether they are deployed on a single machine or in a cluster.
 
 ```python
@@ -53,11 +53,11 @@ from dbgpt.agent import AgentContext, AgentMemory
 # language="zh" for Chinese
 context: AgentContext = AgentContext(
     conv_id="test123", language="en", temperature=0.5, max_new_tokens=2048
-) 
+)
 # Create an agent memory, default memory is ShortTermMemory
 agent_memory: AgentMemory = AgentMemory()
 ```
-Memory stores information perceived from the environment and leverages the recorded 
+Memory stores information perceived from the environment and leverages the recorded
 memories to facilitate future actions.
 Default memory is `ShortTermMemory`, it just keeps the latest `k` turns of the conversation.
 Your can use other memory, such as `LongTermMemory`, `SensoryMemory` and `HybridMemory`, we will introduce them later.
@@ -81,7 +81,7 @@ async def main():
         .bind(agent_memory)
         .build()
     )
-    
+
     # Initialize GptsMemory
     agent_memory.gpts_memory.init(conv_id="test123")
 
@@ -127,9 +127,9 @@ un_stream ai response: True
 Turing (to User)-[gpt-3.5-turbo]:
 
 "```python\n# filename: calculate_multiplication.py\n\nresult = 321 * 123\nprint(result)\n```"
->>>>>>>>Turing Review info: 
+>>>>>>>>Turing Review info:
 Pass(None)
->>>>>>>>Turing Action report: 
+>>>>>>>>Turing Action report:
 execution succeeded,
 
 39483
@@ -141,8 +141,8 @@ execution succeeded,
 ```
 ``````
 
-In DB-GPT agents, most core interfaces are asynchronous for high performance. 
-So we will write all the code to build the agent in an asynchronous way. In development, 
+In Datrix agents, most core interfaces are asynchronous for high performance.
+So we will write all the code to build the agent in an asynchronous way. In development,
 you can use the `asyncio.run(main())` to run the agent.
 
 Here is the graph of above code:
@@ -152,23 +152,23 @@ Here is the graph of above code:
 </p>
 
 
-In the above code, we create a `CodeAssistantAgent` and a `UserProxyAgent`. 
-`UserProxyAgent` is a proxy of the user, it is an admin agent that can initiate a chat 
+In the above code, we create a `CodeAssistantAgent` and a `UserProxyAgent`.
+`UserProxyAgent` is a proxy of the user, it is an admin agent that can initiate a chat
 with other agents, and it can review the feedback of the agents.
 
-`CodeAssistantAgent` is a code assistant agent, it will generate some codes to solve 
-the question of the user, in this case, it will generate a Python code to calculate the 
-result of `321 * 123`, then the code will be executed in its internal `CodeAction`, the 
+`CodeAssistantAgent` is a code assistant agent, it will generate some codes to solve
+the question of the user, in this case, it will generate a Python code to calculate the
+result of `321 * 123`, then the code will be executed in its internal `CodeAction`, the
 result will be returned to the user if it is reviewed passed.
 
 In the end of the code, we print the conversation history messages between agents.
 
 ## What's Next
 
-- How to use tools in DB-GPT agents
-- How to connect to the database in DB-GPT agents
-- How to use planning in DB-GPT agents
-- How to use various memories in DB-GPT agents
-- How to write a custom agent in DB-GPT agents
+- How to use tools in Datrix agents
+- How to connect to the database in Datrix agents
+- How to use planning in Datrix agents
+- How to use various memories in Datrix agents
+- How to write a custom agent in Datrix agents
 - How to integrate agents with AWEL(Agentic Workflow Expression Language)
 - How to deploy agents in production

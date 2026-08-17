@@ -1,7 +1,11 @@
 import { ChatContext, ChatContextProvider } from '@/app/chat-context';
 import SideBar from '@/components/layout/side-bar';
-import FloatHelper from '@/new-components/layout/FloatHelper';
-import { STORAGE_LANG_KEY, STORAGE_USERINFO_KEY, STORAGE_USERINFO_VALID_TIME_KEY } from '@/utils/constants/index';
+import {
+  STORAGE_INTERFACE_STYLE_KEY,
+  STORAGE_LANG_KEY,
+  STORAGE_USERINFO_KEY,
+  STORAGE_USERINFO_VALID_TIME_KEY,
+} from '@/utils/constants/index';
 import { App, ConfigProvider, MappingAlgorithm, theme } from 'antd';
 import enUS from 'antd/locale/en_US';
 import zhCN from 'antd/locale/zh_CN';
@@ -44,8 +48,13 @@ function CssWrapper({ children }: { children: React.ReactElement }) {
     i18n.changeLanguage?.(window.localStorage.getItem(STORAGE_LANG_KEY) || 'zh');
   }, [i18n]);
 
+  useEffect(() => {
+    document.documentElement.dataset.interfaceStyle =
+      window.localStorage.getItem(STORAGE_INTERFACE_STYLE_KEY) === 'industrial' ? 'industrial' : 'default';
+  }, []);
+
   return (
-    <div>
+    <div className='app-root'>
       {/* <TopProgressBar /> */}
       {children}
     </div>
@@ -98,17 +107,23 @@ function LayoutWrapper({ children }: { children: React.ReactNode }) {
       return <>{children}</>;
     }
     return (
-      <div className='flex w-screen h-screen overflow-hidden'>
+      <div className='flex h-full min-h-0 w-full overflow-hidden'>
         <Head>
           <meta name='viewport' content='initial-scale=1.0, width=device-width, maximum-scale=1' />
         </Head>
         {router.pathname !== '/construct/app/extra' && !hideSidebar && (
-          <div className={classNames('transition-[width]', isMenuExpand ? 'w-60' : 'w-20', 'hidden', 'md:block')}>
+          <div
+            className={classNames(
+              'app-sidebar-slot transition-[width]',
+              isMenuExpand ? 'w-60' : 'w-20',
+              'hidden',
+              'md:block',
+            )}
+          >
             <SideBar />
           </div>
         )}
-        <div className='flex flex-col flex-1 relative overflow-hidden'>{children}</div>
-        {!hideSidebar && <FloatHelper />}
+        <div className='flex min-h-0 flex-1 flex-col overflow-hidden relative'>{children}</div>
       </div>
     );
   };
@@ -124,7 +139,7 @@ function LayoutWrapper({ children }: { children: React.ReactNode }) {
         algorithm: mode === 'dark' ? antdDarkTheme : undefined,
       }}
     >
-      <App>{renderContent()}</App>
+      <App className='app-provider-root'>{renderContent()}</App>
     </ConfigProvider>
   );
 }

@@ -5,7 +5,7 @@ title: Installation Issues
 
 # Installation Issues
 
-Common problems during DB-GPT installation and how to fix them.
+Common problems during Datrix installation and how to fix them.
 
 ## Python version errors
 

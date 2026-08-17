@@ -5,7 +5,7 @@ title: RAG
 
 # RAG (Retrieval-Augmented Generation)
 
-RAG enhances LLM responses by retrieving relevant context from your own data before generating an answer. DB-GPT provides a comprehensive RAG framework supporting multiple retrieval strategies.
+RAG enhances LLM responses by retrieving relevant context from your own data before generating an answer. Datrix provides a comprehensive RAG framework supporting multiple retrieval strategies.
 
 ## How RAG works
 
@@ -29,7 +29,7 @@ flowchart LR
 
 ## Knowledge base types
 
-DB-GPT supports multiple knowledge base types out of the box:
+Datrix supports multiple knowledge base types out of the box:
 
 | Type | Storage | Best for |
 |---|---|---|
@@ -49,7 +49,7 @@ Upload and process a wide variety of document formats:
 
 ## RAG pipeline
 
-The full RAG pipeline in DB-GPT:
+The full RAG pipeline in Datrix:
 
 ```mermaid
 flowchart TB
@@ -78,7 +78,7 @@ flowchart TB
 
 ## Quick start with RAG
 
-1. Open the DB-GPT Web UI
+1. Open the Datrix Web UI
 2. Navigate to **Knowledge Base** in the sidebar
 3. Create a new knowledge base
 4. Upload your documents

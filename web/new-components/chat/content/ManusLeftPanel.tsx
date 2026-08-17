@@ -99,7 +99,6 @@ export interface ManusLeftPanelProps {
   isWorking?: boolean;
   userQuery?: string;
   assistantText?: string;
-  modelName?: string;
   stepThoughts?: Record<string, string>;
   artifacts?: ArtifactItem[];
   onArtifactClick?: (artifact: ArtifactItem) => void;
@@ -550,8 +549,7 @@ const StepCard: React.FC<{
           {
             'opacity-0 translate-y-1': !isVisible,
             'opacity-100 translate-y-0': isVisible,
-            'bg-gradient-to-r from-amber-50/80 via-orange-50/50 to-white dark:from-amber-900/20 dark:via-orange-900/10 dark:to-[#1a1b1e]':
-              true,
+            'bg-gradient-to-r from-amber-50/80 via-orange-50/50 to-white dark:from-amber-900/20 dark:via-orange-900/10 dark:to-[#1a1b1e]': true,
             'border-amber-300/80 dark:border-amber-500/30 shadow-[0_4px_16px_rgba(245,158,11,0.12)] ring-1 ring-amber-200/50 dark:ring-amber-500/20':
               isActive || isWaiting,
             'border-amber-200/60 dark:border-amber-600/20 hover:border-amber-300 hover:shadow-[0_4px_12px_rgba(245,158,11,0.08)]':
@@ -946,7 +944,6 @@ const ManusLeftPanel: React.FC<ManusLeftPanelProps> = ({
   isWorking,
   userQuery,
   assistantText,
-  modelName,
   stepThoughts,
   artifacts,
   onArtifactClick,
@@ -1108,21 +1105,17 @@ const ManusLeftPanel: React.FC<ManusLeftPanelProps> = ({
               />
             ))}
           </div>
-        ) : (
+        ) : isWorking ? (
           <div className='px-4 py-6 text-gray-400 space-y-2'>
-            {isWorking ? (
-              <div className='flex items-center gap-2'>
-                <LoadingOutlined spin className='text-blue-500' />
-                <span className='text-sm text-blue-600 dark:text-blue-400'>{t('db_gpt_thinking')}</span>
-              </div>
-            ) : (
-              <span className='text-sm'>{t('waiting_to_start')}</span>
-            )}
-            {isWorking && stepThoughts?.[activeStepId || 'initial'] && (
+            <div className='flex items-center gap-2'>
+              <LoadingOutlined spin className='text-blue-500' />
+              <span className='text-sm text-blue-600 dark:text-blue-400'>{t('db_gpt_thinking')}</span>
+            </div>
+            {stepThoughts?.[activeStepId || 'initial'] && (
               <ThoughtBubble text={stepThoughts[activeStepId || 'initial']} />
             )}
           </div>
-        )}
+        ) : null}
 
         {isWorking && sections.length > 0 && (
           <div className='px-4 py-3 mt-2 rounded-lg bg-blue-50/50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 space-y-2'>
@@ -1195,17 +1188,6 @@ const ManusLeftPanel: React.FC<ManusLeftPanelProps> = ({
           </div>
         )}
       </div>
-
-      {modelName && (
-        <div className='px-4 py-2 border-t border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/50'>
-          <div className='flex items-center justify-between text-[10px] text-gray-400'>
-            <span>{`Model: ${modelName}`}</span>
-            <div className='flex items-center gap-2'>
-              {isWorking && <span className='animate-pulse'>Processing...</span>}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

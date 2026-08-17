@@ -37,10 +37,12 @@ class MyDocument extends Document {
     return (
       <Html lang='en'>
         <Head>
-          <link rel='icon' href='/favicon.ico' />
-          <meta name='description' content='Revolutionizing Database Interactions with Private LLM Technology' />
-          <meta property='og:description' content='eosphoros-ai' />
-          <meta property='og:title' content='DB-GPT' />
+          <link rel='icon' href='/favicon.ico' sizes='any' />
+          <link rel='icon' type='image/png' href='/datrix-brand.png' />
+          <link rel='apple-touch-icon' href='/datrix-brand.png' />
+          <meta name='description' content='由智能体矩阵驱动的数据分析工具' />
+          <meta property='og:description' content='Data intelligence through coordinated agents.' />
+          <meta property='og:title' content='Datrix' />
         </Head>
         <body>
           <Main />

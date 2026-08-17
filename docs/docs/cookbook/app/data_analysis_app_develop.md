@@ -1,6 +1,6 @@
 # Data App Develop Guide
 
-In this document, we will guide you through the process of developing a data analysis app using DB-GPT.
+In this document, we will guide you through the process of developing a data analysis app using Datrix.
 
 # Target
 
@@ -9,7 +9,7 @@ In this case, our goal is to build a data assistant application that includes th
 2. Conduct data dialogue based on database.
 3. Internet search based on tool usage.
 
-These three capabilities can be utilized within a single conversation based on the intent recognition ability provided by DB-GPT. The data assistant will match appropriate sub-agent applications to answer questions in corresponding domains based on the user's inquiries.
+These three capabilities can be utilized within a single conversation based on the intent recognition ability provided by Datrix. The data assistant will match appropriate sub-agent applications to answer questions in corresponding domains based on the user's inquiries.
 
 :::tip
 Note: This case is mainly for demonstration purposes of application building, and actual applications in production environments still need further optimization.
@@ -26,7 +26,7 @@ First, we need to create three sub-intelligent applications separately, and then
 
 ## 1. Building a question answering assistant based on RAG
 
-We use the agent module provided by DB-GPT to build a RAG-based question-answering assistant. DB-GPT has some built-in agents, such as
+We use the agent module provided by Datrix to build a RAG-based question-answering assistant. Datrix has some built-in agents, such as
 
 - Intent Recognition Expert Agent
 - CodeEnginner Agent
@@ -39,12 +39,12 @@ We use the agent module provided by DB-GPT to build a RAG-based question-answeri
 In this case, intelligent question answering mainly relies on the domain knowledge base and document summarization agent (Summarizer), so we first need to build the domain knowledge base. The process is as follows:
 
 1. Domain Knowledge Cleaning and Organization
-2. Upload to DB-GPT Knowledge
+2. Upload to Datrix Knowledge
 3. Create Knowledge-Based Data App
 4. Chat with KBQA
 
 ### Domain Knowledge Cleaning and Organization
-The organization and processing of domain knowledge is a very important task and has a very important impact on the final effect. You need to organize and clean up the files according to your actual application. In this example, we use the default PDF for uploading. We prepare the official DB-GPT document as demonstration material.
+The organization and processing of domain knowledge is a very important task and has a very important impact on the final effect. You need to organize and clean up the files according to your actual application. In this example, we use the default PDF for uploading. We prepare the official Datrix document as demonstration material.
 
 ### Create a knowledge base
 
@@ -96,7 +96,7 @@ Click [Save] to complete the creation of the smart application.
 </p>
 
 :::tip
-Note:  The agent application shown in this tutorial is built based on the Summarizer agent. The Summarizer agent is a built-in agent of DB-GPT. See the [source code](https://github.com/eosphoros-ai/DB-GPT/blob/main/dbgpt/agent/expand/summary_assistant_agent.py) for the relevant code implementation. In actual use, the relevant code can be further modified according to specific scenarios. Customization and optimization. Or customize the agent based on this case
+Note:  The agent application shown in this tutorial is built based on the Summarizer agent. The Summarizer agent is a built-in agent of Datrix. See the [source code](https://github.com/eosphoros-ai/DB-GPT/blob/main/dbgpt/agent/expand/summary_assistant_agent.py) for the relevant code implementation. In actual use, the relevant code can be further modified according to specific scenarios. Customization and optimization. Or customize the agent based on this case
 :::
 
 ## Data ChatBot Assistant
@@ -108,11 +108,11 @@ In the same way, a data dialogue assistant can be built based on similar ideas. 
 3. Create Data Chat App
 4. Chat
 
-### Data Preparation 
+### Data Preparation
 
 For data preparation, please refer to the [data preparation](https://github.com/eosphoros-ai/DB-GPT/blob/main/docker/examples/dashboard/test_case_mysql_data.py) section in the document.
 
-### Create Datasource 
+### Create Datasource
 
 After preparing the data, you need to add the database to the data source for subsequent use. Select [Application Management] -> [Database] -> [Add Data Source]
 
@@ -185,7 +185,7 @@ Execute the `dbgpt app install awel-flow-web-info-search` command to install it 
 ```
 dbgpt app install awel-flow-web-info-search
 
-> 
+>
   Installing collected packages: awel-flow-web-info-search
   Successfully installed awel-flow-web-info-search-0.1.0
   Installed dbgpts at ~/.dbgpts/packages/ae442685cde998fe51eb565a23180544/awel-flow-web-info-search.
@@ -330,7 +330,7 @@ Click OK, select the workflow, enter the recommended questions, and save.
 </p>
 
 
-### Chat 
+### Chat
 <p align="center">
   <img src={'/img/cookbook/data_expert_chat.png'} width="800" />
 </p>

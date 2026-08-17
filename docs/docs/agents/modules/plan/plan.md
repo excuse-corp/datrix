@@ -1,15 +1,15 @@
 # Planning Introduction
 
-> When faced with a complex task, humans tend to deconstruct it into simpler subtasks 
-> and solve them individually. The planning module aims to empower the agents with such 
+> When faced with a complex task, humans tend to deconstruct it into simpler subtasks
+> and solve them individually. The planning module aims to empower the agents with such
 > human capability, which is expected to make the agent behave more reasonably, powerfully, and reliably.
 
-In previous sections [Agents Planning](../../introduction/planning), we have seen the 
+In previous sections [Agents Planning](../../introduction/planning), we have seen the
 `AutoPlanChatManager` agent, and how it can be used to analyze the database with auto-planning.
 
 ## Planning With AWEL
 
-Here we will introduce how to use the planning module in DB-GPT with `WrappedAWELLayoutManager`.
+Here we will introduce how to use the planning module in Datrix with `WrappedAWELLayoutManager`.
 `WrappedAWELLayoutManager` will run the agents in a sequence, and the agents can be added to the manager by `hire` method.
 
 Here is an example of how to use the `WrappedAWELLayoutManager`:
@@ -105,9 +105,9 @@ un_stream ai response: {
 LuBan (to Aristotle)-[gpt-4o]:
 
 "{\n  \"thought\": \"To find the current weather in Beijing, I will use the baidu_search API to search for the latest weather information.\",\n  \"tool_name\": \"baidu_search\",\n  \"args\": {\n    \"query\": \"current weather in Beijing\",\n    \"num_results\": 8\n  }\n}"
->>>>>>>>LuBan Review info: 
+>>>>>>>>LuBan Review info:
 Pass(None)
->>>>>>>>LuBan Action report: 
+>>>>>>>>LuBan Action report:
 execution succeeded,
 ### [Weather for Beijing, Beijing Municipality, China](http://www.baidu.com/link?url=wpnRKEh7u3CA7C7n3f3wuit8nrIMJXReMRsPJ4gSiZGg_3sSCOuxi4rUSDGkxgG2CEAITa25NLfKcSZOK34kyq)
 Location:Beijing Airport Current Time:25 Jun 2024, 16:31:38 Latest Report:25 Jun 2024, 08:30 Visibility:N/A Pressure:1009 mbar Humidity:32% Dew Point:10 °C Upcom...
@@ -146,9 +146,9 @@ un_stream ai response: Beijing weather summary:
 AWELBaseManager (to User)-[]:
 
 "Query the weather in Beijing"
->>>>>>>>AWELBaseManager Review info: 
+>>>>>>>>AWELBaseManager Review info:
 Pass(None)
->>>>>>>>AWELBaseManager Action report: 
+>>>>>>>>AWELBaseManager Action report:
 execution succeeded,
 Beijing weather summary:
 - Current temperature: 22°C

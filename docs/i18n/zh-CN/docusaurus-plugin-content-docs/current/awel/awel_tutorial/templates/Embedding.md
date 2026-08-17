@@ -1,27 +1,27 @@
-# Embedding Process Workflow 
-# Introduction 
-the traditional knowledge extraction preparation process of Native RAG aims at the process of turning documents into databases, including reading unstructured documents-&gt; knowledge slices-&gt; document slices turning-&gt; import vector databases. 
+# Embedding Process Workflow
+# Introduction
+the traditional knowledge extraction preparation process of Native RAG aims at the process of turning documents into databases, including reading unstructured documents-&gt; knowledge slices-&gt; document slices turning-&gt; import vector databases.
 
-# Applicable Scenarios 
-+ supports simple intelligent question and answer scenarios and recalls context information through semantic similarity. 
-+ Users can cut and add existing embedded processing processes according to their own business scenarios. 
+# Applicable Scenarios
++ supports simple intelligent question and answer scenarios and recalls context information through semantic similarity.
++ Users can cut and add existing embedded processing processes according to their own business scenarios.
 
-# How to use 
-+ enter the AWEL interface and add a workflow 
+# How to use
++ enter the AWEL interface and add a workflow
 
 ![](https://intranetproxy.alipay.com/skylark/lark/0/2024/png/26456775/1734354927468-feed0ac7-e0fe-45e8-b85c-aba170084f82.png)
 
-+ import Knowledge Processing Template 
++ import Knowledge Processing Template
 
 ![](https://intranetproxy.alipay.com/skylark/lark/0/2024/png/26456775/1734358060884-672d3157-a2ee-498b-887e-ea51f1caddae.png)
 
-+ adjust parameters and save 
++ adjust parameters and save
 
 ![](https://intranetproxy.alipay.com/skylark/lark/0/2024/png/26456775/1734358170081-32d38282-7765-4bbf-9bf7-c068550907d1.png)
 
-    - `document knowledge loader operator `: Knowledge loading factory, by loading the specified document type, find the corresponding document processor for document content parsing. 
-    - `Document Chunk Manager operator `: Slice the loaded document content according to the specified slicing parameters. 
-    - `Vector storage machining operator `: You can connect different vector databases for vector storage, and you can also connect different Embedding models and services for vector extraction. 
+    - `document knowledge loader operator `: Knowledge loading factory, by loading the specified document type, find the corresponding document processor for document content parsing.
+    - `Document Chunk Manager operator `: Slice the loaded document content according to the specified slicing parameters.
+    - `Vector storage machining operator `: You can connect different vector databases for vector storage, and you can also connect different Embedding models and services for vector extraction.
 
 
 

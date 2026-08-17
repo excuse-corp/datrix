@@ -1,11 +1,11 @@
 # Hybrid Memory
 
-> This structure explicitly models the human short-term and long-term memories. The 
-> short-term memory temporarily buffers recent perceptions, while long-term memory consolidates 
+> This structure explicitly models the human short-term and long-term memories. The
+> short-term memory temporarily buffers recent perceptions, while long-term memory consolidates
 > important information over time.
 
 
-For example, the short-term memory contains the context information about the agent current situations, 
+For example, the short-term memory contains the context information about the agent current situations,
 while the long-term memory stores the agent past behaviors and thoughts, which can be retrieved according to the current events.
 
 ## Creating A Hybrid Memory
@@ -106,7 +106,7 @@ agent_memory: AgentMemory = AgentMemory(memory=hybrid_memory)
 
 ### Method 3: Creating A Hybrid Memory From Vector Store
 
-You can create a hybrid memory from a vector store, it will use the default values for 
+You can create a hybrid memory from a vector store, it will use the default values for
 sensory memory and short-term memory.
 
 ```python
@@ -123,10 +123,10 @@ agent_memory: AgentMemory = AgentMemory(memory=hybrid_memory)
 
 When writing a memory fragment:
 1. The hybrid memory will store the memory fragments in sensory memory first,
-if the sensory memory is full, it will discard all the sensory memory fragments, and 
+if the sensory memory is full, it will discard all the sensory memory fragments, and
 some of discarded memory fragments will be transferred to short-term memory.
-2. Short-term memory will receive some of the sensory memory as outside observations, 
-and memory fragments in short-term memory can be enhanced by other observations. Some of 
+2. Short-term memory will receive some of the sensory memory as outside observations,
+and memory fragments in short-term memory can be enhanced by other observations. Some of
 enhanced memory fragments will be transferred to long-term memory, at the same time, this
 enhanced memory will be reflected to higher-level thoughts and insights to the long-term memory.
 3. Long-term memory will store the agent's experiences and knowledge. When it receives the memory
@@ -134,10 +134,10 @@ fragments from short-term memory, it will compute the importance of the memory f
 to vector store.
 
 When reading a memory fragment:
-1. First, the hybrid memory will read the memory fragments from long-term memory according 
-to the observation. The long-term memory uses a `TimeWeightedEmbeddingRetriever` to retrieve 
+1. First, the hybrid memory will read the memory fragments from long-term memory according
+to the observation. The long-term memory uses a `TimeWeightedEmbeddingRetriever` to retrieve
 the memory fragments(latest memory fragments have higher weights).
-2. The retrieved memory fragments will be saved to short-term memory(just for enhancing 
+2. The retrieved memory fragments will be saved to short-term memory(just for enhancing
 the memory fragments, not append a new memory fragment to short-term memory). The retrieved
 memory fragments and all short-term memory fragments will be merged, and as the current memory to LLM.
 After the enhancing process, there are some new short-term memory fragments will be transferred to long-term memory.

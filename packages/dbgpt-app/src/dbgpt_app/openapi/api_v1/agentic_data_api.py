@@ -1,3 +1,5 @@
+# ruff: noqa: E501
+
 import io
 import json
 import logging
@@ -7,7 +9,7 @@ import shutil
 import tempfile
 import uuid
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
@@ -40,6 +42,7 @@ if TYPE_CHECKING:
     from dbgpt.agent.resource.tool.base import BaseTool
 
 REACT_AGENT_MEMORY_CACHE: Dict[str, "GptsMemory"] = {}
+REACT_ASK_DATA_PENDING: Dict[str, Dict[str, str]] = {}
 
 DEFAULT_SKILLS_DIR = SKILLS_DIR
 AUTO_DATA_MARKER_PATTERN = re.compile(
@@ -217,6 +220,71 @@ def _select_connector_tools(
             if isinstance(sub_tool, BaseTool):
                 tools.append(sub_tool)
     return tools, missing_ids
+
+
+def _as_base_tool(tool_like: Any) -> Optional["BaseTool"]:
+    """Return the underlying BaseTool for direct tool callables or BaseTool objects."""
+    from dbgpt.agent.resource.tool.base import BaseTool
+
+    if isinstance(tool_like, BaseTool):
+        return tool_like
+    wrapped = getattr(tool_like, "_tool", None)
+    if isinstance(wrapped, BaseTool):
+        return wrapped
+    return None
+
+
+def _render_tool_parameters(tool_resource: "BaseTool") -> str:
+    """Render exact Action Input schema from the registered tool metadata."""
+    if not tool_resource.args:
+        return "{}"
+    parts: List[str] = []
+    for name, meta in tool_resource.args.items():
+        arg_type = getattr(meta, "type", None) or "any"
+        required = "required" if getattr(meta, "required", True) else "optional"
+        description = (
+            getattr(meta, "description", None)
+            or getattr(meta, "title", None)
+            or name
+        )
+        if len(description) > 120:
+            description = description[:117] + "..."
+        parts.append(f'"{name}": <{arg_type}, {required}, {description}>')
+    return "{" + ", ".join(parts) + "}"
+
+
+def _render_direct_tool_schema_prompt(
+    title: str,
+    tools: List[Any],
+    *,
+    extra_rules: Optional[List[str]] = None,
+) -> str:
+    """Render direct-call tool schemas that are otherwise easy to omit from prompts.
+
+    The ReAct agent uses text protocol instead of native function-calling, so every
+    directly callable runtime tool must have its exact Action Input schema in the
+    system prompt.  This renderer consumes the same Tool metadata used by ToolPack
+    execution to avoid hand-written schema drift.
+    """
+    rendered_tools = []
+    for item in tools:
+        tool_resource = _as_base_tool(item)
+        if tool_resource is None:
+            continue
+        rendered_tools.append(
+            f"- **{tool_resource.name}**: {tool_resource.description}\n"
+            f"  Parameters: {_render_tool_parameters(tool_resource)}"
+        )
+    if not rendered_tools:
+        return ""
+    lines = [
+        f"## {title}",
+        "These tools are directly callable with `Action: <tool_name>`. Use the exact parameter names shown below.",
+        *rendered_tools,
+    ]
+    if extra_rules:
+        lines.extend(extra_rules)
+    return "\n".join(lines)
 
 
 async def _execute_skill_script_impl(
@@ -545,6 +613,15 @@ async def skill_upload(
     user_dir.mkdir(parents=True, exist_ok=True)
 
     filename = file.filename
+    normalized_filename = filename.replace("\\", "/")
+    filename_path = PurePosixPath(normalized_filename)
+    if (
+        filename_path.is_absolute()
+        or ".." in filename_path.parts
+        or len(filename_path.parts) != 1
+        or filename_path.name != filename
+    ):
+        return Result.failed(code="E4002", msg="Unsafe upload filename")
     suffix = Path(filename).suffix.lower()
     stem = Path(filename).stem
 
@@ -965,6 +1042,7 @@ def _sse_event(payload: Dict[str, Any]) -> str:
 
 async def _react_agent_stream(
     dialogue: ConversationVo,
+    user_token: UserRequest | None = None,
 ) -> AsyncGenerator[str, None]:
     import asyncio
 
@@ -980,7 +1058,12 @@ async def _react_agent_stream(
     from dbgpt.agent.resource.manage import get_resource_manager
     from dbgpt.agent.util.llm.llm import LLMConfig, LLMStrategyType
     from dbgpt.agent.util.react_parser import ReActOutputParser
-    from dbgpt.core import StorageConversation
+    from dbgpt.core import (
+        ModelMessage,
+        ModelMessageRoleType,
+        ModelRequest,
+        StorageConversation,
+    )
     from dbgpt.model.cluster.client import DefaultLLMClient
     from dbgpt_serve.agent.agents.db_gpts_memory import MetaDbGptsMessageMemory
     from dbgpt_serve.conversation.serve import Serve as ConversationServe
@@ -1007,6 +1090,12 @@ async def _react_agent_stream(
 
     # Connector selection (Task C): only inject user-selected connectors.
     connector_ids: List[str] = _parse_connector_ids(dialogue.ext_info)
+    ask_data_enabled = os.getenv("DBGPT_REACT_ASK_DATA_TOOL_ENABLED", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
     def build_step(title: str, detail: str, phase: str = None):
         nonlocal step
@@ -1270,6 +1359,7 @@ async def _react_agent_stream(
         "matched": None,
         "skill_prompt": None,
         "file_path": file_path,
+        "ask_data_sql_guard": False,
     }
 
     # Pre-select skill if skill_name provided in ext_info
@@ -1748,6 +1838,8 @@ print(json.dumps(summary, ensure_ascii=False))
 
     # ── Import built-in tools from tools/ directory ──
     from dbgpt_app.openapi.api_v1.tools import (
+        ask_data_capability_summary,
+        make_ask_data_tools,
         make_code_interpreter,
         make_execute_analysis,
         make_execute_skill_script_file,
@@ -1786,6 +1878,90 @@ print(json.dumps(summary, ensure_ascii=False))
     html_interpreter_tool = make_html_interpreter(react_state, DEFAULT_SKILLS_DIR)
     todowrite_tool = make_todowrite(_todo_list, stream_callback)
     question_tool = make_question(react_state, stream_callback)
+    ask_data_tools = []
+    ask_data_prompt_context = ""
+    scene_query_agent = None
+    if ask_data_enabled:
+        from dbgpt_app.scene.ask_data.agents import SceneQueryAgent
+        from dbgpt_app.scene.ask_data.security import AskDataPrincipal
+
+        llm_client = DefaultLLMClient(
+            CFG.SYSTEM_APP.get_component(
+                ComponentType.WORKER_MANAGER_FACTORY, WorkerManagerFactory
+            ).create(),
+            auto_convert_message=True,
+        )
+
+        async def generate_scene_query_spec(prompt: str) -> str:
+            models = await llm_client.models()
+            model_name = dialogue.model_name or (models[0].model if models else None)
+            if not model_name:
+                raise RuntimeError("No models available for SceneQueryAgent")
+            request = ModelRequest.build_request(
+                model_name,
+                messages=[
+                    ModelMessage(
+                        role=ModelMessageRoleType.HUMAN,
+                        content=prompt,
+                    )
+                ],
+                temperature=0,
+            )
+            response = await llm_client.generate(request)
+            if not response.success or not response.has_text:
+                raise RuntimeError("SceneQueryAgent model generation failed")
+            return response.text
+
+        scene_query_agent = SceneQueryAgent(generate_scene_query_spec)
+        ask_data_context_budget = await _load_context_budget_config(
+            llm_client, dialogue.model_name
+        )
+        ask_data_max_result_tokens = max(
+            1024, int(ask_data_context_budget.max_context_tokens * 0.5)
+        )
+
+        role = getattr(user_token, "role", None)
+        ask_data_principal = AskDataPrincipal(
+            user_id=(getattr(user_token, "user_id", None) or dialogue.user_name or "anonymous"),
+            roles=frozenset({str(role)}) if role else frozenset(),
+        )
+        ask_data_query_tool, ask_data_capabilities_tool = make_ask_data_tools(
+            react_state,
+            stream_callback,
+            ask_data_principal,
+            scene_query_agent,
+            max_result_tokens=ask_data_max_result_tokens,
+        )
+        ask_data_tools = [ask_data_query_tool, ask_data_capabilities_tool]
+        capability_summary = ask_data_capability_summary(ask_data_principal, user_input)
+        ask_data_tool_schema_context = _render_direct_tool_schema_prompt(
+            "AskData Direct Tool Schema",
+            ask_data_tools,
+            extra_rules=[
+                "- `ask_data_query` Action Input MUST be `{\"question\": \"<natural-language business question>\"}`.",
+                "- Never call `ask_data_query` with `{\"query\": ...}`; `query` is not a valid parameter name.",
+                "- Do not pass SQL, table names, field names, data-source names, or Snapshot IDs to `ask_data_query`.",
+            ],
+        )
+        business_markers = ("合同", "项目", "部门", "金额", "统计", "汇总", "指标")
+        explicit_sql = "sql" in user_input.lower()
+        react_state["ask_data_sql_guard"] = (
+            database_connector is not None
+            and "没有可用" not in capability_summary
+            and not explicit_sql
+            and any(marker in user_input for marker in business_markers)
+        )
+        ask_data_prompt_context = f"""
+## Trusted Business Data Query
+{capability_summary}
+- For covered business metrics, statistics, contracts, projects, departments, or time-based aggregation, you MUST call `ask_data_query`.
+- Never use `sql_query` as a substitute for a covered business-data question.
+- `ask_data_query` accepts only a natural-language question. Never pass SQL, table names, fields, views, data-source names, or Snapshot IDs.
+- Before calling `ask_data_query`, rewrite the user's latest request into a self-contained natural-language business question if chat history is needed for pronouns, ellipses, or follow-up references.
+- When AskData returns data JSON, use it as the evidence for your final answer. You may call other built-in tools afterwards when the user asked for formatting or visualization.
+
+{ask_data_tool_schema_context}
+"""
     # Keep local aliases for backward compatibility (SSE loop references these names)
     execute_skill_script_file_tool = make_execute_skill_script_file(react_state)
 
@@ -1947,12 +2123,13 @@ print(json.dumps(summary, ensure_ascii=False))
 
         return list(_todo_list) if changed else None
 
-    llm_client = DefaultLLMClient(
-        CFG.SYSTEM_APP.get_component(
-            ComponentType.WORKER_MANAGER_FACTORY, WorkerManagerFactory
-        ).create(),
-        auto_convert_message=True,
-    )
+    if not ask_data_enabled:
+        llm_client = DefaultLLMClient(
+            CFG.SYSTEM_APP.get_component(
+                ComponentType.WORKER_MANAGER_FACTORY, WorkerManagerFactory
+            ).create(),
+            auto_convert_message=True,
+        )
     if dialogue.model_name:
         llm_config = LLMConfig(
             llm_client=llm_client,
@@ -1964,6 +2141,49 @@ print(json.dumps(summary, ensure_ascii=False))
 
     conv_id = dialogue.conv_uid or str(uuid.uuid4())
     react_state["conv_id"] = conv_id
+    pending_ask_data = REACT_ASK_DATA_PENDING.get(conv_id)
+    if pending_ask_data and pending_ask_data.get("user_id") == (dialogue.user_name or "anonymous"):
+        from dbgpt_app.openapi.api_v1.tools import reply_to_ask_data_query
+        from dbgpt_app.scene.ask_data.security import AskDataPrincipal
+
+        role = getattr(user_token, "role", None)
+        principal = AskDataPrincipal(
+            user_id=dialogue.user_name or "anonymous",
+            roles=frozenset({str(role)}) if role else frozenset(),
+        )
+        yield _sse_event(
+            {
+                "type": "ask_data.stage",
+                "stage": "clarification",
+                "title": "正在补充业务查询条件",
+                "detail": "继续上一轮业务问数",
+            }
+        )
+        payload = await reply_to_ask_data_query(
+            query_id=pending_ask_data["query_id"],
+            answer=user_input,
+            principal=principal,
+            conversation_id=conv_id,
+            scene_query_agent=scene_query_agent,
+        )
+        if payload.get("status") == "clarification_required":
+            REACT_ASK_DATA_PENDING[conv_id] = {
+                "query_id": str(payload.get("query_id") or pending_ask_data["query_id"]),
+                "user_id": principal.user_id,
+            }
+            yield _sse_event(
+                {
+                    "type": "ask_data.clarification",
+                    "query_id": payload.get("query_id"),
+                    "clarification": payload.get("clarification"),
+                }
+            )
+        else:
+            REACT_ASK_DATA_PENDING.pop(conv_id, None)
+        yield _sse_event({"type": "ask_data.result", **payload})
+        yield _sse_event({"type": "final", "content": payload.get("answer") or "业务查询已处理。"})
+        yield _sse_event({"type": "done"})
+        return
     if conv_id in REACT_AGENT_MEMORY_CACHE:
         gpt_memory = REACT_AGENT_MEMORY_CACHE[conv_id]
     else:
@@ -2074,7 +2294,7 @@ print(json.dumps(summary, ensure_ascii=False))
         # Simplified prompt for skill mode - only skill-related tools +
         # html_interpreter
         workflow_prompt = f"""
-You are the DB-GPT intelligent assistant, executing the skill task selected by the user.
+You are the Datrix intelligent assistant, executing the skill task selected by the user.
 Please always response in the same language as the user's input language.
 
 ## Autonomous Decision Principles
@@ -2199,6 +2419,7 @@ Example flow for 3 tasks:
 {file_context}
 {knowledge_context}
 {database_context}
+{ask_data_prompt_context}
 ## ReAct Output Format
 Must output for each interaction round:
 Thought: Analyze current task status and think about what to do next
@@ -2224,13 +2445,14 @@ Action Input: The JSON format of tool parameters
                 question_tool,
                 Terminate(),
             ]
+            + ask_data_tools
             + business_tools
             + connector_tool_extras
         )
     else:
         # Full prompt with all tools when no skill is pre-selected
         workflow_prompt = f"""
-You are the DB-GPT intelligent assistant, capable of autonomously selecting tools
+You are the Datrix intelligent assistant, capable of autonomously selecting tools
 to solve problems based on user tasks.
 Please always response in the same language as the user's input language.
 
@@ -2349,6 +2571,7 @@ Parameters: {{"todos": [{{...}}]}}
 {file_context}
 {knowledge_context}
 {database_context}
+{ask_data_prompt_context}
 
 ## ReAct Output Format
 Must output for each interaction round:
@@ -2382,6 +2605,7 @@ Action Input: The JSON format of tool parameters
                 question_tool,
                 Terminate(),
             ]
+            + ask_data_tools
             + business_tools
             + connector_tool_extras
         )
@@ -2583,6 +2807,8 @@ Action Input: The JSON format of tool parameters
         event_type = event.get("type")
         if event_type == "context.status":
             # Forward context-management status to frontend as-is.
+            yield _sse_event(event)
+        elif event_type.startswith("ask_data."):
             yield _sse_event(event)
         elif event_type in ("question.asked", "question.replied", "question.rejected"):
             # Forward human-in-the-loop question events to frontend as-is.
@@ -3023,6 +3249,14 @@ Action Input: The JSON format of tool parameters
     else:
         final_content = reply.content or ""
 
+    if react_state.get("ask_data_pending_query_id"):
+        REACT_ASK_DATA_PENDING[conv_id] = {
+            "query_id": str(react_state["ask_data_pending_query_id"]),
+            "user_id": dialogue.user_name or "anonymous",
+        }
+    else:
+        REACT_ASK_DATA_PENDING.pop(conv_id, None)
+
     # Persist AI reply with structured history payload
     history_payload = json.dumps(
         {
@@ -3266,7 +3500,7 @@ async def chat_react_agent(
     }
     try:
         return StreamingResponse(
-            _react_agent_stream(dialogue),
+            _react_agent_stream(dialogue, user_token),
             headers=headers,
             media_type="text/event-stream",
         )

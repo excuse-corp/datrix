@@ -188,11 +188,11 @@ ID of the model to use. See the model endpoint compatibility table for details o
 ________
 <b>chat_mode</b> <font color="gray"> string </font> <font color="red"> Optional </font>
 
-The DB-GPT chat mode, which can be one of the following: `chat_normal`, `chat_app`, `chat_knowledge`, `chat_flow`, default is `chat_normal`.
+The Datrix chat mode, which can be one of the following: `chat_normal`, `chat_app`, `chat_knowledge`, `chat_flow`, default is `chat_normal`.
 ________
 <b>chat_param</b> <font color="gray"> string </font> <font color="red"> Optional </font>
 
-The DB-GPT The chat param value of chat mode: `{app_id}`, `{space_id}`, `{flow_id}`, default is `None`.
+The Datrix The chat param value of chat mode: `{app_id}`, `{space_id}`, `{flow_id}`, default is `None`.
 ________
 <b>max_new_tokens</b> <font color="gray"> integer </font> <font color="red"> Optional </font>
 
@@ -202,7 +202,7 @@ The total length of input tokens and generated tokens is limited by the model's 
 ________
 <b>stream</b> <font color="gray"> integer </font> <font color="red"> Optional </font>
 
-If set, partial message deltas will be sent. 
+If set, partial message deltas will be sent.
 Tokens will be sent as data-only server-sent events as they become available, with the stream terminated by a `data: [DONE]`
 ________
 <b>temperature</b> <font color="gray"> integer </font> <font color="red"> Optional </font>
@@ -259,7 +259,7 @@ A list of chat completion choices. Can be more than one if n is greater than 1.
 
       The content of the message.
     - <b>finish_reason</b> <font color="gray"> string </font>
-    
+
         The reason the chat completion finished. Can be `max_tokens` or `stop`.
 ________
 
@@ -301,7 +301,7 @@ A list of chat completion choices. Can be more than one if n is greater than 1.
 
       The content of the message.
     - <b>finish_reason</b> <font color="gray"> string </font>
-    
+
         The reason the chat completion finished. Can be `max_tokens` or `stop`.
 ________
 <b>usage</b> <font color="gray"> object </font>

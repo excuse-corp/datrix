@@ -1,7 +1,7 @@
 # Agents With Database
 
 Most of the time, we want the agent to answer questions based on the data in the database,
-or make decisions based on the data in the database. In this case, we need to connect 
+or make decisions based on the data in the database. In this case, we need to connect
 the agent to the database.
 
 ## Installation
@@ -28,7 +28,7 @@ import TabItem from '@theme/TabItem';
 <TabItem value="sqlite_temp" label="sqlite_temp">
 
 :::tip NOTE
-We provide a temporary SQLite database for testing. The temporary database will be 
+We provide a temporary SQLite database for testing. The temporary database will be
 created in temporary directory and will be deleted after the program exits.
 :::
 
@@ -76,7 +76,7 @@ connector = SQLiteConnector.from_file_path("path/to/your/database.db")
 
 :::tip NOTE
 
-We connect to the MySQL database by giving the database connection information, please 
+We connect to the MySQL database by giving the database connection information, please
 make sure the connection information is correct.
 :::
 
@@ -92,7 +92,7 @@ connector = MySQLConnector.from_uri_db(
     engine_args={"connect_args": {"charset": "utf8mb4"}},
 )
 ```
- 
+
 </TabItem>
 
 </Tabs>
@@ -107,7 +107,7 @@ db_resource = RDBMSConnectorResource("user_manager", connector=connector)
 ```
 
 As previously mentioned, the **Database** is a kind of resource, we can use most database
-which supported in DB-GPT(like SQLite, MySQL, ClickHouse, ApacheDoris, DuckDB, Hive, 
+which supported in Datrix(like SQLite, MySQL, ClickHouse, ApacheDoris, DuckDB, Hive,
 MSSQL, OceanBase, PostgreSQL, StarRocks, Vertica, etc.) as the resource.
 
 ## Use Database In Your Agent
@@ -177,9 +177,9 @@ un_stream ai response: {
 Edgar (to User)-[gpt-3.5-turbo]:
 
 "{\n  \"display_type\": \"response_table\",\n  \"sql\": \"SELECT name, age FROM user WHERE age < 18\",\n  \"thought\": \"I have selected a response_table to display the names and ages of users with an age less than 18. The SQL query retrieves the name and age columns from the user table where the age is less than 18.\"\n}"
->>>>>>>>Edgar Review info: 
+>>>>>>>>Edgar Review info:
 Pass(None)
->>>>>>>>Edgar Action report: 
+>>>>>>>>Edgar Action report:
 execution succeeded,
 {"display_type":"response_table","sql":"SELECT name, age FROM user WHERE age < 18","thought":"I have selected a response_table to display the names and ages of users with an age less than 18. The SQL query retrieves the name and age columns from the user table where the age is less than 18."}
 
@@ -202,8 +202,8 @@ Let's parse the result from above output, we just focus on the last part
     }
 ]
 ```
-What is GPT-Vis? GPT-Vis is a collection components for GPTs, generative AI, and LLM projects. 
-It provides a protocol(a custom code syntax in markdown) to describe the output of the AI model, 
-and be able to render the output in rich UI components. 
+What is GPT-Vis? GPT-Vis is a collection components for GPTs, generative AI, and LLM projects.
+It provides a protocol(a custom code syntax in markdown) to describe the output of the AI model,
+and be able to render the output in rich UI components.
 
 Here, the output is a table, which contains the name and age of the users with age less than 18.

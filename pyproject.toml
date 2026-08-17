@@ -1,9 +1,8 @@
 [project]
 name = "dbgpt-mono"
 version = "0.8.1"
-description = """DB-GPT is an experimental open-source project that uses localized GPT \
-large models to interact with your data and environment. With this solution, you can be\
- assured that there is no risk of data leakage, and your data is 100% private and secure.\
+description = """Datrix is an open-source multi-agent matrix for data analysis. It coordinates
+specialized agents to explore data, generate insights, and produce reliable analysis.\
 """
 authors = [
     { name = "csunny", email = "cfqcsunny@gmail.com" }
@@ -19,7 +18,6 @@ dbgpt-ext = { workspace = true }
 dbgpt-serve = { workspace = true }
 dbgpt-app = { workspace = true }
 dbgpt-acc-auto = { workspace = true }
-dbgpt-acc-flash-attn = { workspace = true }
 dbgpt-sandbox = { workspace = true }
 
 [[tool.uv.index]]
@@ -36,7 +34,7 @@ members = [
   "packages/dbgpt-ext",
   "packages/dbgpt-serve",
   "packages/dbgpt-sandbox",
-  "packages/dbgpt-accelerator/dbgpt-acc*",
+  "packages/dbgpt-accelerator/dbgpt-acc-auto",
 ]
 
 [tool.uv]

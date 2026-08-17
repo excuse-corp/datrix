@@ -1,4 +1,5 @@
 import { ChatContext } from '@/app/chat-context';
+import { ResultDisplay } from '@/components/ask-data/ResultDisplay';
 import ModelSelector from '@/components/chat/header/model-selector';
 import { useConnectors } from '@/hooks/use-connector-api';
 import { ColumnAnalysis, PreprocessingResult, analyzeDataset } from '@/new-components/analysis';
@@ -23,6 +24,7 @@ import { useConfirmPolling } from '@/new-components/connector/useConfirmPolling'
 import FromTaskBanner from '@/new-components/scheduled-task/FromTaskBanner';
 import SaveAsScheduledTaskDrawer from '@/new-components/scheduled-task/SaveAsScheduledTaskDrawer';
 import type { ChatReplayPayload } from '@/types/scheduled-task';
+import type { AskDataQueryResponse } from '@/utils/ask-data';
 import axios from '@/utils/ctx-axios';
 import { sendSpacePostRequest } from '@/utils/request';
 import {
@@ -30,7 +32,6 @@ import {
   ArrowUpOutlined,
   AudioOutlined,
   BarChartOutlined,
-  BellOutlined,
   BookOutlined,
   CheckCircleFilled,
   CloudServerOutlined,
@@ -52,11 +53,9 @@ import {
   TableOutlined,
   ThunderboltOutlined,
   UploadOutlined,
-  UserOutlined,
 } from '@ant-design/icons';
 import { useRequest } from 'ahooks';
 import {
-  Avatar,
   Button,
   ConfigProvider,
   Dropdown,
@@ -175,6 +174,7 @@ interface ChatMessage {
   attachedDb?: { db_name: string; db_type: string };
   taskPlan?: TaskItem[];
   attachedConnectors?: AttachedConnector[];
+  askDataResult?: AskDataQueryResponse;
 }
 
 interface ExecutionStep {
@@ -389,9 +389,18 @@ const convertToManusFormat = (
   // Get step status mapping
   const getStepStatus = (status: string): 'pending' | 'running' | 'completed' | 'error' => {
     if (status === 'running') return 'running';
-    if (status === 'done') return 'completed';
-    if (status === 'failed') return 'error';
+    if (status === 'done' || status === 'completed') return 'completed';
+    if (status === 'failed' || status === 'error') return 'error';
     return 'pending';
+  };
+
+  const isCompletedThinkingPlaceholder = (step: ExecutionStep) => {
+    if (step.status === 'running') return false;
+    const title = (step.title || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\.{3}$/, '');
+    return title === 'thinking' || title === '思考中' || title === '正在思考中';
   };
 
   // Group steps into sections (for now, create one section with all steps)
@@ -399,7 +408,7 @@ const convertToManusFormat = (
   const steps: ManusExecutionStep[] = execution.steps
     .filter(step => {
       const detail = (step.detail || '').toLowerCase();
-      return !detail.includes('action: terminate');
+      return !detail.includes('action: terminate') && !isCompletedThinkingPlaceholder(step);
     })
     .map(step => {
       const cleanDetail = step.detail?.replace(/^Thought:.*\n?/gm, '').trim();
@@ -414,20 +423,22 @@ const convertToManusFormat = (
       };
     });
 
-  const sections: ThinkingSection[] = [
-    {
-      id: 'section-execution',
-      title: t ? t('execution_steps') : 'Execution Steps',
-      isCompleted: steps.every(s => s.status === 'completed'),
-      steps,
-    },
-  ];
+  const sections: ThinkingSection[] = steps.length
+    ? [
+        {
+          id: 'section-execution',
+          title: t ? t('execution_steps') : 'Execution Steps',
+          isCompleted: steps.every(s => s.status === 'completed'),
+          steps,
+        },
+      ]
+    : [];
 
   // Get active step info
   let activeStep: ActiveStepInfo | null = null;
   if (execution.activeStepId) {
     const step = execution.steps.find(s => s.id === execution.activeStepId);
-    if (step) {
+    if (step && !isCompletedThinkingPlaceholder(step)) {
       const cleanDetail = step.detail?.replace(/^Thought:.*\n?/gm, '').trim();
       activeStep = {
         id: step.id,
@@ -454,69 +465,20 @@ const convertToManusFormat = (
   return { sections, activeStep, outputs, stepThoughts: execution?.stepThoughts || {} };
 };
 
-const EXAMPLE_CARDS = [
-  {
-    id: 'walmart_sales',
-    icon: '📊',
-    title: '沃尔玛销售数据分析',
-    description: '分析沃尔玛销售CSV数据，生成可视化网页报告',
-    query:
-      '请全面分析这份沃尔玛销售数据，包括各门店销售趋势、假日影响、温度与油价对销售的影响等维度，生成一份精美的交互式网页分析报告。',
-    fileName: 'Walmart_Sales.csv',
-    fileType: 'text/csv',
-    fileSize: 98304, // ~96 KB
-    color: 'from-blue-500/10 to-cyan-500/10',
-    borderColor: 'border-blue-200/60 dark:border-blue-800/40',
-    iconBg: 'bg-blue-100 dark:bg-blue-900/40',
-    skillName: 'csv-data-analysis',
-  },
-  {
-    id: 'db_profile_report',
-    icon: '🗄️',
-    title: '数据库画像与分析报告',
-    description: '连接数据库后，生成数据库画像并生成可视化网页报告',
-    query:
-      '请分析当前连接的数据库，生成数据库画像（包括表结构、字段信息、数据量统计等），并生成一份精美的交互式网页分析报告。',
-    dbName: 'Walmart_Sales',
-    color: 'from-emerald-500/10 to-teal-500/10',
-    borderColor: 'border-emerald-200/60 dark:border-emerald-800/40',
-    iconBg: 'bg-emerald-100 dark:bg-emerald-900/40',
-  },
-  {
-    id: 'fin_report',
-    icon: '📈',
-    title: '金融财报深度分析',
-    description: '分析浙江海翔药业年度报告，生成数据可视化报告',
-    query:
-      '请深度分析这份浙江海翔药业2019年年度报告，包括营收利润趋势、资产负债结构、现金流分析、关键财务指标等，生成一份专业的交互式网页分析报告。',
-    fileName: '2020-01-23__浙江海翔药业股份有限公司__002099__海翔药业__2019年__年度报告.pdf',
-    fileType: 'application/pdf',
-    fileSize: 2621440, // ~2.5 MB
-    color: 'from-violet-500/10 to-purple-500/10',
-    borderColor: 'border-violet-200/60 dark:border-violet-800/40',
-    iconBg: 'bg-violet-100 dark:bg-violet-900/40',
-    skillName: 'financial-report-analyzer',
-  },
-  {
-    id: 'create_sql_skill',
-    icon: '🛠️',
-    title: '创建SQL分析技能',
-    description: '使用skill-creator创建一个实用的SQL数据分析技能',
-    query:
-      '请使用 skill-creator 帮我创建一个实用的SQL数据分析技能，包含连接数据库、执行SQL查询和数据可视化等核心功能。',
-    color: 'from-amber-500/10 to-orange-500/10',
-    borderColor: 'border-amber-200/60 dark:border-amber-800/40',
-    iconBg: 'bg-amber-100 dark:bg-amber-900/40',
-    skillName: 'skill-creator',
-  },
-];
-
 const Playground: NextPage = () => {
   const router = useRouter();
-  const { t } = useTranslation();
+  const { t: translate } = useTranslation();
+  const t = translate as unknown as (key: string, options?: Record<string, unknown>) => string;
   const { model, setModel } = useContext(ChatContext);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const prompt = router.query.q;
+    if (typeof prompt === 'string' && prompt.trim()) {
+      setQuery(prompt);
+    }
+  }, [router.query.q]);
 
   // Selection State
   const [isDbModalOpen, setIsDbModalOpen] = useState(false);
@@ -1588,6 +1550,22 @@ const Playground: NextPage = () => {
     }));
     setActiveMessageId(responseId);
 
+    const settleResponseState = (runningStepStatus: 'done' | 'failed' = 'done') => {
+      setExecutionMap(prev => {
+        const current = prev[responseId];
+        if (!current) return prev;
+        const steps = current.steps.map<ExecutionStep>(step => {
+          if (step.status !== 'running') return step;
+          return { ...step, status: runningStepStatus };
+        });
+        return { ...prev, [responseId]: { ...current, steps } };
+      });
+      setMessages(prev =>
+        prev.map(msg => (msg.id === responseId && msg.role === 'view' ? { ...msg, thinking: false } : msg)),
+      );
+      setLoading(false);
+    };
+
     // Build ext_info once and reuse it for both the live request and the
     // snapshot captured for "保存定时任务", so a saved task replays the exact
     // same context (file / database / knowledge / skill / connectors).
@@ -1672,6 +1650,71 @@ const Playground: NextPage = () => {
             usage_percent: (payload.ratio ?? 0) * 100,
             layer: payload.compact_layer ?? null,
           });
+          return;
+        }
+        if (payload.type === 'ask_data.stage') {
+          const id = `ask-data-${payload.stage || 'query'}`;
+          const stageStatus: ExecutionStep['status'] =
+            payload.status === 'failed' || payload.status === 'error'
+              ? 'failed'
+              : payload.status === 'done' || payload.status === 'succeeded'
+                ? 'done'
+                : 'running';
+          setExecutionMap(prev => {
+            const current = prev[responseId] || {
+              steps: [],
+              outputs: {},
+              activeStepId: null,
+              collapsed: false,
+              stepThoughts: {},
+            };
+            const steps = current.steps.some(step => step.id === id)
+              ? current.steps.map(step =>
+                  step.id === id
+                    ? { ...step, title: payload.title, detail: payload.detail || 'AskData', status: stageStatus }
+                    : step.status === 'running'
+                      ? { ...step, status: 'done' as const }
+                      : step,
+                )
+              : [
+                  ...current.steps.map(step =>
+                    step.status === 'running' ? { ...step, status: 'done' as const } : step,
+                  ),
+                  {
+                    id,
+                    step: current.steps.length + 1,
+                    title: payload.title || '正在查询业务数据',
+                    detail: payload.detail || 'AskData',
+                    status: stageStatus,
+                    action: 'ask_data_query',
+                  },
+                ];
+            return { ...prev, [responseId]: { ...current, steps } };
+          });
+          return;
+        }
+        if (payload.type === 'ask_data.result') {
+          const askDataResult = payload as AskDataQueryResponse;
+          setExecutionMap(prev => {
+            const current = prev[responseId];
+            if (!current) return prev;
+            return {
+              ...prev,
+              [responseId]: {
+                ...current,
+                steps: current.steps.map(step =>
+                  step.action === 'ask_data_query' && step.status === 'running' ? { ...step, status: 'done' } : step,
+                ),
+              },
+            };
+          });
+          setMessages(prev =>
+            prev.map(msg =>
+              msg.id === responseId && msg.role === 'view'
+                ? { ...msg, askDataResult, context: askDataResult.answer || msg.context }
+                : msg,
+            ),
+          );
           return;
         }
         if (payload.type === 'question.asked') {
@@ -1913,14 +1956,7 @@ const Playground: NextPage = () => {
             });
           }
         } else if (payload.type === 'final') {
-          setExecutionMap(prev => {
-            const current = prev[responseId];
-            if (!current) return prev;
-            const nextSteps = current.steps.map(item =>
-              item.status === 'running' ? { ...item, status: 'done' } : item,
-            );
-            return { ...prev, [responseId]: { ...current, steps: nextSteps } };
-          });
+          settleResponseState();
           setMessages(prev =>
             prev.map(msg => {
               if (msg.id !== responseId || msg.role !== 'view') return msg;
@@ -2020,7 +2056,7 @@ const Playground: NextPage = () => {
             }, 15);
           }
         } else if (payload.type === 'done') {
-          setLoading(false);
+          settleResponseState();
         }
       };
 
@@ -2033,9 +2069,12 @@ const Playground: NextPage = () => {
         buffer = parts.pop() || '';
         parts.forEach(processEvent);
       }
-      setLoading(false);
+      if (buffer.trim()) {
+        processEvent(buffer);
+      }
+      settleResponseState();
     } catch (err: any) {
-      setLoading(false);
+      settleResponseState('failed');
       message.error(err?.message || 'Failed to get response');
       setMessages(prev => {
         const newMessages = [...prev];
@@ -2049,89 +2088,7 @@ const Playground: NextPage = () => {
     }
   };
 
-  const handleExampleClick = async (example: (typeof EXAMPLE_CARDS)[number]) => {
-    const queryKey = `example_${example.id}_query`;
-    const queryVal = t(queryKey) as string;
-    const translatedQuery = (queryVal && queryVal !== queryKey ? queryVal : example.query) as string;
-
-    if (loading) return;
-
-    try {
-      message.loading({ content: '正在加载示例...', key: 'example-loading', duration: 0 });
-
-      let filePath: string | null = null;
-      let fakeFile: File | null = null;
-
-      // If example has a file, request it from backend
-      if (example.fileName) {
-        const res = await axios.post(`${process.env.API_BASE_URL ?? ''}/api/v1/examples/use`, {
-          example_id: example.id,
-        });
-
-        if (res?.success && res?.data) {
-          filePath = res.data;
-          preloadedFilePathRef.current = filePath;
-          fakeFile = new File([new ArrayBuffer(example.fileSize || 0)], example.fileName, {
-            type: example.fileType,
-          });
-          setUploadedFile(fakeFile);
-        } else {
-          message.destroy('example-loading');
-          const errMsg = res?.err_msg || 'Unknown error';
-          message.error('加载示例失败: ' + errMsg);
-          return;
-        }
-      }
-
-      message.destroy('example-loading');
-
-      // Auto-select skill if example specifies one
-      let exampleSkill: Skill | null = null;
-      if (example.skillName && skillsList) {
-        const matched = skillsList.find(s => s.name === example.skillName);
-        if (matched) {
-          exampleSkill = matched;
-          setSelectedSkill(matched);
-        }
-      }
-
-      // Auto-select database if example specifies one
-      let matchedDb: DataSource | null = null;
-      if (example.dbName && dataSources) {
-        const found = dataSources.find((ds: DataSource) => ds.db_name === example.dbName);
-        if (found) {
-          matchedDb = found;
-          setSelectedDb(found);
-        }
-      }
-
-      handleStart(translatedQuery, fakeFile, exampleSkill, matchedDb);
-    } catch (err: unknown) {
-      message.destroy('example-loading');
-      console.error('Example click error:', err);
-      const errMessage = err instanceof Error ? err.message : 'Unknown error';
-      message.error('加载示例失败: ' + errMessage);
-    }
-  };
-
   // Clear chat history
-  const handleClearChat = () => {
-    setMessages([]);
-    setConversationId(null);
-    setQuery('');
-    setExecutionMap({});
-    setActiveMessageId(null);
-    setActiveViewMsgId(null);
-    setUploadedFilePath(null);
-    setFilePreview(null);
-    setFilePreviewError(null);
-    setArtifacts([]);
-    setRightPanelTab('preview');
-    setStreamingSummary('');
-    setSummaryComplete(false);
-    router.push('/', undefined, { shallow: true });
-  };
-
   const restoreFromHistory = (
     historyMessages: Array<{ role: string; context: string; order?: number; model_name?: string }>,
   ) => {
@@ -2419,33 +2376,9 @@ const Playground: NextPage = () => {
         },
       }}
     >
-      <div className='flex h-full w-full bg-[#f7f7f9] dark:bg-[#0f1012] text-[#1a1b1e] dark:text-gray-200 font-sans overflow-hidden'>
+      <div className='dataman-chat-home flex h-full w-full bg-[#f7f7f9] dark:bg-[#0f1012] text-[#1a1b1e] dark:text-gray-200 font-sans overflow-hidden'>
         {/* Main Content */}
-        <div className='flex-1 flex flex-col relative overflow-hidden bg-white dark:bg-[#111217]'>
-          {/* Top Header */}
-          <div className='h-16 flex-shrink-0 flex items-center justify-between px-8 border-b border-gray-200 dark:border-gray-800 bg-white/80 dark:bg-[#111217]/80 backdrop-blur z-20'>
-            <div className='flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300 px-2 py-1 rounded-md'>
-              <span>{t('home_title')}</span>
-            </div>
-            <div className='flex items-center gap-4'>
-              {selectedDb && (
-                <Tag className='flex items-center gap-1 bg-blue-50 border-blue-200 text-blue-700 px-3 py-1 rounded-full text-xs'>
-                  {getDbIcon(selectedDb.type)} <span className='font-medium ml-1'>{selectedDb.db_name}</span>
-                </Tag>
-              )}
-              {messages.length > 0 && (
-                <Button type='text' size='small' onClick={handleClearChat} className='text-gray-500'>
-                  Clear Chat
-                </Button>
-              )}
-              <BellOutlined className='text-lg text-gray-500 cursor-pointer' />
-              <div className='flex items-center gap-2 bg-gray-100 dark:bg-gray-800 px-3 py-1 rounded-full text-xs font-medium'>
-                <ThunderboltOutlined className='text-yellow-500' /> <span>300</span>
-              </div>
-              <Avatar size='small' icon={<UserOutlined />} className='bg-blue-500' />
-            </div>
-          </div>
-
+        <div className='industrial-canvas flex-1 flex flex-col relative overflow-hidden bg-white dark:bg-[#111217]'>
           {/* From Task Banner - shown when navigating from a scheduled task */}
           {router.query.from_task && <FromTaskBanner taskId={router.query.from_task as string} />}
 
@@ -2483,133 +2416,141 @@ const Playground: NextPage = () => {
                       : round.viewMsg?.context || undefined;
 
                     return (
-                      <ManusLeftPanel
-                        key={round.viewMsg?.id || round.humanMsg?.id || `round-${roundIndex}`}
-                        sections={sections}
-                        activeStepId={isSelected ? selectedStepId || execution?.activeStepId : undefined}
-                        onStepClick={(stepId, _sectionId) => {
-                          if (round.viewMsg?.id) {
-                            setActiveViewMsgId(round.viewMsg.id);
-                            setSelectedStepId(stepId);
-                            setRightPanelCollapsed(false);
-                            setExecutionMap(prev => ({
-                              ...prev,
-                              [round.viewMsg!.id!]: {
-                                ...prev[round.viewMsg!.id!],
-                                activeStepId: stepId,
-                              },
-                            }));
-                          }
-                        }}
-                        isWorking={isWorking}
-                        userQuery={round.humanMsg?.context}
-                        attachedFile={round.humanMsg?.attachedFile}
-                        attachedKnowledge={round.humanMsg?.attachedKnowledge}
-                        attachedSkill={round.humanMsg?.attachedSkill}
-                        attachedDb={round.humanMsg?.attachedDb}
-                        taskPlan={round.viewMsg?.taskPlan}
-                        attachedConnectors={round.humanMsg?.attachedConnectors}
-                        assistantText={roundAssistantText}
-                        modelName={round.viewMsg?.model_name || model}
-                        stepThoughts={stepThoughts}
-                        artifacts={artifacts.filter(a => a.messageId === round.viewMsg?.id)}
-                        onArtifactClick={artifact => {
-                          if (round.viewMsg?.id) setActiveViewMsgId(round.viewMsg.id);
-                          setRightPanelCollapsed(false);
-                          if (artifact.type === 'html') {
-                            setPreviewArtifact(artifact as Artifact);
-                            setRightPanelView('html-preview');
-                          } else if (artifact.type === 'code' && artifact.stepId) {
-                            setSelectedStepId(artifact.stepId);
-                            setRightPanelView('execution');
-                            if (round.viewMsg?.id && execution) {
+                      <div key={round.viewMsg?.id || round.humanMsg?.id || `round-${roundIndex}`}>
+                        <ManusLeftPanel
+                          sections={sections}
+                          activeStepId={isSelected ? selectedStepId || execution?.activeStepId : undefined}
+                          onStepClick={(stepId, _sectionId) => {
+                            if (round.viewMsg?.id) {
+                              setActiveViewMsgId(round.viewMsg.id);
+                              setSelectedStepId(stepId);
+                              setRightPanelCollapsed(false);
                               setExecutionMap(prev => ({
                                 ...prev,
                                 [round.viewMsg!.id!]: {
                                   ...prev[round.viewMsg!.id!],
-                                  activeStepId: artifact.stepId!,
+                                  activeStepId: stepId,
                                 },
                               }));
                             }
-                          } else if (artifact.type === 'file') {
-                            // Image file artifacts: preview instead of download
-                            if (/\.(png|jpg|jpeg|gif|webp|svg|bmp)$/i.test(artifact.name)) {
+                          }}
+                          isWorking={isWorking}
+                          userQuery={round.humanMsg?.context}
+                          attachedFile={round.humanMsg?.attachedFile}
+                          attachedKnowledge={round.humanMsg?.attachedKnowledge}
+                          attachedSkill={round.humanMsg?.attachedSkill}
+                          attachedDb={round.humanMsg?.attachedDb}
+                          taskPlan={round.viewMsg?.taskPlan}
+                          attachedConnectors={round.humanMsg?.attachedConnectors}
+                          assistantText={roundAssistantText}
+                          stepThoughts={stepThoughts}
+                          artifacts={artifacts.filter(a => a.messageId === round.viewMsg?.id)}
+                          onArtifactClick={artifact => {
+                            if (round.viewMsg?.id) setActiveViewMsgId(round.viewMsg.id);
+                            setRightPanelCollapsed(false);
+                            if (artifact.type === 'html') {
+                              setPreviewArtifact(artifact as Artifact);
+                              setRightPanelView('html-preview');
+                            } else if (artifact.type === 'code' && artifact.stepId) {
+                              setSelectedStepId(artifact.stepId);
+                              setRightPanelView('execution');
+                              if (round.viewMsg?.id && execution) {
+                                setExecutionMap(prev => ({
+                                  ...prev,
+                                  [round.viewMsg!.id!]: {
+                                    ...prev[round.viewMsg!.id!],
+                                    activeStepId: artifact.stepId!,
+                                  },
+                                }));
+                              }
+                            } else if (artifact.type === 'file') {
+                              // Image file artifacts: preview instead of download
+                              if (/\.(png|jpg|jpeg|gif|webp|svg|bmp)$/i.test(artifact.name)) {
+                                setPreviewArtifact(artifact as Artifact);
+                                setRightPanelView('image-preview');
+                              } else {
+                                downloadArtifact(artifact as Artifact);
+                              }
+                            } else if (artifact.type === 'image') {
                               setPreviewArtifact(artifact as Artifact);
                               setRightPanelView('image-preview');
-                            } else {
-                              downloadArtifact(artifact as Artifact);
                             }
-                          } else if (artifact.type === 'image') {
-                            setPreviewArtifact(artifact as Artifact);
-                            setRightPanelView('image-preview');
-                          }
-                        }}
-                        onArtifactDownload={artifact => downloadArtifact(artifact as Artifact)}
-                        onViewAllFiles={() => {
-                          if (round.viewMsg?.id) setActiveViewMsgId(round.viewMsg.id);
-                          setRightPanelCollapsed(false);
-                          setRightPanelView('files');
-                        }}
-                        isCollapsed={isCurrentRoundCollapsed}
-                        onExpand={() => {
-                          if (round.viewMsg?.id) setActiveViewMsgId(round.viewMsg.id);
-                        }}
-                        createdSkillName={createdSkillNames[round.viewMsg?.id || '']}
-                        onSkillCardClick={_skillName => {
-                          if (round.viewMsg?.id) setActiveViewMsgId(round.viewMsg.id);
-                          setRightPanelCollapsed(false);
-                          setRightPanelView('skill-preview');
-                          // Find the package_skill step and select it so right panel shows SkillCardRenderer
-                          if (execution) {
-                            const skillStep = execution.steps.find((s: ExecutionStep) => {
-                              if (s.action !== 'shell_interpreter') return false;
-                              const detailHas = s.detail?.includes('package_skill') || s.detail?.includes('init_skill');
-                              const inputHas =
-                                s.actionInput?.includes('package_skill') || s.actionInput?.includes('init_skill');
-                              const outputTexts = (execution.outputs[s.id] || []).map(o => String(o.content)).join(' ');
-                              const outputHas =
-                                outputTexts.includes('package_skill') ||
-                                outputTexts.includes('init_skill') ||
-                                outputTexts.includes('Successfully packaged');
-                              return detailHas || inputHas || outputHas;
-                            });
-                            if (skillStep) {
-                              setSelectedStepId(skillStep.id);
-                              setExecutionMap(prev => ({
-                                ...prev,
-                                [round.viewMsg!.id!]: { ...prev[round.viewMsg!.id!], activeStepId: skillStep.id },
-                              }));
+                          }}
+                          onArtifactDownload={artifact => downloadArtifact(artifact as Artifact)}
+                          onViewAllFiles={() => {
+                            if (round.viewMsg?.id) setActiveViewMsgId(round.viewMsg.id);
+                            setRightPanelCollapsed(false);
+                            setRightPanelView('files');
+                          }}
+                          isCollapsed={isCurrentRoundCollapsed}
+                          onExpand={() => {
+                            if (round.viewMsg?.id) setActiveViewMsgId(round.viewMsg.id);
+                          }}
+                          createdSkillName={createdSkillNames[round.viewMsg?.id || '']}
+                          onSkillCardClick={_skillName => {
+                            if (round.viewMsg?.id) setActiveViewMsgId(round.viewMsg.id);
+                            setRightPanelCollapsed(false);
+                            setRightPanelView('skill-preview');
+                            // Find the package_skill step and select it so right panel shows SkillCardRenderer
+                            if (execution) {
+                              const skillStep = execution.steps.find((s: ExecutionStep) => {
+                                if (s.action !== 'shell_interpreter') return false;
+                                const detailHas =
+                                  s.detail?.includes('package_skill') || s.detail?.includes('init_skill');
+                                const inputHas =
+                                  s.actionInput?.includes('package_skill') || s.actionInput?.includes('init_skill');
+                                const outputTexts = (execution.outputs[s.id] || [])
+                                  .map(o => String(o.content))
+                                  .join(' ');
+                                const outputHas =
+                                  outputTexts.includes('package_skill') ||
+                                  outputTexts.includes('init_skill') ||
+                                  outputTexts.includes('Successfully packaged');
+                                return detailHas || inputHas || outputHas;
+                              });
+                              if (skillStep) {
+                                setSelectedStepId(skillStep.id);
+                                setExecutionMap(prev => ({
+                                  ...prev,
+                                  [round.viewMsg!.id!]: { ...prev[round.viewMsg!.id!], activeStepId: skillStep.id },
+                                }));
+                              }
                             }
-                          }
-                        }}
-                        onSkillDownload={async skillName => {
-                          try {
-                            const base = process.env.API_BASE_URL || '';
-                            const res = await fetch(
-                              `${base}/api/v1/agent/skills/download?skill_name=${encodeURIComponent(skillName)}`,
-                            );
-                            if (!res.ok) throw new Error('Download failed');
-                            const blob = await res.blob();
-                            const url = URL.createObjectURL(blob);
-                            const a = document.createElement('a');
-                            a.href = url;
-                            a.download = `${skillName}.zip`;
-                            document.body.appendChild(a);
-                            a.click();
-                            document.body.removeChild(a);
-                            URL.revokeObjectURL(url);
-                          } catch {
-                            // Download failed silently
-                          }
-                        }}
-                      />
+                          }}
+                          onSkillDownload={async skillName => {
+                            try {
+                              const base = process.env.API_BASE_URL || '';
+                              const res = await fetch(
+                                `${base}/api/v1/agent/skills/download?skill_name=${encodeURIComponent(skillName)}`,
+                              );
+                              if (!res.ok) throw new Error('Download failed');
+                              const blob = await res.blob();
+                              const url = URL.createObjectURL(blob);
+                              const a = document.createElement('a');
+                              a.href = url;
+                              a.download = `${skillName}.zip`;
+                              document.body.appendChild(a);
+                              a.click();
+                              document.body.removeChild(a);
+                              URL.revokeObjectURL(url);
+                            } catch {
+                              // Download failed silently
+                            }
+                          }}
+                        />
+                        {round.viewMsg?.askDataResult && (
+                          <div className='mx-auto mb-6 max-w-5xl px-4'>
+                            <ResultDisplay response={round.viewMsg.askDataResult} />
+                          </div>
+                        )}
+                      </div>
                     );
                   })}
                 </div>
 
                 {/* Input Area at Bottom for Chat Mode - Hidden in read-only task replay mode */}
                 {!router.query.from_task && (
-                  <div className='bg-gradient-to-t from-white via-white/95 to-white/80 dark:from-[#1a1b1e] dark:via-[#1a1b1e]/95 dark:to-[#1a1b1e]/80 p-4 md:p-6'>
+                  <div className='chat-composer-region bg-white dark:bg-[#111217] p-4 md:p-6'>
                     <div className='max-w-[720px] mx-auto'>
                       {/* Context Tags Area */}
                       <div className='flex flex-wrap gap-2 mb-2'>
@@ -3226,25 +3167,23 @@ const Playground: NextPage = () => {
             </div>
           ) : (
             // Welcome Mode: Display Hero Section
-            <div className='flex-1 flex flex-col items-center justify-center px-6 py-4 pb-20 overflow-y-auto'>
-              <div className='w-full max-w-[860px] flex flex-col items-center animate-fade-in-up'>
-                <h1 className='text-4xl md:text-5xl font-serif text-gray-900 dark:text-gray-100 mb-4 text-center flex items-center gap-4'>
-                  <div className='w-12 h-12 rounded-xl bg-white dark:bg-[#1a1b1e] shadow-md flex items-center justify-center flex-shrink-0'>
-                    <Image src='/LOGO_SMALL.png' alt='DB-GPT' width={32} height={32} className='object-contain' />
-                  </div>
-                  {t('home_title')}
-                </h1>
-
-                <p className='text-sm md:text-base text-gray-400 dark:text-gray-500 tracking-[0.2em] font-light mb-10'>
-                  {t('home_subtitle')}
-                </p>
+            <div className='industrial-welcome relative flex-1 flex flex-col items-center justify-center px-6 py-4 overflow-y-auto'>
+              <div className='industrial-welcome-content w-full max-w-[860px] flex flex-col items-center animate-fade-in-up'>
+                <div className='industrial-hero-header w-full flex flex-col items-center'>
+                  <h1 className='industrial-hero-title text-4xl md:text-5xl font-serif text-gray-900 dark:text-gray-100 mb-4 text-center flex items-center gap-4'>
+                    <div className='w-14 h-14 rounded-xl bg-white dark:bg-[#1a1b1e] shadow-md flex items-center justify-center flex-shrink-0'>
+                      <Image src='/datrix-brand.png' alt='Datrix' width={40} height={40} className='object-contain' />
+                    </div>
+                    <span className='industrial-hero-name'>{t('home_title')}</span>
+                  </h1>
+                </div>
 
                 {/* Input Box Container - Premium Layered Style */}
-                <div className='w-full relative'>
+                <div className='industrial-command-region w-full relative'>
                   {/* Outer Frame - Floating Effect */}
-                  <div className='w-full relative transition-all duration-500 rounded-[28px] shadow-[0_16px_48px_rgba(0,0,0,0.12),0_6px_20px_rgba(0,0,0,0.08)] hover:shadow-[0_24px_64px_rgba(0,0,0,0.2),0_12px_32px_rgba(0,0,0,0.1)] dark:shadow-[0_16px_48px_rgba(0,0,0,0.4)] dark:hover:shadow-[0_24px_64px_rgba(0,0,0,0.5)]'>
+                  <div className='industrial-command-frame w-full relative transition-all duration-500 rounded-[28px] shadow-[0_16px_48px_rgba(0,0,0,0.12),0_6px_20px_rgba(0,0,0,0.08)] hover:shadow-[0_24px_64px_rgba(0,0,0,0.2),0_12px_32px_rgba(0,0,0,0.1)] dark:shadow-[0_16px_48px_rgba(0,0,0,0.4)] dark:hover:shadow-[0_24px_64px_rgba(0,0,0,0.5)]'>
                     {/* White Inner Box - Clean Glass Card */}
-                    <div className='bg-white/95 backdrop-blur-md dark:bg-[#1e1f24]/95 rounded-[28px] border border-gray-100 dark:border-[#33353b] shadow-[inset_0_1px_0_rgba(255,255,255,1)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-5 relative z-10'>
+                    <div className='industrial-command-shell bg-white/95 backdrop-blur-md dark:bg-[#1e1f24]/95 rounded-[28px] border border-gray-100 dark:border-[#33353b] shadow-[inset_0_1px_0_rgba(255,255,255,1)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-5 relative z-10'>
                       {/* Uploaded File, Database, Knowledge, Connector Tags */}
                       {(uploadedFile || selectedDb || selectedKnowledge || selectedConnectors.length > 0) && (
                         <div className='flex flex-wrap gap-2 mb-2'>
@@ -3313,12 +3252,12 @@ const Playground: NextPage = () => {
                           'Ask a question about your database, upload a CSV, or generate a report...'
                         }
                         autoSize={{ minRows: 3, maxRows: 8 }}
-                        className='text-lg resize-none !border-none !shadow-none !bg-transparent px-2 py-2 mb-2'
+                        className='industrial-command-input text-lg resize-none !border-none !shadow-none !bg-transparent px-2 py-2 mb-2'
                         style={{ backgroundColor: 'transparent' }}
                       />
 
                       {/* Input Toolbar */}
-                      <div className='flex items-center justify-between px-1 mt-1'>
+                      <div className='industrial-command-toolbar flex items-center justify-between px-1 mt-1'>
                         <div className='flex items-center gap-4'>
                           {/* Add Button with Dropdown Menu */}
                           <Dropdown
@@ -3907,48 +3846,9 @@ const Playground: NextPage = () => {
                               </Button>
                             </Tooltip>
                           </Popover>
-
-                          {/* Separator */}
-                          <div className='w-px h-4 bg-gray-200 dark:bg-gray-700 mx-0.5' />
-
-                          {/* Model Selector with premium styling */}
-                          <div className='model-selector-premium'>
-                            <ModelSelector onChange={val => setModel(val)} />
-                          </div>
-                          <style
-                            dangerouslySetInnerHTML={{
-                              __html: `
-                                  .model-selector-premium .ant-select { border-radius: 8px !important; border: none !important; }
-                                  .model-selector-premium .ant-select-selector { background: linear-gradient(180deg, #ffffff 0%, #f9fafb 100%) !important; border: 1px solid rgba(0,0,0,0.12) !important; box-shadow: 0 1px 2px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,1) !important; border-radius: 8px !important; transition: all 0.2s ease !important; padding: 0 8px !important; }
-                                  .dark .model-selector-premium .ant-select-selector { background: linear-gradient(180deg, #2a2b2f 0%, #1e1f24 100%) !important; border: 1px solid rgba(255,255,255,0.1) !important; box-shadow: 0 1px 2px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.05) !important; }
-                                  .model-selector-premium .ant-select:hover .ant-select-selector { border-color: rgba(0,0,0,0.2) !important; box-shadow: 0 2px 4px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,1) !important; transform: translateY(-0.5px); }
-                                  .dark .model-selector-premium .ant-select:hover .ant-select-selector { border-color: rgba(255,255,255,0.15) !important; }
-                                  .model-selector-premium .ant-select-focused .ant-select-selector { border-color: #a78bfa !important; box-shadow: 0 0 0 2px rgba(167,139,250,0.15), inset 0 1px 0 rgba(255,255,255,1) !important; }
-                                  .dark .model-selector-premium .ant-select-focused .ant-select-selector { box-shadow: 0 0 0 2px rgba(167,139,250,0.2), inset 0 1px 0 rgba(255,255,255,0.05) !important; }
-                                  
-                                  /* Global Dropdown Item Styles for Model Selectors */
-                                  .ant-select-dropdown .ant-select-item-option-selected { background-color: #f1f5f9 !important; color: #0f172a !important; font-weight: 500 !important; }
-                                  .ant-select-dropdown .ant-select-item-option-active:not(.ant-select-item-option-selected) { background-color: #f8fafc !important; }
-                                  .dark .ant-select-dropdown .ant-select-item-option-selected { background-color: rgba(255,255,255,0.08) !important; color: #e2e8f0 !important; }
-                                  .dark .ant-select-dropdown .ant-select-item-option-active:not(.ant-select-item-option-selected) { background-color: rgba(255,255,255,0.04) !important; }
-                                `,
-                            }}
-                          />
                         </div>
 
                         <div className='flex items-center gap-3'>
-                          {/* Voice Button */}
-                          <Tooltip title={t('voice_input')}>
-                            <Button
-                              type='text'
-                              shape='circle'
-                              size='large'
-                              icon={<AudioOutlined className='text-gray-500 text-xl' />}
-                              onClick={() => message.info(t('voice_input_coming_soon'))}
-                              className='flex-shrink-0 transition-all duration-200 flex items-center justify-center hover:bg-gray-100 dark:hover:bg-gray-800'
-                            />
-                          </Tooltip>
-
                           {/* Send Button with blue gradient + gloss */}
                           <Button
                             type='primary'
@@ -3990,68 +3890,10 @@ const Playground: NextPage = () => {
                     </div>
                   </div>
                 </div>
-
-                {/* Recommended Examples */}
-                <div className='mt-10 w-full'>
-                  <div className='flex items-center justify-center gap-2 mb-4'>
-                    <div className='h-px flex-1 bg-gradient-to-r from-transparent to-gray-200 dark:to-gray-700' />
-                    <span className='text-xs font-medium text-gray-400 dark:text-gray-500 tracking-wider uppercase'>
-                      {t('recommend_examples')}
-                    </span>
-                    <div className='h-px flex-1 bg-gradient-to-l from-transparent to-gray-200 dark:to-gray-700' />
-                  </div>
-                  <div className='grid grid-cols-1 sm:grid-cols-2 gap-3'>
-                    {EXAMPLE_CARDS.map(example => (
-                      <div
-                        key={example.id}
-                        onClick={() => handleExampleClick(example)}
-                        className={`group relative bg-gradient-to-br ${example.color} border ${example.borderColor} rounded-2xl p-4 cursor-pointer hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300`}
-                      >
-                        <div className='flex items-start gap-3'>
-                          <div
-                            className={`w-10 h-10 ${example.iconBg} rounded-xl flex items-center justify-center text-xl flex-shrink-0`}
-                          >
-                            {example.icon}
-                          </div>
-                          <div className='flex-1 min-w-0'>
-                            <h3 className='text-sm font-semibold text-gray-800 dark:text-gray-200 mb-1'>
-                              {(() => {
-                                const key = `example_${example.id}_title`;
-                                const val = t(key) as string;
-                                return val && val !== key ? val : example.title;
-                              })()}
-                            </h3>
-                            <p className='text-xs text-gray-500 dark:text-gray-400 line-clamp-2'>
-                              {(() => {
-                                const key = `example_${example.id}_desc`;
-                                const val = t(key) as string;
-                                return val && val !== key ? val : example.description;
-                              })()}
-                            </p>
-                          </div>
-                        </div>
-                        <div className='absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity'>
-                          <RightOutlined className='text-xs text-gray-400' />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
               </div>
-            </div>
-          )}
-
-          {/* Footer Promo - Only show when no messages */}
-          {messages.length === 0 && (
-            <div className='absolute bottom-6 left-0 right-0 flex justify-center'>
-              <div className='bg-white/60 dark:bg-[#1e1f24]/60 backdrop-blur-sm px-5 py-2.5 rounded-full border border-gray-100 dark:border-gray-700/50 flex items-center gap-3 shadow-sm cursor-pointer hover:shadow-md hover:bg-white/90 dark:hover:bg-[#1e1f24]/90 transition-all duration-300'>
-                <Image src='/LOGO_SMALL.png' alt='DB-GPT' width={22} height={22} className='object-contain' />
-                <span className='text-xs font-medium text-gray-600 dark:text-gray-300 tracking-wide'>
-                  {t('home_subtitle')}
-                </span>
-                <span className='text-[10px] text-gray-400 dark:text-gray-500'>·</span>
-                <span className='text-[10px] text-gray-400 dark:text-gray-500'>{t('home_title')}</span>
-              </div>
+              <p className='industrial-hero-slogan absolute bottom-6 left-6 right-6 text-center text-sm text-gray-400 dark:text-gray-500 md:text-base'>
+                {t('home_subtitle')}
+              </p>
             </div>
           )}
         </div>

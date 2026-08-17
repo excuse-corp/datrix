@@ -1,31 +1,31 @@
 # Memory Introduction
 
-> The memory module plays a very important role in the agent architecture design. It 
-> stores information perceived from the environment and leverages the recorded memories 
-> to facilitate future actions. The memory module can help the agent to accumulate 
+> The memory module plays a very important role in the agent architecture design. It
+> stores information perceived from the environment and leverages the recorded memories
+> to facilitate future actions. The memory module can help the agent to accumulate
 > experiences, self-evolve, and behave in a more consistent, reasonable, and effective manner.
 
 ## Memory Module Overview
 
 ### Memory Operations
 
-In DB-GPT agents, there are three main memory operations:
+In Datrix agents, there are three main memory operations:
 
-1. **Memory reading**: The objective of memory reading is to extract meaningful 
+1. **Memory reading**: The objective of memory reading is to extract meaningful
 information from memory to enhance the agent’s actions.
-2. **Memory writing**: The purpose of memory writing is to store information about the 
-perceived environment in memory. Storing valuable information in memory provides a 
-foundation for retrieving informative memories in the future, enabling the agent to act 
+2. **Memory writing**: The purpose of memory writing is to store information about the
+perceived environment in memory. Storing valuable information in memory provides a
+foundation for retrieving informative memories in the future, enabling the agent to act
 more efficiently and rationally.
-3. **Memory reflection**: Memory reflection emulates humans’ ability to witness and 
-evaluate their own cognitive, emotional, and behavioral processes. When adapted to agents, 
-the objective is to provide agents with the capability to independently summarize and 
+3. **Memory reflection**: Memory reflection emulates humans’ ability to witness and
+evaluate their own cognitive, emotional, and behavioral processes. When adapted to agents,
+the objective is to provide agents with the capability to independently summarize and
 infer more abstract, complex and high-level information.
 
 ### Memory Structure
 
-In DB-GPT agents, there are four main memory structures:
-1. **Sensory memory**: Like human sensory memory, the sensory memory is registers 
+In Datrix agents, there are four main memory structures:
+1. **Sensory memory**: Like human sensory memory, the sensory memory is registers
 perceptual inputs, and it will receive the observations from the environment, some of sensory
 memory will be transferred to short-term memory.
 2. **Short-term memory**: Short-term memory temporarily buffers recent perceptions, it will receive
@@ -34,15 +34,15 @@ some of the sensory memory, and it can be enhanced by other observations or retr
 information from short-term memory, and it will consolidates important information over time.
 4. **Hybrid memory**: Hybrid memory is a combination of sensory memory, short-term memory, and long-term memory.
 
-## Memory In DB-GPT Agents
+## Memory In Datrix Agents
 
 ### Some Concepts Of Memory
 
-- `Memory`: The memory is a class that stores all the memories, it can be `SensorMemory`, 
+- `Memory`: The memory is a class that stores all the memories, it can be `SensorMemory`,
 `ShortTermMemory`, `EnhancedShortTermMemory`, `LongTermMemory` and `HybridMemory` now.
-- `MemoryFragment`: The `MemoryFragment` is an abstract class that stores the memory information,  
-The `AgentMemoryFragment` is a class that inherits from `MemoryFragment`,  it contains 
-the memory content, memory id, memory importance, last access time, etc. 
+- `MemoryFragment`: The `MemoryFragment` is an abstract class that stores the memory information,
+The `AgentMemoryFragment` is a class that inherits from `MemoryFragment`,  it contains
+the memory content, memory id, memory importance, last access time, etc.
 - `GptsMemory`: The `GptsMemory` is used to store the conversation and plan information, not a part of the memory structure.
 - `AgentMemory`: The `AgentMemory` is a class that contains the `Memory` and `GptsMemory`.
 
@@ -57,7 +57,7 @@ memory = ShortTermMemory(buffer_size=5)
 agent_memory = AgentMemory(memory=memory)
 ```
 
-By the way, in `AgentMemory` class, you can pass a `GptsMemory`, in the conventional sense, 
+By the way, in `AgentMemory` class, you can pass a `GptsMemory`, in the conventional sense,
 `GptsMemory` is not included in the memory structure, it is used to store the conversation and plan information.
 
 A example of `GptsMemory`:
@@ -73,13 +73,13 @@ agent_memory = AgentMemory(memory=memory, gpts_memory=gpts_memory)
 
 ### Read And Write Memory In Agent
 
-The agent will call the `read_memories` method to read the memory fragments from the memory, 
+The agent will call the `read_memories` method to read the memory fragments from the memory,
 and call the `write_memories` method to write the memory fragments to the memory.
 
 When agent call the LLM, the memories will write to the LLM prompt, after the LLM return the response,
 the agent will write the query and response to the memory.
 
-As we mentioned in [Profile To Prompt](../profile/profile_to_prompt), there are a 
+As we mentioned in [Profile To Prompt](../profile/profile_to_prompt), there are a
 template variables named `most_recent_memories` in prompt template, it will be replaced by the
 most recent memories.
 
@@ -188,9 +188,9 @@ Why don’t scientists trust atoms?
 Because they make up everything!
 
 --------------------------------------------------------------------------------
-String Prompt[verbose]: 
+String Prompt[verbose]:
 system: You are a Comedians, named Joy, your goal is None.
-Please think step by step to achieve the goal. You can use the resources given below. 
+Please think step by step to achieve the goal. You can use the resources given below.
 At the same time, please strictly abide by the constraints and specifications in IMPORTANT REMINDER.
 
 *** IMPORTANT REMINDER ***
@@ -199,10 +199,10 @@ Please answer in English.
 
 
 
-human: 
+human:
 Question: My name is bob, please tell me a joke
 
-LLM Output[verbose]: 
+LLM Output[verbose]:
 Sure thing, Bob! Here's one for you:
 
 Why don’t scientists trust atoms?
@@ -215,9 +215,9 @@ Because they make up everything!
 Joy (to User)-[gpt-4o]:
 
 "Sure thing, Bob! Here's one for you:\n\nWhy don’t scientists trust atoms?\n\nBecause they make up everything!"
->>>>>>>>Joy Review info: 
+>>>>>>>>Joy Review info:
 Pass(None)
->>>>>>>>Joy Action report: 
+>>>>>>>>Joy Action report:
 execution succeeded,
 Sure thing, Bob! Here's one for you:
 
@@ -233,7 +233,7 @@ User (to Joy)-[]:
 "What's my name?"
 
 --------------------------------------------------------------------------------
-un_stream ai response: Your name is Bob! 
+un_stream ai response: Your name is Bob!
 
 And here's another quick joke for you:
 
@@ -242,9 +242,9 @@ Why don't skeletons fight each other?
 They don't have the guts!
 
 --------------------------------------------------------------------------------
-String Prompt[verbose]: 
+String Prompt[verbose]:
 system: You are a Comedians, named Joy, your goal is None.
-Please think step by step to achieve the goal. You can use the resources given below. 
+Please think step by step to achieve the goal. You can use the resources given below.
 At the same time, please strictly abide by the constraints and specifications in IMPORTANT REMINDER.
 
 *** IMPORTANT REMINDER ***
@@ -254,17 +254,17 @@ Please answer in English.
 
 
 human: Most recent observations:
-user: My name is bob, please tell me a joke 
+user: My name is bob, please tell me a joke
 assistant: Sure thing, Bob! Here's one for you:
 
 Why don’t scientists trust atoms?
 
-Because they make up everything! 
+Because they make up everything!
 
 Question: What's my name?
 
-LLM Output[verbose]: 
-Your name is Bob! 
+LLM Output[verbose]:
+Your name is Bob!
 
 And here's another quick joke for you:
 
@@ -278,11 +278,11 @@ They don't have the guts!
 Joy (to User)-[gpt-4o]:
 
 "Your name is Bob! \n\nAnd here's another quick joke for you:\n\nWhy don't skeletons fight each other?\n\nThey don't have the guts!"
->>>>>>>>Joy Review info: 
+>>>>>>>>Joy Review info:
 Pass(None)
->>>>>>>>Joy Action report: 
+>>>>>>>>Joy Action report:
 execution succeeded,
-Your name is Bob! 
+Your name is Bob!
 
 And here's another quick joke for you:
 
@@ -296,9 +296,9 @@ They don't have the guts!
 In the second conversation, you can see the `Most recent observations` in the user prompt,
 ``````
 --------------------------------------------------------------------------------
-String Prompt[verbose]: 
+String Prompt[verbose]:
 system: You are a Comedians, named Joy, your goal is None.
-Please think step by step to achieve the goal. You can use the resources given below. 
+Please think step by step to achieve the goal. You can use the resources given below.
 At the same time, please strictly abide by the constraints and specifications in IMPORTANT REMINDER.
 
 *** IMPORTANT REMINDER ***
@@ -308,17 +308,17 @@ Please answer in English.
 
 
 human: Most recent observations:
-user: My name is bob, please tell me a joke 
+user: My name is bob, please tell me a joke
 assistant: Sure thing, Bob! Here's one for you:
 
 Why don’t scientists trust atoms?
 
-Because they make up everything! 
+Because they make up everything!
 
 Question: What's my name?
 
-LLM Output[verbose]: 
-Your name is Bob! 
+LLM Output[verbose]:
+Your name is Bob!
 
 And here's another quick joke for you:
 
@@ -345,7 +345,7 @@ The `question` is the user query, and the `thought` is the LLM response, we will
 
 ## Custom Memory Reading And Writing
 
-We can customize the memory reading and writing by inheriting the `ConversableAgent` class 
+We can customize the memory reading and writing by inheriting the `ConversableAgent` class
 and override the `read_memories` and `write_memories` methods.
 
 ```python
@@ -421,13 +421,13 @@ class JoyAgent(ConversableAgent):
         await self.memory.write(fragment)
 ```
 
-In the above example, we override the `read_memories` to read the memories from the memory, in DB-GPT,
-the most recent memories will form the `most_recent_memories` in the prompt template, 
+In the above example, we override the `read_memories` to read the memories from the memory, in Datrix,
+the most recent memories will form the `most_recent_memories` in the prompt template,
 And override the `write_memories` to write the memories to the memory.
 
 **So, you can customize the memory reading and writing according to your needs.**
 
 ## Summary
 
-In this document, we introduced the memory module in DB-GPT agents, and how to use the memory in agents.
-In following sections, we will introduce how to use each memory structure in DB-GPT agents.
+In this document, we introduced the memory module in Datrix agents, and how to use the memory in agents.
+In following sections, we will introduce how to use each memory structure in Datrix agents.

@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "incremental": false
+  },
+  "include": [
+    "next-env.d.ts",
+    "pages/ask-data/**/*.ts",
+    "pages/ask-data/**/*.tsx",
+    "components/ask-data/**/*.ts",
+    "components/ask-data/**/*.tsx",
+    "utils/ask-data.ts",
+    "types/chat.ts"
+  ]
+}

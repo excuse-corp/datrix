@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import pytest
 
 from dbgpt.storage.metadata import db
@@ -44,6 +46,20 @@ def test_entity_create(default_entity_dict):
     with db.session() as session:
         entity = ServeEntity(**default_entity_dict)
         session.add(entity)
+
+
+def test_response_serializes_naive_timestamps_as_utc(dao, default_entity_dict):
+    timestamp = datetime(2026, 7, 18, 12, 29, 40)
+    entity = ServeEntity(
+        **default_entity_dict,
+        gmt_created=timestamp,
+        gmt_modified=timestamp,
+    )
+
+    response = dao.to_response(entity)
+
+    assert response.gmt_created == "2026-07-18T12:29:40Z"
+    assert response.gmt_modified == "2026-07-18T12:29:40Z"
 
 
 def test_entity_unique_key(default_entity_dict):

@@ -98,9 +98,8 @@ quant_gptq = [
     "optimum",
     "auto-gptq",
 ]
-flash_attn = [
-    "dbgpt-acc-flash-attn"
-]
+# flash_attn is intentionally not registered for the ask-data deployment.
+# Keep packages/dbgpt-accelerator/dbgpt-acc-flash-attn as source only.
 
 [dependency-groups]
 

@@ -1,6 +1,6 @@
-# DB-GPT Integrations
+# Datrix Integrations
 
-DB-GPT integrates with many datasources and rag storage providers.
+Datrix integrates with many datasources and rag storage providers.
 
 Integration Packages
 
@@ -28,9 +28,9 @@ Integration Packages
 
 | Provider    | Supported | Install Packages               |
 |-------------|-----------|--------------------------------|
-| Chroma      | ✅         | --extra storage_chroma         |       
-| Milvus      | ✅         | --extra storage_milvus         |       
-| Elasticsearch | ✅         | --extra storage_elasticsearch   |        
+| Chroma      | ✅         | --extra storage_chroma         |
+| Milvus      | ✅         | --extra storage_milvus         |
+| Elasticsearch | ✅         | --extra storage_elasticsearch   |
 | OceanBase   | ✅         | --extra storage_obvector      |
 
 

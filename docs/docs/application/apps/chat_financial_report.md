@@ -1,7 +1,7 @@
 # Chat With Financial Report
-   Financial report analysis using large models is becoming a popular application in vertical fields. Large models can not only understand complex financial rules more accurately than humans, but can also output reasonable analysis results based on professional knowledge. 
-   
-Using AWEL to build a financial report knowledge building workflow and a financial report intelligent Q&A workflow app can help users 
+   Financial report analysis using large models is becoming a popular application in vertical fields. Large models can not only understand complex financial rules more accurately than humans, but can also output reasonable analysis results based on professional knowledge.
+
+Using AWEL to build a financial report knowledge building workflow and a financial report intelligent Q&A workflow app can help users
 - answer basic information questions about financial reports
 - financial report indicator calculation and analysis questions
 - financial report content analysis questions.
@@ -11,7 +11,7 @@ Using AWEL to build a financial report knowledge building workflow and a financi
   <img src={'/img/chat_knowledge/fin_report/knowledge_workflow.png'} width="1000px"/>
 </p>
 
-#### a financial report intelligent robot workflow 
+#### a financial report intelligent robot workflow
 <p align="left">
   <img src={'/img/chat_knowledge/fin_report/financial_robot_chat.png'} width="1000px"/>
 </p>

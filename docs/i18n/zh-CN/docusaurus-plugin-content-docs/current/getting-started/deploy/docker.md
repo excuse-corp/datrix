@@ -5,7 +5,7 @@ title: Docker Deployment
 
 # Docker Deployment
 
-Run DB-GPT in a single Docker container — no Python setup required.
+Run Datrix in a single Docker container — no Python setup required.
 
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';

@@ -1,14 +1,14 @@
-# DB-GPT V0.8.0 — Paradigm Shift: AI + Data Driven Analytics Experience
+# Datrix V0.8.0 — Paradigm Shift: AI + Data Driven Analytics Experience
 
 A paradigm shift from "conversational Q&A" to "task delivery" — from passive answering to autonomous analysis, exploring true Agentic productivity.
 
 ## Introduction
 
-DB-GPT V0.8.0 introduces a self-driven AI Data Assistant that autonomously handles the entire analytics pipeline:
+Datrix V0.8.0 introduces a self-driven AI Data Assistant that autonomously handles the entire analytics pipeline:
 
 🎯 Business Goal → 🧠 Task Decomposition → 🧩 Skill Invocation → 💻 Code Generation (SQL/Python) → 🛡️ Sandbox Execution → 📊 Chart Generation → 📝 Report Delivery
 
-You no longer need to know which table your data lives in, nor write Python scripts for intermediate data cleaning. Simply state your business objective, and the **DB-GPT AI Data Assistant** will take care of everything.
+You no longer need to know which table your data lives in, nor write Python scripts for intermediate data cleaning. Simply state your business objective, and the **Datrix AI Data Assistant** will take care of everything.
 
 ### Key Highlights
 
@@ -18,13 +18,13 @@ You no longer need to know which table your data lives in, nor write Python scri
 - 💻 **Autonomous Code Execution** — AI agents can automatically generate and execute Python code for data analysis tasks
 - 🛡️ **Sandbox Environment** — A secure, isolated sandbox environment for executing untrusted code
 - 💬 **Conversation Sharing & Replay** — View not only the final polished HTML reports, but also replay the entire reasoning process
-- 🚀 **One-Click Setup Script** — A new streamlined installation script to get DB-GPT up and running faster than ever
+- 🚀 **One-Click Setup Script** — A new streamlined installation script to get Datrix up and running faster than ever
 
 ## Features
 
 ### ✨ Agentic Data Analytics Engine
 
-The DB-GPT AI Data Assistant can now autonomously orchestrate an entire execution pipeline around your analysis goals, moving beyond the limitations of traditional single-turn conversations to deliver a brand-new autonomous data analytics experience:
+The Datrix AI Data Assistant can now autonomously orchestrate an entire execution pipeline around your analysis goals, moving beyond the limitations of traditional single-turn conversations to deliver a brand-new autonomous data analytics experience:
 
 - **Multi-Source Data Integration**: Seamlessly connect to relational databases, CSV/Excel files, data warehouses, knowledge bases, documents, and more.
 - **Autonomous Reasoning & Exploration**: For complex problems, the AI Data Assistant automatically analyzes database schemas or data files and plans multi-step execution strategies.
@@ -88,7 +88,7 @@ Great tools need to flow smoothly, transforming analysis reports and processes f
 
 ### 🚀 One-Click Setup Script
 
-We provide multiple new streamlined installation scripts to get DB-GPT up and running faster.
+We provide multiple new streamlined installation scripts to get Datrix up and running faster.
 
 **Option 1: Install via PyPI**
 
@@ -96,7 +96,7 @@ We provide multiple new streamlined installation scripts to get DB-GPT up and ru
 # Step 1: Install dbgpt-app
 pip install dbgpt-app
 
-# Step 2: Start DB-GPT
+# Step 2: Start Datrix
 dbgpt start
 ```
 
@@ -107,7 +107,7 @@ dbgpt start
 curl -fsSL https://raw.githubusercontent.com/eosphoros-ai/DB-GPT/main/scripts/install/install.sh \
   | OPENAI_API_KEY=sk-xxx bash -s -- --profile openai
 
-# Start DB-GPT
+# Start Datrix
 cd ~/.dbgpt/DB-GPT && uv run dbgpt start webserver --config ~/.dbgpt/configs/<profile>.toml
 ```
 

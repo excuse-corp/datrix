@@ -50,9 +50,9 @@ FLOW_ID="{YOUR_FLOW_ID}"
 
 client = Client(api_key=DBGPT_API_KEY)
 async for data in client.chat_stream(
-    messages="Introduce AWEL", 
-    model="gpt-4o", 
-    chat_mode="chat_flow", 
+    messages="Introduce AWEL",
+    model="gpt-4o",
+    chat_mode="chat_flow",
     chat_param=FLOW_ID
 ):
     print(data)
@@ -142,7 +142,7 @@ DELETE /api/v2/serve/awel/flows
 ```shell
 DBGPT_API_KEY=dbgpt
 FLOW_ID={YOUR_FLOW_ID}
- 
+
  curl -X DELETE "http://localhost:5670/api/v2/serve/awel/flows/$FLOW_ID" \
     -H "Authorization: Bearer $DBGPT_API_KEY" \
 

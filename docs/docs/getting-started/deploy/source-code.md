@@ -1,7 +1,7 @@
 ---
 sidebar_position: 0
 title: Source Code Deployment
-summary: "Run DB-GPT from source with uv, configure a provider, and verify the webserver"
+summary: "Run Datrix from source with uv, configure a provider, and verify the webserver"
 read_when:
   - You want the repo-based install instead of Docker
   - You need the most flexible setup for development or customization
@@ -9,7 +9,7 @@ read_when:
 
 # Source Code Deployment
 
-Deploy DB-GPT directly from source code. This is the most flexible option for development, debugging, and custom integrations.
+Deploy Datrix directly from source code. This is the most flexible option for development, debugging, and custom integrations.
 
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
@@ -25,7 +25,7 @@ import TabItem from '@theme/TabItem';
 
 ```bash
 git clone https://github.com/eosphoros-ai/DB-GPT.git
-cd DB-GPT
+cd Datrix
 ```
 
 ## Step 2 — Install uv
@@ -118,7 +118,7 @@ uv sync --all-packages \
 <details>
 <summary><strong>Use the interactive install helper</strong></summary>
 
-DB-GPT provides an interactive helper to generate the right `uv sync` command:
+Datrix provides an interactive helper to generate the right `uv sync` command:
 
 ```bash
 uv run install_help.py install-cmd --interactive
@@ -231,7 +231,7 @@ uv run dbgpt start webserver --config configs/dbgpt-proxy-ollama.toml
 Open your browser and visit **[http://localhost:5670](http://localhost:5670)**.
 
 :::tip Verify it works
-If the Web UI loads and you can start a chat conversation, your DB-GPT is running.
+If the Web UI loads and you can start a chat conversation, your Datrix is running.
 :::
 
 ## Common first-run issues

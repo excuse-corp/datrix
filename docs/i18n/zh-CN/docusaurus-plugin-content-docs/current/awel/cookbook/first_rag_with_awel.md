@@ -16,7 +16,7 @@ pip install "dbgpt[agent,simple_framework, client]>=0.7.1" "dbgpt_ext>=0.7.1" -U
 
 ### Prepare Embedding Model
 
-To store the knowledge in a vector store, we need an embedding model, DB-GPT supports 
+To store the knowledge in a vector store, we need an embedding model, Datrix supports
 a lot of embedding models, here are some of them:
 
 import Tabs from '@theme/Tabs';
@@ -48,7 +48,7 @@ embeddings = DefaultEmbeddingFactory.default("/data/models/text2vec-large-chines
 
   <TabItem value="remote_embedding">
 
-If you have deployed [DB-GPT cluster](/docs/installation/model_service/cluster) and 
+If you have deployed [Datrix cluster](/docs/installation/model_service/cluster) and
 [API server](/docs/installation/advanced_usage/OpenAI_SDK_call)
 , you can connect to the API server to get the embeddings.
 
@@ -66,7 +66,7 @@ embeddings = DefaultEmbeddingFactory.remote(
 
 ### Load Knowledge And Store In Vector Store
 
-Then we can create a DAG which loads the knowledge from a URL and stores it in a vector 
+Then we can create a DAG which loads the knowledge from a URL and stores it in a vector
 store.
 
 ```python
@@ -126,7 +126,7 @@ print(chunks)
 
 ### Prepare LLM
 
-To build a RAG program, we need a LLM, here are some of the LLMs that DB-GPT supports:
+To build a RAG program, we need a LLM, here are some of the LLMs that Datrix supports:
 
 <Tabs
   defaultValue="openai"
@@ -137,7 +137,7 @@ To build a RAG program, we need a LLM, here are some of the LLMs that DB-GPT sup
   ]}>
   <TabItem value="openai">
 
-First, you should install the `openai` library. 
+First, you should install the `openai` library.
 
 ```bash
 pip install openai
@@ -172,11 +172,11 @@ llm_client = YiLLMClient()
 
   <TabItem value="model_service">
 
-If you have deployed [DB-GPT cluster](/docs/installation/model_service/cluster) and 
+If you have deployed [Datrix cluster](/docs/installation/model_service/cluster) and
 [API server](/docs/installation/advanced_usage/OpenAI_SDK_call)
 , you can connect to the API server to get the LLM model.
 
-The API is compatible with the OpenAI API, so you can use the OpenAILLMClient to 
+The API is compatible with the OpenAI API, so you can use the OpenAILLMClient to
 connect to the API server.
 
 First you should install the `openai` library.
@@ -203,11 +203,11 @@ from dbgpt.core.awel import InputOperator, JoinOperator, InputSource
 from dbgpt.core.operators import PromptBuilderOperator, RequestBuilderOperator
 from dbgpt.model.operators import LLMOperator
 
-prompt = """Based on the known information below, provide users with professional and concise answers to their questions. 
-If the answer cannot be obtained from the provided content, please say: 
-"The information provided in the knowledge base is not sufficient to answer this question.". 
+prompt = """Based on the known information below, provide users with professional and concise answers to their questions.
+If the answer cannot be obtained from the provided content, please say:
+"The information provided in the knowledge base is not sufficient to answer this question.".
 It is forbidden to make up information randomly. When answering, it is best to summarize according to points 1.2.3.
-          known information: 
+          known information:
           {context}
           question:
           {question}
@@ -220,9 +220,9 @@ with DAG("llm_rag_dag") as rag_dag:
         index_store=vector_store,
     )
     content_task = MapOperator(lambda cks: "\n".join(c.content for c in cks))
-    
+
     merge_task = JoinOperator(lambda context, question: {"context": context, "question": question})
-    
+
     prompt_task = PromptBuilderOperator(prompt)
     # The model is gpt-3.5-turbo, you can replace it with other models.
     req_build_task = RequestBuilderOperator(model="gpt-3.5-turbo")
@@ -262,7 +262,7 @@ from dbgpt_ext.storage.vector_store.chroma_store import ChromaStore, ChromaVecto
 from dbgpt.model.operators import LLMOperator
 from dbgpt.model.proxy import OpenAILLMClient
 
-# Here we use the openai embedding model, if you want to use other models, you can 
+# Here we use the openai embedding model, if you want to use other models, you can
 # replace it according to the previous example.
 embeddings = DefaultEmbeddingFactory.openai()
 # Here we use the openai LLM model, if you want to use other models, you can replace
@@ -292,11 +292,11 @@ with DAG("load_knowledge_dag") as knowledge_dag:
 chunks = asyncio.run(assembler_task.call("https://docs.dbgpt.site/docs/awel/"))
 print(f"Chunk length: {len(chunks)}\n")
 
-prompt = """Based on the known information below, provide users with professional and concise answers to their questions. 
-If the answer cannot be obtained from the provided content, please say: 
-"The information provided in the knowledge base is not sufficient to answer this question.". 
+prompt = """Based on the known information below, provide users with professional and concise answers to their questions.
+If the answer cannot be obtained from the provided content, please say:
+"The information provided in the knowledge base is not sufficient to answer this question.".
 It is forbidden to make up information randomly. When answering, it is best to summarize according to points 1.2.3.
-          known information: 
+          known information:
           {context}
           question:
           {question}

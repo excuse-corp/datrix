@@ -1,8 +1,8 @@
 # Graph RAG User Manual
 
-In this example, we will show how to use the Graph RAG framework in DB-GPT. Using a graph database to implement RAG can, to some extent, alleviate the uncertainty and interpretability issues brought about by vector database retrieval.
+In this example, we will show how to use the Graph RAG framework in Datrix. Using a graph database to implement RAG can, to some extent, alleviate the uncertainty and interpretability issues brought about by vector database retrieval.
 
-You can refer to the python example file `DB-GPT/examples/rag/graph_rag_example.py` in the source code. This example demonstrates how to load knowledge from a document and store it in a graph store. Subsequently, it recalls knowledge relevant to your question by searching for triplets in the graph store.
+You can refer to the python example file `Datrix/examples/rag/graph_rag_example.py` in the source code. This example demonstrates how to load knowledge from a document and store it in a graph store. Subsequently, it recalls knowledge relevant to your question by searching for triplets in the graph store.
 
 
 ### Install Dependencies
@@ -20,7 +20,7 @@ uv sync --all-packages --frozen \
 
 ### Prepare Graph Database
 
-To store the knowledge in graph, we need an graph database, [TuGraph](https://github.com/TuGraph-family/tugraph-db) is the first graph database supported by DB-GPT.
+To store the knowledge in graph, we need an graph database, [TuGraph](https://github.com/TuGraph-family/tugraph-db) is the first graph database supported by Datrix.
 
 Visit github repository of TuGraph to view [Quick Start](https://tugraph-db.readthedocs.io/zh-cn/latest/3.quick-start/1.preparation.html#id5) document, follow the instructions to pull the TuGraph database docker image (latest / version >= 4.5.1) and launch it.
 
@@ -32,9 +32,9 @@ docker run -d -p 7070:7070  -p 7687:7687 -p 9090:9090 --name tugraph_demo tugrap
 The default port for the bolt protocol is `7687`.
 
 > **Download Tips:**
-> 
+>
 > There is also a corresponding version of the TuGraph Docker image package on OSS. You can also directly download and import it.
-> 
+>
 > ```
 > wget 'https://tugraph-web.oss-cn-beijing.aliyuncs.com/tugraph/tugraph-4.5.1/tugraph-runtime-centos7-4.5.1.tar' -O tugraph-runtime-centos7-4.5.1.tar
 > docker load -i tugraph-runtime-centos7-4.5.1.tar
@@ -43,7 +43,7 @@ The default port for the bolt protocol is `7687`.
 
 ### Prepare LLM
 
-To build a Graph RAG program, we need a LLM, here are some of the LLMs that DB-GPT supports:
+To build a Graph RAG program, we need a LLM, here are some of the LLMs that Datrix supports:
 
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
@@ -78,11 +78,11 @@ Then set your API key in the environment variable `YI_API_KEY`.
 
   <TabItem value="model_service">
 
-If you have deployed [DB-GPT cluster](/docs/installation/model_service/cluster) and 
+If you have deployed [Datrix cluster](/docs/installation/model_service/cluster) and
 [API server](/docs/installation/advanced_usage/OpenAI_SDK_call)
 , you can connect to the API server to get the LLM model.
 
-The API is compatible with the OpenAI API, so you can use the OpenAILLMClient to 
+The API is compatible with the OpenAI API, so you can use the OpenAILLMClient to
 connect to the API server.
 
 First you should install the `openai` library.
@@ -103,7 +103,7 @@ llm_client = OpenAILLMClient(api_base="http://localhost:8100/api/v1/", api_key="
 
 ### TuGraph Configuration
 
-Set variables below in `.env` file, let DB-GPT know how to connect to TuGraph.
+Set variables below in `.env` file, let Datrix know how to connect to TuGraph.
 
 ```
 GRAPH_STORE_TYPE=TuGraph
@@ -122,7 +122,7 @@ COMMUNITY_SUMMARY_BATCH_SIZE=20  # the batch size of parallel community summary 
 
 ### Load into Knowledge Graph
 
-When using a graph database as the underlying knowledge storage platform, it is necessary to build a knowledge graph to facilitate the archiving and retrieval of documents. DB-GPT leverages the capabilities of large language models to implement an integrated knowledge graph, while still maintaining the flexibility to freely connect to other knowledge graph systems and graph database systems. 
+When using a graph database as the underlying knowledge storage platform, it is necessary to build a knowledge graph to facilitate the archiving and retrieval of documents. Datrix leverages the capabilities of large language models to implement an integrated knowledge graph, while still maintaining the flexibility to freely connect to other knowledge graph systems and graph database systems.
 
 We created a knowledge graph with graph community summaries based on `CommunitySummaryKnowledgeGraph`.
 
@@ -170,7 +170,7 @@ async def test_community_graph_rag():
         knowledge_file="examples/test_files/graphrag-mini.md",
         chunk_strategy="CHUNK_BY_MARKDOWN_HEADER",
         knowledge_graph=__create_community_kg_connector(),
-        question="What's the relationship between TuGraph and DB-GPT ?",
+        question="What's the relationship between TuGraph and Datrix ?",
     )
 
 async def __run_graph_rag(knowledge_file, chunk_strategy, knowledge_graph, question):
@@ -226,7 +226,7 @@ async def ask_chunk(chunk: Chunk, question) -> str:
 
 Here we demonstrate how to achieve chat knowledge through Graph RAG on web page.
 
-First, create a knowledge base using the `Knowledge Graph` type. 
+First, create a knowledge base using the `Knowledge Graph` type.
 
 
 <p align="left">
@@ -255,7 +255,7 @@ Performance testing is based on the `gpt-4o-mini` model.
 
 #### Indexing Performance
 
-|                     | DB-GPT                | GraphRAG(microsoft)  |
+|                     | Datrix                | GraphRAG(microsoft)  |
 | ------------------- | --------------------- | -------------------- |
 | Doc Tokens          | 42631                 | 42631                |
 | Triplets Graph      | 734 nodes, 1064 edges | 779 nodes, 967 edges |
@@ -269,7 +269,7 @@ Performance testing is based on the `gpt-4o-mini` model.
 
 **Global Search**
 
-|        | DB-GPT | GraphRAG(microsoft) |
+|        | Datrix | GraphRAG(microsoft) |
 | ------ | ------ | ------------------- |
 | Time   | 8s     | 40s                 |
 | Tokens | 7432   | 63317               |
@@ -279,18 +279,18 @@ Performance testing is based on the `gpt-4o-mini` model.
 请总结知识库的内容，并进行摘要说明。
 ```
 
-- **DB-GPT Answer**
+- **Datrix Answer**
 
 ```
 · 知识图谱概述: 知识图谱集中展示了与图数据库及相关处理系统的多种实体和其相互关联，涵盖了分布式内存图数据库、图计算模型及多种图处理框架和技术，强调了这些技术在图处理· 领域中的应用和相互影响。
 · TuGraph DB: TuGraph DB是一种高效的图数据库，支持大数据容量和低延迟查找，具备ACID特性。其社区版适用于学习和小型项目，支持实时数据管理和多图结构。
-· DB-GPT: DB-GPT是一个私有化的LLM技术数据库交互方式，支持多种高级功能，旨在推动数据3.0时代的到来。它提供了多模型管理、信息检索优化和智能体协作等功能。
+· Datrix: Datrix是一个私有化的LLM技术数据库交互方式，支持多种高级功能，旨在推动数据3.0时代的到来。它提供了多模型管理、信息检索优化和智能体协作等功能。
 · 应用领域: 知识库中提到的图技术应用于金融风控、社交网络和数据分析等多个领域，展示了图数据库的快速发展及其在各行各业中的重要性。
 · 开发者生态: 知识库还强调了开发者在开源项目中的活跃表现，尤其是在Apache Flink和Spark等项目中的贡献，表明了良好的合作与开发生态。
-整体而言，知识库展示了图数据库及其相关技术的广泛应用和快速进步，强调了DB-GPT和TuGraph等工具在数据智能和处理中的重要角色。
+整体而言，知识库展示了图数据库及其相关技术的广泛应用和快速进步，强调了Datrix和TuGraph等工具在数据智能和处理中的重要角色。
 ```
 
-- **GraphRAG(microsoft) Answer** 
+- **GraphRAG(microsoft) Answer**
 
 ```
 知识库内容总结
@@ -310,7 +310,7 @@ Performance testing is based on the `gpt-4o-mini` model.
 
 **Local Search**
 
-|        | DB-GPT | GraphRAG(microsoft) |
+|        | Datrix | GraphRAG(microsoft) |
 | ------ | ------ | ------------------- |
 | Time   | 15s    | 15s                 |
 | Tokens | 9230   | 11619               |
@@ -318,50 +318,50 @@ Performance testing is based on the `gpt-4o-mini` model.
 **Question**
 
 ```
-DB-GPT社区和TuGraph社区在社区贡献，社区生态，开发者的这几个方面的联系和区别分别是什么？
+Datrix社区和TuGraph社区在社区贡献，社区生态，开发者的这几个方面的联系和区别分别是什么？
 ```
 
-- **DB-GPT Answer**
+- **Datrix Answer**
 
 ```
 · 社区贡献:
-  · DB-GPT社区: 由多个开发者和公司支持，开发者积极参与代码提交、审查和问题反馈，展现出强大的社区协作能力。主要合作项目包括Langchain-Chatchat、LLaMA-Factory、FastChat等。
+  · Datrix社区: 由多个开发者和公司支持，开发者积极参与代码提交、审查和问题反馈，展现出强大的社区协作能力。主要合作项目包括Langchain-Chatchat、LLaMA-Factory、FastChat等。
   · TuGraph社区: 吸引了众多开发者参与，专注于提升TuGraph DB的功能和性能，与多个开源工具共同开发，形成了活跃的贡献模式。
 · 社区生态:
-  · DB-GPT社区: 主要围绕私有化LLM技术数据库交互方式，支持多种高级功能，促进数据智能应用开发，构建了一个以AI和数据处理为核心的生态。
+  · Datrix社区: 主要围绕私有化LLM技术数据库交互方式，支持多种高级功能，促进数据智能应用开发，构建了一个以AI和数据处理为核心的生态。
   · TuGraph社区: 依托于图数据库领域，尤其是TuGraph DB和TuGraph Analytics，形成了以大数据处理和实时计算为核心的生态，涉及多个行业应用，如金融风控和社交网络。
 · 开发者:
-  · DB-GPT社区: 包含多个GitHub用户，开发者主要集中在AI和数据处理领域，积极参与开源项目的开发和维护。
+  · Datrix社区: 包含多个GitHub用户，开发者主要集中在AI和数据处理领域，积极参与开源项目的开发和维护。
   · TuGraph社区: 涉及来自不同国家的开发者，特别是在图数据库和大数据分析领域的专业人员，强调多领域协作与贡献。
-总体来看，DB-GPT社区和TuGraph社区在贡献方式和生态领域有所不同，前者更侧重于AI和数据交互技术，后者则专注于图数据库技术及其应用。
+总体来看，Datrix社区和TuGraph社区在贡献方式和生态领域有所不同，前者更侧重于AI和数据交互技术，后者则专注于图数据库技术及其应用。
 ```
 
-- **GraphRAG(microsoft) Answer** 
+- **GraphRAG(microsoft) Answer**
 ```
-DB-GPT社区与TuGraph社区的比较
-  DB-GPT社区和TuGraph社区在多个方面展现了各自的特点和贡献，尤其是在社区贡献、生态系统和开发者参与等方面。以下是对这两个社区的联系与区别的详细分析。
+Datrix社区与TuGraph社区的比较
+  Datrix社区和TuGraph社区在多个方面展现了各自的特点和贡献，尤其是在社区贡献、生态系统和开发者参与等方面。以下是对这两个社区的联系与区别的详细分析。
 社区贡献
-  DB-GPT社区
-    DB-GPT社区围绕DB-GPT框架展开，整合了多个组织和资源，致力于AI和数据驱动应用的开发。该社区的主要贡献者包括Hiyouga、LM-Sys和Langchain-AI等组织，这些组织通过合作推动AI模型和应用的发展。DB-GPT的开发者们积极参与知识共享和技术创新，推动了AI应用的多样化和实用性。
+  Datrix社区
+    Datrix社区围绕Datrix框架展开，整合了多个组织和资源，致力于AI和数据驱动应用的开发。该社区的主要贡献者包括Hiyouga、LM-Sys和Langchain-AI等组织，这些组织通过合作推动AI模型和应用的发展。Datrix的开发者们积极参与知识共享和技术创新，推动了AI应用的多样化和实用性。
   TuGraph社区
     TuGraph社区则专注于图数据库的开发，尤其是TuGraph及其相关项目。该社区的贡献者包括Ant Group和Tsinghua University等，致力于提供高效的图数据管理和分析解决方案。TuGraph社区的开发者们通过开源项目和技术文档，促进了图数据库技术的普及和应用。
 社区生态
-  DB-GPT社区
-    DB-GPT社区的生态系统是一个多元化的合作网络，涵盖了多个组织和技术平台。该社区通过整合不同的技术和数据源，支持从聊天系统到企业报告等多种应用，展现出其在AI领域的广泛适用性。DB-GPT的生态系统强调了组织间的协作与知识共享，促进了技术的快速发展。
+  Datrix社区
+    Datrix社区的生态系统是一个多元化的合作网络，涵盖了多个组织和技术平台。该社区通过整合不同的技术和数据源，支持从聊天系统到企业报告等多种应用，展现出其在AI领域的广泛适用性。Datrix的生态系统强调了组织间的协作与知识共享，促进了技术的快速发展。
   TuGraph社区
     相较之下，TuGraph社区的生态系统更为专注于图数据的管理和分析。TuGraph及其相关项目（如TuGraph DB和TuGraph Analytics）共同构成了一个完整的图技术体系，支持大规模数据的实时处理和复杂分析。该社区的生态系统强调了图数据库在金融、工业和政务服务等领域的应用，展现了其在特定行业中的深度影响。
 开发者参与
-  DB-GPT社区
-    在DB-GPT社区中，开发者的参与主要体现在对AI应用的开发和优化上。社区内的开发者通过贡献代码、参与讨论和解决问题，推动了DB-GPT框架的不断完善。该社区的开发者们来自不同国家和地区，展现了全球范围内对AI技术的关注和参与。
+  Datrix社区
+    在Datrix社区中，开发者的参与主要体现在对AI应用的开发和优化上。社区内的开发者通过贡献代码、参与讨论和解决问题，推动了Datrix框架的不断完善。该社区的开发者们来自不同国家和地区，展现了全球范围内对AI技术的关注和参与。
   TuGraph社区
     TuGraph社区的开发者则主要集中在图数据库的构建和优化上。该社区的开发者们通过GitHub等平台积极参与项目的开发、代码审查和问题解决，推动了TuGraph技术的进步。TuGraph社区的开发者们同样来自中国及其他国家，展现了对图数据管理技术的广泛兴趣。
 总结
-  总体而言，DB-GPT社区和TuGraph社区在社区贡献、生态系统和开发者参与等方面各具特色。DB-GPT社区更侧重于AI应用的多样性和组织间的合作，而TuGraph社区则专注于图数据的高效管理和分析。两者的共同点在于都强调了开源和社区合作的重要性，推动了各自领域的技术进步和应用发展。
+  总体而言，Datrix社区和TuGraph社区在社区贡献、生态系统和开发者参与等方面各具特色。Datrix社区更侧重于AI应用的多样性和组织间的合作，而TuGraph社区则专注于图数据的高效管理和分析。两者的共同点在于都强调了开源和社区合作的重要性，推动了各自领域的技术进步和应用发展。
 ```
 
 ### Retrieval Of Document Structure
 
-In version 0.6.1 of DB-GPT, we have added a new feature:
+In version 0.6.1 of Datrix, we have added a new feature:
 - Retrieval of triplets with the **retrieval of document structure**
 
 We have expanded the definition scope of 'Graph' in GraphRAG:
@@ -393,7 +393,7 @@ We aim to construct a more complex Graph that covers more comprehensive informat
 
 ### Similarity Search in GraphRAG:
 
-In the latest version of DB-GPT, we have implemented a new feature:
+In the latest version of Datrix, we have implemented a new feature:
 
 - **Similarity search** for GraphRAG retrieval
 
@@ -401,7 +401,7 @@ In the latest version of DB-GPT, we have implemented a new feature:
 
 Use TuGraph 4.5.1 and above.
 
-Set the variables below in the `.env` file to enable similarity search in DB-GPT.
+Set the variables below in the `.env` file to enable similarity search in Datrix.
 
 ```
 SIMILARITY_SEARCH_ENABLED=True # enable the similarity search for entities and chunks
@@ -436,7 +436,7 @@ Additionally, you need to choose an embedding model in the `.env` file
 
 TuGraph now offers comprehensive vector capabilities, including vector storage, indexing, and similarity search functionalities. These features enable GraphRAG to achieve superior retrieval performance compared to traditional keyword-based approaches.
 
-	
+
 To leverage these capabilities, we've introduced an `_embedding` field in both entity and chunk objects to store embedding data, enabling similarity search to identify the most relevant results for a given query.
 
 #### Comparison of Similarity Search Results
@@ -467,13 +467,13 @@ In conclusion, enabling similarity search in GraphRAG significantly expands the 
 
 ### Text2GQL Search in GraphRAG:
 
-In the latest version of DB-GPT, we have implemented a new feature:
+In the latest version of Datrix, we have implemented a new feature:
 
 - **Text2GQL search** for GraphRAG retrieval
 
 #### How to use?
 
-Set the variables below in the `.env` file to enable text2gql search in DB-GPT.
+Set the variables below in the `.env` file to enable text2gql search in Datrix.
 
 ```
 TEXT2GQL_SEARCH_ENABLED=True # enable the text2gql search for entities and relations.
@@ -500,10 +500,10 @@ The results of the text2gql search mode are as follows:
   <img src={'/img/chat_knowledge/graph_rag/comparison_result_for_text2gql_search.png'} width="1000px"/>
 </p>
 
-Compared to the keyword search method, the text2gql search method can generate an accurate graph query laguage to query the entity of DB-GPT in knowledge graph, which is
+Compared to the keyword search method, the text2gql search method can generate an accurate graph query laguage to query the entity of Datrix in knowledge graph, which is
 
 ```cypher
-MATCH (n) WHERE n.id = 'DB-GPT' RETURN n LIMIT 10
+MATCH (n) WHERE n.id = 'Datrix' RETURN n LIMIT 10
 ```
 
 This implies that in scenarios where questions can be expressed by a single graph query, the text2gql search approach can retrieve more accurate information with lower cost.

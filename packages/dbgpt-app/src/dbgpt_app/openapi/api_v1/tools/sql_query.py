@@ -1,3 +1,5 @@
+# ruff: noqa: E501
+
 """sql_query tool — read-only SQL query against the selected database."""
 
 import json
@@ -15,6 +17,18 @@ def make_sql_query(react_state: Dict[str, Any], database_connector: Optional[Any
     )
     def sql_query(sql: str) -> str:
         """Execute a read-only SQL query against the selected database."""
+        if react_state.get("ask_data_sql_guard"):
+            return json.dumps(
+                {
+                    "chunks": [
+                        {
+                            "output_type": "text",
+                            "content": "该问题属于受控业务问数范围，请调用 ask_data_query，不能使用自由 SQL 查询。",
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            )
         if database_connector is None:
             return json.dumps(
                 {

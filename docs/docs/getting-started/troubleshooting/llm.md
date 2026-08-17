@@ -74,7 +74,7 @@ ollama serve
 # Or check: curl http://localhost:11434/api/tags
 ```
 
-2. If running DB-GPT in Docker, use the host network address instead of `localhost`:
+2. If running Datrix in Docker, use the host network address instead of `localhost`:
 
 ```toml
 [[models.llms]]

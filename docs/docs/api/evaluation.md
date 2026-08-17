@@ -26,7 +26,7 @@ import TabItem from '@theme/TabItem';
 DBGPT_API_KEY=dbgpt
 SPACE_ID={YOUR_SPACE_ID}
 
-curl -X POST "http://localhost:5670/api/v2/serve/evaluate/evaluation" 
+curl -X POST "http://localhost:5670/api/v2/serve/evaluate/evaluation"
 -H "Authorization: Bearer $DBGPT_API_KEY" \
 -H "accept: application/json" \
 -H "Content-Type: application/json" \
@@ -115,7 +115,7 @@ when scene_key is recall, the request body should be like this:
 ```
 
 #### Response body
-Return <a href="#the-evaluation-object">Evaluation Object</a> List 
+Return <a href="#the-evaluation-object">Evaluation Object</a> List
 
 
 ### The Evaluation Request Object
@@ -141,8 +141,8 @@ The context of the evaluation
 --------
 evaluate_metrics <font color="gray"> array </font> <font color="red"> Required </font>
 
-The evaluate metrics of the evaluation, 
-e.g. 
+The evaluate metrics of the evaluation,
+e.g.
 - <b>AnswerRelevancyMetric</b>: the answer relevancy metric(when scene_key is app)
 - <b>RetrieverHitRateMetric</b>: Hit rate calculates the fraction of queries where the correct answer is found
     within the top-k retrieved documents. In simpler terms, it’s about how often our

@@ -1,30 +1,30 @@
 # Knowledge Graph Process Workflow
 
 # Introduction
-Unlike traditional Native RAG, which requires vectors as data carriers, GraphRAG requires triple extraction (entity -> relationship -> entity) to build a knowledge graph, so the entire knowledge processing can also be regarded as the process of building a knowledge graph. 
+Unlike traditional Native RAG, which requires vectors as data carriers, GraphRAG requires triple extraction (entity -> relationship -> entity) to build a knowledge graph, so the entire knowledge processing can also be regarded as the process of building a knowledge graph.
 
 ![](https://intranetproxy.alipay.com/skylark/lark/0/2024/png/26456775/1734357331126-a3a96fd7-c8fb-4208-8e3b-be798d1b73b4.png)
 
-# Applicable Scenarios 
-+ It is necessary to use GraphRAG ability to mine the relationship between knowledge for multi-step reasoning. 
-+ Make up for the lack of integrity of Naive RAG in the recall context. 
+# Applicable Scenarios
++ It is necessary to use GraphRAG ability to mine the relationship between knowledge for multi-step reasoning.
++ Make up for the lack of integrity of Naive RAG in the recall context.
 
-# How to use 
-+ Enter the AWEL interface and add a workflow 
+# How to use
++ Enter the AWEL interface and add a workflow
 
 ![](https://intranetproxy.alipay.com/skylark/lark/0/2024/png/26456775/1734354927468-feed0ac7-e0fe-45e8-b85c-aba170084f82.png)
 
-+ Import Knowledge Processing Template 
++ Import Knowledge Processing Template
 
 ![](https://intranetproxy.alipay.com/skylark/lark/0/2024/png/26456775/1734356276305-a6e03aff-ba89-40c4-be2d-f88dff29d0f5.png)
 
-+ Adjust parameters and save 
++ Adjust parameters and save
 
 ![](https://intranetproxy.alipay.com/skylark/lark/0/2024/png/26456775/1734356745373-4e449611-d0bc-4735-b142-0aebafaa34d6.png)
 
-    - `document knowledge loading operator `: Knowledge loading factory, by loading the specified document type, find the corresponding document processor for document content parsing. 
-    - `Document Chunk slicing operator `: Slice the loaded document content according to the specified slicing parameters. 
-    - `Knowledge Graph processing operator `: You can connect different knowledge graph processing operators, including native knowledge graph processing operators and community summary Knowledge Graph processing operators. You can also specify different graph databases for storage. Currently, TuGraph databases are supported. 
+    - `document knowledge loading operator `: Knowledge loading factory, by loading the specified document type, find the corresponding document processor for document content parsing.
+    - `Document Chunk slicing operator `: Slice the loaded document content according to the specified slicing parameters.
+    - `Knowledge Graph processing operator `: You can connect different knowledge graph processing operators, including native knowledge graph processing operators and community summary Knowledge Graph processing operators. You can also specify different graph databases for storage. Currently, TuGraph databases are supported.
 
 
 

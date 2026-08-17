@@ -8,7 +8,7 @@ Large Language Models (LLMs) are powerful, but they can only answer based on the
 
 **Retrieval-Augmented Generation (RAG)** bridges this gap by retrieving relevant information from external knowledge sources and feeding it as context to the LLM before generating a response. This ensures answers are grounded in real data rather than memorized patterns.
 
-DB-GPT implements a **Multi-Source RAG (MS-RAG)** framework that goes beyond basic document Q&A. It supports multiple knowledge sources (documents, URLs, databases, knowledge graphs), multiple retrieval strategies (vector, keyword, graph, hybrid), and integrates deeply with the DB-GPT agent and workflow ecosystem.
+Datrix implements a **Multi-Source RAG (MS-RAG)** framework that goes beyond basic document Q&A. It supports multiple knowledge sources (documents, URLs, databases, knowledge graphs), multiple retrieval strategies (vector, keyword, graph, hybrid), and integrates deeply with the Datrix agent and workflow ecosystem.
 
 # Architecture
 
@@ -33,7 +33,7 @@ The `BaseAssembler` defines a unified pipeline that connects all stages:
 Knowledge.load() → ChunkManager.split() → Assembler.persist() → Assembler.as_retriever()
 ```
 
-DB-GPT provides four specialized assemblers:
+Datrix provides four specialized assemblers:
 
 | Assembler | Purpose | Index Backend |
 |---|---|---|
@@ -44,7 +44,7 @@ DB-GPT provides four specialized assemblers:
 
 # Knowledge Sources
 
-DB-GPT supports loading knowledge from multiple source types. In the Web UI, you can select a datasource type when uploading:
+Datrix supports loading knowledge from multiple source types. In the Web UI, you can select a datasource type when uploading:
 
 <p align="center">
   <img src={'/img/rag/knowledge_datasource_type.png'} width="720px" />
@@ -117,7 +117,7 @@ When creating a knowledge base, you can choose from three storage types:
 
 # Retrieval Strategies
 
-DB-GPT offers multiple retrieval modes. You can configure the retrieve mode in the knowledge base settings:
+Datrix offers multiple retrieval modes. You can configure the retrieve mode in the knowledge base settings:
 
 <p align="center">
   <img src={'/img/rag/embedding_retrieve_mode.png'} width="720px" />
@@ -132,7 +132,7 @@ DB-GPT offers multiple retrieval modes. You can configure the retrieve mode in t
 
 ## Query Enhancement
 
-Beyond basic retrieval, DB-GPT provides advanced query processing:
+Beyond basic retrieval, Datrix provides advanced query processing:
 
 - **Query Rewrite** — Uses an LLM to expand and rephrase the original query into multiple search queries for better recall.
 - **Reranking** — After initial retrieval, a reranker model re-scores and re-orders the results for higher precision.
@@ -149,7 +149,7 @@ Beyond basic retrieval, DB-GPT provides advanced query processing:
 
 # Chunking Strategies
 
-Document chunking is a critical step in RAG quality. DB-GPT supports multiple chunking strategies:
+Document chunking is a critical step in RAG quality. Datrix supports multiple chunking strategies:
 
 <p align="center">
   <img src={'/img/rag/file_chunk.png'} width="720px" />
@@ -180,7 +180,7 @@ Document chunking is a critical step in RAG quality. DB-GPT supports multiple ch
 
 # Embedding Models
 
-DB-GPT supports a wide range of embedding models for converting text into vector representations:
+Datrix supports a wide range of embedding models for converting text into vector representations:
 
 ## Local Models
 
@@ -203,7 +203,7 @@ DB-GPT supports a wide range of embedding models for converting text into vector
 
 # Knowledge Graph RAG
 
-Beyond traditional vector-based RAG, DB-GPT supports **Knowledge Graph RAG** for structured knowledge retrieval.
+Beyond traditional vector-based RAG, Datrix supports **Knowledge Graph RAG** for structured knowledge retrieval.
 
 ## How It Works
 
@@ -252,7 +252,7 @@ Choose a chunking strategy and set parameters:
 
 ### Step 5 — Configure Retrieval Strategy (Optional)
 
-You can configure the retrieval strategy for your knowledge base. DB-GPT supports multiple retrieve modes — **Semantic**, **Keyword**, **Hybrid**, and **Tree** — to suit different query scenarios. Select the mode that best fits your use case in the knowledge base settings.
+You can configure the retrieval strategy for your knowledge base. Datrix supports multiple retrieve modes — **Semantic**, **Keyword**, **Hybrid**, and **Tree** — to suit different query scenarios. Select the mode that best fits your use case in the knowledge base settings.
 
 <p align="center">
   <img src={'/img/rag/embedding_retrieve_mode.png'} width="720px" />

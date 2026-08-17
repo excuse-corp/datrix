@@ -1,5 +1,5 @@
-import { ChartId } from '@antv/ava';
-import { CustomChartsType } from '../charts';
+import type { ChartId } from '@antv/ava';
+import type { CustomChartsType } from '../charts';
 
 export type BackEndChartType =
   | 'response_line_chart'

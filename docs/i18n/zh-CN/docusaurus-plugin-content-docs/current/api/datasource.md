@@ -50,9 +50,9 @@ DB_NAME="{your_db_name}"
 
 client = Client(api_key=DBGPT_API_KEY)
 res = client.chat(
-    messages="show space datas limit 5", 
-    model="gpt-4o", 
-    chat_mode="chat_data", 
+    messages="show space datas limit 5",
+    model="gpt-4o",
+    chat_mode="chat_data",
     chat_param=DB_NAME
 )
 ```
@@ -160,7 +160,7 @@ DELETE /api/v2/serve/datasources
 ```shell
 DBGPT_API_KEY=dbgpt
 DATASOURCE_ID={YOUR_DATASOURCE_ID}
- 
+
  curl -X DELETE "http://localhost:5670/api/v2/serve/datasources/$DATASOURCE_ID" \
     -H "Authorization: Bearer $DBGPT_API_KEY" \
 

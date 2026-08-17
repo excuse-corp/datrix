@@ -49,7 +49,7 @@ user: {{ question }}
 """
 ```
 
-In above code, we set `max_chat_round=4` in `AgentContext`, which means the conversation 
+In above code, we set `max_chat_round=4` in `AgentContext`, which means the conversation
 will end after 4 rounds.
 
 And here we set `system_prompt_template` and `user_prompt_template` for both agents for a simple conversation, we
@@ -58,7 +58,7 @@ will introduce it in profile module later.
 
 Then, create two agents, `Bob` and `Alice`, and initiate a chat between them.
 
-```python 
+```python
 
 import asyncio
 from dbgpt.agent import ConversableAgent, ProfileConfig, LLMConfig, BlankAction
@@ -118,9 +118,9 @@ Because they make up everything!
 Alice (to Bob)-[gpt-4o]:
 
 "Why don't scientists trust atoms?\n\nBecause they make up everything!"
->>>>>>>>Alice Review info: 
+>>>>>>>>Alice Review info:
 Pass(None)
->>>>>>>>Alice Action report: 
+>>>>>>>>Alice Action report:
 execution succeeded,
 Why don't scientists trust atoms?
 
@@ -133,9 +133,9 @@ un_stream ai response: That's a classic! You know, it's always good to have a fe
 Bob (to Alice)-[gpt-4o]:
 
 "That's a classic! You know, it's always good to have a few science jokes in your toolbox—they have the potential energy to make everyone laugh, and they rarely get a negative reaction!"
->>>>>>>>Bob Review info: 
+>>>>>>>>Bob Review info:
 Pass(None)
->>>>>>>>Bob Action report: 
+>>>>>>>>Bob Action report:
 execution succeeded,
 That's a classic! You know, it's always good to have a few science jokes in your toolbox—they have the potential energy to make everyone laugh, and they rarely get a negative reaction!
 
@@ -150,9 +150,9 @@ Because they wanted to study the current events!
 Alice (to Bob)-[gpt-4o]:
 
 "Absolutely, science jokes have a universal appeal! Here's another one for your collection:\n\nWhy did the biologist go to the beach?\n\nBecause they wanted to study the current events!"
->>>>>>>>Alice Review info: 
+>>>>>>>>Alice Review info:
 Pass(None)
->>>>>>>>Alice Action report: 
+>>>>>>>>Alice Action report:
 execution succeeded,
 Absolutely, science jokes have a universal appeal! Here's another one for your collection:
 
@@ -167,9 +167,9 @@ un_stream ai response: Haha, that's a good one! You know, biologists at the beac
 Bob (to Alice)-[gpt-4o]:
 
 "Haha, that's a good one! You know, biologists at the beach must have some serious kelp issues, too. They just can’t help but dive into their work—whether it's in the lab or lounging in the sand!"
->>>>>>>>Bob Review info: 
+>>>>>>>>Bob Review info:
 Pass(None)
->>>>>>>>Bob Action report: 
+>>>>>>>>Bob Action report:
 execution succeeded,
 Haha, that's a good one! You know, biologists at the beach must have some serious kelp issues, too. They just can’t help but dive into their work—whether it's in the lab or lounging in the sand!
 

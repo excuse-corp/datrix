@@ -1,5 +1,7 @@
 /** Theme */
 export const STORAGE_THEME_KEY = '__db_gpt_theme_key';
+/** Interface appearance */
+export const STORAGE_INTERFACE_STYLE_KEY = '__db_gpt_interface_style_key';
 /** Language */
 export const STORAGE_LANG_KEY = '__db_gpt_lng_key';
 /** Init Message */

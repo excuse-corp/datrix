@@ -3,21 +3,21 @@
 
 ## Architecture
 
-Here is the architecture of the high availability cluster, more details can be found in 
+Here is the architecture of the high availability cluster, more details can be found in
 the [cluster deployment](./cluster.md) mode and [SMMF](../../modules/smmf.md) module.
 
 <p align="center">
   <img src={'/img/module/smmf.png'} width="600px" />
 </p>
 
-The model worker and API server can be deployed on different machines, and the model 
+The model worker and API server can be deployed on different machines, and the model
 worker and API server can be deployed with multiple instances.
-But the model controller has only one instance by default, because it is a stateful 
-service and stores all metadata of the model service, specifically, all metadata are 
+But the model controller has only one instance by default, because it is a stateful
+service and stores all metadata of the model service, specifically, all metadata are
 stored in the component named **Model Registry**.
 
 The default model registry is `EmbeddedModelRegistry`, which is a simple in-memory component.
-To support high availability, we can use `StorageModelRegistry` as the model registry, 
+To support high availability, we can use `StorageModelRegistry` as the model registry,
 it can use a database as the storage backend, such as MySQL, SQLite, etc.
 
 So we can deploy the model controller with multiple instances, and they can share the metadata by connecting to the same database.
@@ -25,7 +25,7 @@ So we can deploy the model controller with multiple instances, and they can shar
 Now let's see how to deploy the high availability cluster.
 
 ## Deploy High Availability Cluster
-For simplicity, we will deploy two model controllers on two machines(`server1` and `server2`), 
+For simplicity, we will deploy two model controllers on two machines(`server1` and `server2`),
 and deploy a model worker, an embedding model worker, and a web server on another machine(`server3`).
 
 (Of course, you can deploy all of them on the same machine with different ports.)
@@ -37,7 +37,7 @@ and deploy a model worker, an embedding model worker, and a web server on anothe
 
 ```sql
 
--- For deploy model cluster of DB-GPT(StorageModelRegistry)
+-- For deploy model cluster of Datrix(StorageModelRegistry)
 CREATE TABLE IF NOT EXISTS `dbgpt_cluster_registry_instance` (
   `id` int(11) NOT NULL AUTO_INCREMENT COMMENT 'Auto increment id',
   `model_name` varchar(128) NOT NULL COMMENT 'Model name',
@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS `dbgpt_cluster_registry_instance` (
 
 ### Start Model Controller With Storage Model Registry
 
-We need to start the model controllers on two machines(`server1` and `server2`), and 
+We need to start the model controllers on two machines(`server1` and `server2`), and
 they will share the metadata by connecting to the same database.
 
 1. Start the model controller on `server1`:
@@ -105,7 +105,7 @@ dbgpt start worker --model_name glm-4-9b-chat \
 --port 8001 \
 --controller_addr "http://server1:8000,http://server2:8000"
 ```
-Here we use `server1` and `server2` as the controller address, so the model worker can 
+Here we use `server1` and `server2` as the controller address, so the model worker can
 register to any healthy controller.
 
 ### Start Embedding Model Worker
@@ -138,16 +138,16 @@ dbgpt start webserver \
 CONTROLLER_ADDRESS="http://server1:8000,http://server2:8000" dbgpt model list
 ```
 
-Congratulations! You have successfully deployed a high availability cluster of DB-GPT.
+Congratulations! You have successfully deployed a high availability cluster of Datrix.
 
 
 ## Deploy High Availability Cluster With Docker Compose
 
-If your want know more about deploying a high availability DB-GPT cluster, you can see 
+If your want know more about deploying a high availability Datrix cluster, you can see
 the example of docker compose in `docker/compose_examples/ha-cluster-docker-compose.yml`.
 It uses OpenAI LLM and OpenAI embedding model, so you can run it directly.
 
-Here we will show you how to deploy a high availability cluster of DB-GPT with docker compose.
+Here we will show you how to deploy a high availability cluster of Datrix with docker compose.
 
 First, build the docker image just include openai dependencies:
 

@@ -1,6 +1,6 @@
 # Datasources
 
-The DB-GPT data source module is designed to manage the structured and semi-structured data assets of an enterprise, connect databases, data warehouses, data lakes, etc. to the DB-GPT framework, and quickly build data-based intelligent applications and large models. Currently, DB-GPT supports some common data sources and also supports custom extensions.
+The Datrix data source module is designed to manage the structured and semi-structured data assets of an enterprise, connect databases, data warehouses, data lakes, etc. to the Datrix framework, and quickly build data-based intelligent applications and large models. Currently, Datrix supports some common data sources and also supports custom extensions.
 
 <p align="center">
   <img src={'/img/app/datasource.jpg'} width="800px" />

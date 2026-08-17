@@ -17,7 +17,7 @@ To start a data conversation, you need to go through the following steps:
 
 ### Add data source
 
-First, select the [data source](../datasources.md) on the left to add and add a database. Currently, DB-GPT supports multiple database types. Just select the corresponding database type to add. Here we choose MySQL as a demonstration. For the test data of the demonstration, see the [test sample](https://github.com/eosphoros-ai/DB-GPT/tree/main/docker/examples/sqls).
+First, select the [data source](../datasources.md) on the left to add and add a database. Currently, Datrix supports multiple database types. Just select the corresponding database type to add. Here we choose MySQL as a demonstration. For the test data of the demonstration, see the [test sample](https://github.com/eosphoros-ai/DB-GPT/tree/main/docker/examples/sqls).
 
 
 ### Choose ChatData App

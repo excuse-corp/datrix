@@ -17,9 +17,9 @@ AIMLAPI_API_KEY=${AIMLAPI_API_KEY} docker compose up -d
 You will see the following output if the deployment is successful.
 ```bash
 [+] Running 3/3
- ✔ Network dbgptnet              Created                                            0.0s 
- ✔ Container db-gpt-db-1         Started                                            0.2s 
- ✔ Container db-gpt-webserver-1  Started                                            0.2s 
+ ✔ Network dbgptnet              Created                                            0.0s
+ ✔ Container db-gpt-db-1         Started                                            0.2s
+ ✔ Container db-gpt-webserver-1  Started                                            0.2s
 ```
 
 

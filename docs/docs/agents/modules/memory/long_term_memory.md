@@ -1,12 +1,12 @@
 # Long-term Memory
 
-> The short-term memory contains the context information about the agent current situations, 
-> while the long-term memory stores the agent past behaviors and thoughts, which can be 
+> The short-term memory contains the context information about the agent current situations,
+> while the long-term memory stores the agent past behaviors and thoughts, which can be
 > retrieved according to the current events.
 
 > Long-term memory resembles the external vector storage that agents can rapidly query and retrieve from as needed.
 
-In DB-GPT, the long-term memory stored in the vector storage by default.
+In Datrix, the long-term memory stored in the vector storage by default.
 
 
 ## Using Long-term Memory

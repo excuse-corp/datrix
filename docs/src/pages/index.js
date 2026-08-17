@@ -9,19 +9,19 @@ const featureGroups = [
     items: [
       {
         title: 'Overview',
-        description: 'Learn what DB-GPT is and how it revolutionizes database interactions with AI.',
+        description: 'Learn how Datrix coordinates multiple agents for data analysis.',
         link: '/docs/overview',
         icon: '📖',
       },
       {
         title: 'Getting Started',
-        description: 'Get DB-GPT running in minutes with the one-line installer.',
+        description: 'Get Datrix running in minutes with the local development stack.',
         link: '/docs/installation',
         icon: '🚀',
       },
       {
         title: 'Show Cases',
-        description: 'Explore real-world use cases and examples powered by DB-GPT.',
+        description: 'Explore real-world use cases and examples powered by Datrix.',
         link: '/docs/use_cases',
         icon: '⚡',
       },
@@ -38,7 +38,7 @@ const featureGroups = [
       },
       {
         title: 'CLI Quick Start',
-        description: 'Get started quickly with the DB-GPT CLI.',
+        description: 'Get started quickly with the Datrix compatibility CLI.',
         link: '/docs/getting-started/cli-quickstart',
         icon: '🔧',
       },
@@ -134,7 +134,7 @@ const featureGroups = [
 ];
 
 const quickLinks = [
-  { title: 'GitHub', href: 'https://github.com/eosphoros-ai/DB-GPT', icon: '🔗' },
+  { title: 'GitHub', href: 'https://github.com/eosphoros-ai/community', icon: '🔗' },
   { title: 'Discord', href: 'https://discord.gg/erwfqcMP', icon: '💬' },
   { title: 'HuggingFace', href: 'https://huggingface.co/eosphoros', icon: '🤗' },
   { title: 'Community', href: 'https://github.com/eosphoros-ai/community', icon: '👥' },
@@ -177,19 +177,19 @@ function QuickLink({ title, href, icon }) {
 
 export default function Home() {
   const { siteConfig } = useDocusaurusContext();
-  const logoSrc = useBaseUrl('img/dbgpt_logo.svg');
+  const logoSrc = useBaseUrl('img/datrix-logo.svg');
 
   return (
     <Layout
       title={siteConfig.title}
-      description="DB-GPT: Open-Source Agentic AI Data Assistant - Revolutionizing Database Interactions with Private LLM Technology"
+      description="Datrix: a multi-agent matrix for data analysis"
     >
       <main className="homepage-main">
         <div className="homepage-hero">
           <div className="homepage-hero-content">
-            <img src={logoSrc} alt="DB-GPT Logo" className="homepage-hero-logo" />
+            <img src={logoSrc} alt="Datrix Logo" className="homepage-hero-logo" />
             <p className="homepage-hero-tagline">
-              Open-Source Agentic AI Data Assistant
+              由智能体矩阵驱动的数据分析工具
             </p>
             <p className="homepage-hero-description">
               Connect to your data, write SQL and code autonomously, run skills in sandboxed environments, 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ╔════════════════════════════════════════════════════════════════════════════╗
-# ║  DB-GPT Quick Installer                                                  ║
+# ║  Datrix Quick Installer                                                  ║
 # ║                                                                          ║
 # ║  One-line usage:                                                         ║
 # ║    curl -fsSL https://raw.githubusercontent.com/eosphoros-ai/DB-GPT/\    ║
@@ -10,7 +10,7 @@
 # ║    1. Detect OS (macOS / Linux)                                          ║
 # ║    2. Ensure git and curl are available                                  ║
 # ║    3. Install uv (if not already present)                                ║
-# ║    4. Clone (or update) the DB-GPT repository                           ║
+# ║    4. Clone (or update) the Datrix repository                           ║
 # ║    5. Run `uv sync` with the extras for the chosen profile              ║
 # ║    6. Generate config via dbgpt setup wizard                             ║
 # ║    7. Print next-steps (start command, URL)                              ║
@@ -70,7 +70,7 @@ USER_CONFIG=""
 # ── Usage ─────────────────────────────────────────────────────────────────────
 usage() {
   cat <<'EOF'
-DB-GPT Quick Installer
+Datrix Quick Installer
 
 Usage:
   install.sh [options]
@@ -80,10 +80,10 @@ Options:
   --config <path>        Use existing TOML config (skip config generation)
   --install-dir <path>   Where to install (default: ~/.dbgpt)
   --version <git-ref>    Git tag or branch to check out (default: main)
-  --repo-dir <path>      Use an existing local DB-GPT checkout
+  --repo-dir <path>      Use an existing local Datrix checkout
   --mirror china         Use China PyPI mirror (Tsinghua)
   --yes                  Non-interactive — accept all defaults
-  --start                Start DB-GPT server after install
+  --start                Start Datrix server after install
   -h, --help             Show this help
 
 Environment variables:
@@ -297,7 +297,7 @@ resolve_repo_dir() {
 
   local resolved_repo_dir
   resolved_repo_dir="$(git -C "${REPO_DIR}" rev-parse --show-toplevel 2>/dev/null)" \
-    || die "--repo-dir must point to a DB-GPT git checkout: ${REPO_DIR}"
+    || die "--repo-dir must point to a Datrix git checkout: ${REPO_DIR}"
 
   REPO_DIR="${resolved_repo_dir}"
 
@@ -315,7 +315,7 @@ step_clone_or_update_repo() {
   fi
 
   if [[ ! -e "${repo_dir}" ]]; then
-    run "Cloning DB-GPT repository..." \
+    run "Cloning Datrix repository..." \
       git clone --depth 1 --branch "${VERSION}" \
       https://github.com/eosphoros-ai/DB-GPT.git "${repo_dir}"
     return
@@ -325,7 +325,7 @@ step_clone_or_update_repo() {
     die "Directory exists but is not a git repo: ${repo_dir}. Remove it and re-run."
   fi
 
-  info "Existing DB-GPT repo found: ${repo_dir}"
+  info "Existing Datrix repo found: ${repo_dir}"
   if confirm "Update to version '${VERSION}'?"; then
     run "Fetching latest..." git -C "${repo_dir}" fetch --tags --prune
     run "Checking out ${VERSION}..." git -C "${repo_dir}" checkout "${VERSION}"
@@ -418,7 +418,7 @@ step_print_summary() {
 
   printf '%b' "
 ${COLOR_GREEN}════════════════════════════════════════════════════════════${COLOR_RESET}
-${COLOR_GREEN}  DB-GPT installed successfully!${COLOR_RESET}
+${COLOR_GREEN}  Datrix installed successfully!${COLOR_RESET}
 ${COLOR_GREEN}════════════════════════════════════════════════════════════${COLOR_RESET}
 
   Profile:    ${PROFILE}
@@ -430,7 +430,7 @@ ${COLOR_GREEN}══════════════════════
   1. Review / Edit your config (set Custom API key Or BaseURL if not done):
      ${COLOR_YELLOW}${config_path}${COLOR_RESET}
 
-  2. Start DB-GPT:
+  2. Start Datrix:
      ${COLOR_YELLOW}cd \"${repo_dir}\" && uv run dbgpt start webserver --profile ${PROFILE}${COLOR_RESET}
 
   3. Open your browser:
@@ -445,7 +445,7 @@ step_start_if_requested() {
   fi
 
   local repo_dir="${REPO_DIR}"
-  info "Starting DB-GPT server..."
+  info "Starting Datrix server..."
   (
     cd "${repo_dir}"
     if [[ -n "${USER_CONFIG:-}" ]]; then

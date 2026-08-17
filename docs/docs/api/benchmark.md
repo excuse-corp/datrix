@@ -74,7 +74,7 @@ GET /api/v2/serve/evaluate/benchmark_task_list
 DBGPT_API_KEY=dbgpt
 SPACE_ID={YOUR_SPACE_ID}
 
-curl -X GET "http://localhost:5670/api/v2/serve/evaluate/benchmark_task_list?page=1&page_size=20" \ 
+curl -X GET "http://localhost:5670/api/v2/serve/evaluate/benchmark_task_list?page=1&page_size=20" \
 -H "Authorization: Bearer $DBGPT_API_KEY" \
 -H "accept: application/json" \
 -H "Content-Type: application/json"
@@ -187,7 +187,7 @@ The benchmark task system code, e.g. benchmark_system
 ________
 <b>parallel_num</b> <font color="gray">int</font>
 
-The benchmark task execute parallel num 
+The benchmark task execute parallel num
 ________
 <b>state</b> <font color="gray">string</font>
 
@@ -203,7 +203,7 @@ The benchmark task LLM max tokens
 ________
 <b>log_info</b>  <font color="gray">int</font>
 
-If benchmark task execute error, It will show error message, 
+If benchmark task execute error, It will show error message,
 ________
 <b>gmt_create</b> <font color="gray">string</font>
 

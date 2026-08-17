@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# profiles.sh - Profile definitions for DB-GPT installer
+# profiles.sh - Profile definitions for Datrix installer
 #
 # Each profile maps to:
 #   1. A set of uv extras (fed to `uv sync --extra ...`)

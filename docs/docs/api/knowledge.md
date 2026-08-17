@@ -50,9 +50,9 @@ SPACE_NAME="{YOUR_SPACE_NAME}"
 client = Client(api_key=DBGPT_API_KEY)
 
 async for data in client.chat_stream(
-    messages="Introduce AWEL", 
-    model="gpt-4o", 
-    chat_mode="chat_knowledge", 
+    messages="Introduce AWEL",
+    model="gpt-4o",
+    chat_mode="chat_knowledge",
     chat_param=SPACE_NAME
 ):
     print(data)
@@ -344,7 +344,7 @@ data: {"id": "chatcmpl-86f60a0c-e686-11ee-9322-acde48001122", "model": "gpt-4o",
 
 data: {"id": "chatcmpl-86f60a0c-e686-11ee-9322-acde48001122", "model": "gpt-4o", "choices": [{"index": 0, "delta": {"role": "assistant", "content": "."}}]}
 
-data: {"id": "chatcmpl-86f60a0c-e686-11ee-9322-acde48001122", "model": "gpt-4o", "choices": [{"index": 0, "delta": {"role": "assistant", "content": "\n\n<references title=\"References\" references=\"[{&quot;name&quot;: &quot;AWEL_URL&quot;, &quot;chunks&quot;: [{&quot;id&quot;: 2526, &quot;content&quot;: &quot;Agentic Workflow Expression Language(AWEL) is a set of intelligent agent workflow expression language specially designed for large model applicationdevelopment. It provides great functionality and flexibility. Through the AWEL API, you can focus on the development of business logic for LLMs applicationswithout paying attention to cumbersome model and environment details.AWEL adopts a layered API design. AWEL's layered API design architecture is shown in the figure below.AWEL Design&quot;, &quot;meta_info&quot;: &quot;{'source': 'https://docs.dbgpt.site/docs/awel/', 'title': 'AWEL(Agentic Workflow Expression Language) | DB-GPT', 'description': 'Agentic Workflow Expression Language(AWEL) is a set of intelligent agent workflow expression language specially designed for large model application', 'language': 'en-US'}&quot;, &quot;recall_score&quot;: 0.6579902643967029}, {&quot;id&quot;: 2531, &quot;content&quot;: &quot;ExamplesThe preliminary version of AWEL has alse been released, and we have provided some built-in usage examples.OperatorsExample of API-RAGYou can find source code from examples/awel/simple_rag_example.py&quot;, &quot;meta_info&quot;: &quot;{'source': 'https://docs.dbgpt.site/docs/awel/', 'title': 'AWEL(Agentic Workflow Expression Language) | DB-GPT', 'description': 'Agentic Workflow Expression Language(AWEL) is a set of intelligent agent workflow expression language specially designed for large model application', 'language': 'en-US'}&quot;, &quot;recall_score&quot;: 0.5997033286385491}, {&quot;id&quot;: 2538, &quot;content&quot;: &quot;Stand-alone environmentRay environmentPreviousWhy use AWEL?NextReleased V0.5.0 | Develop native data applications through workflows and agentsAWEL DesignExamplesOperatorsExample of API-RAGAgentFream ExampleDSL ExampleCurrently supported operatorsExecutable environmentCommunityDiscordDockerhubGithubGithubHuggingFaceMoreHacker NewsTwitterCopyright © 2024 DB-GPT&quot;, &quot;meta_info&quot;: &quot;{'source': 'https://docs.dbgpt.site/docs/awel/', 'title': 'AWEL(Agentic Workflow Expression Language) | DB-GPT', 'description': 'Agentic Workflow Expression Language(AWEL) is a set of intelligent agent workflow expression language specially designed for large model application', 'language': 'en-US'}&quot;, &quot;recall_score&quot;: 0.5980204530753225}]}]\" />"}}]}
+data: {"id": "chatcmpl-86f60a0c-e686-11ee-9322-acde48001122", "model": "gpt-4o", "choices": [{"index": 0, "delta": {"role": "assistant", "content": "\n\n<references title=\"References\" references=\"[{&quot;name&quot;: &quot;AWEL_URL&quot;, &quot;chunks&quot;: [{&quot;id&quot;: 2526, &quot;content&quot;: &quot;Agentic Workflow Expression Language(AWEL) is a set of intelligent agent workflow expression language specially designed for large model applicationdevelopment. It provides great functionality and flexibility. Through the AWEL API, you can focus on the development of business logic for LLMs applicationswithout paying attention to cumbersome model and environment details.AWEL adopts a layered API design. AWEL's layered API design architecture is shown in the figure below.AWEL Design&quot;, &quot;meta_info&quot;: &quot;{'source': 'https://docs.dbgpt.site/docs/awel/', 'title': 'AWEL(Agentic Workflow Expression Language) | Datrix', 'description': 'Agentic Workflow Expression Language(AWEL) is a set of intelligent agent workflow expression language specially designed for large model application', 'language': 'en-US'}&quot;, &quot;recall_score&quot;: 0.6579902643967029}, {&quot;id&quot;: 2531, &quot;content&quot;: &quot;ExamplesThe preliminary version of AWEL has alse been released, and we have provided some built-in usage examples.OperatorsExample of API-RAGYou can find source code from examples/awel/simple_rag_example.py&quot;, &quot;meta_info&quot;: &quot;{'source': 'https://docs.dbgpt.site/docs/awel/', 'title': 'AWEL(Agentic Workflow Expression Language) | Datrix', 'description': 'Agentic Workflow Expression Language(AWEL) is a set of intelligent agent workflow expression language specially designed for large model application', 'language': 'en-US'}&quot;, &quot;recall_score&quot;: 0.5997033286385491}, {&quot;id&quot;: 2538, &quot;content&quot;: &quot;Stand-alone environmentRay environmentPreviousWhy use AWEL?NextReleased V0.5.0 | Develop native data applications through workflows and agentsAWEL DesignExamplesOperatorsExample of API-RAGAgentFream ExampleDSL ExampleCurrently supported operatorsExecutable environmentCommunityDiscordDockerhubGithubGithubHuggingFaceMoreHacker NewsTwitterCopyright © 2024 Datrix&quot;, &quot;meta_info&quot;: &quot;{'source': 'https://docs.dbgpt.site/docs/awel/', 'title': 'AWEL(Agentic Workflow Expression Language) | Datrix', 'description': 'Agentic Workflow Expression Language(AWEL) is a set of intelligent agent workflow expression language specially designed for large model application', 'language': 'en-US'}&quot;, &quot;recall_score&quot;: 0.5980204530753225}]}]\" />"}}]}
 
 data: [DONE]
 ```
@@ -672,7 +672,7 @@ ________
 
 knowledge space name
 ________
-<b>vector_type</b> <font color="gray"> string </font> 
+<b>vector_type</b> <font color="gray"> string </font>
 
 vector db type, `Chroma`, `Milvus`, default is `Chroma`
 ________

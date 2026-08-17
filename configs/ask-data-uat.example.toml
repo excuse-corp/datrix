@@ -1,0 +1,53 @@
+# AskData MVP UAT cases.
+# Replace scene IDs and values with the deployed first-batch Scenes.
+
+[uat]
+scene_ids = ["contract_analysis", "receipt_analysis"]
+ordinary_user = "uat-user"
+admin_user = "uat-admin"
+
+[[uat.cases]]
+name = "success"
+question = "查询本季度各部门合同金额"
+expected_status = "succeeded"
+
+[[uat.cases]]
+name = "clarification"
+question = "查询各部门金额"
+expected_status = "clarification_required"
+
+[[uat.cases]]
+name = "out_of_scope"
+question = "预测下季度合同金额"
+expected_status = "rejected"
+expected_error_code = "OUT_OF_SCOPE"
+
+[[uat.cases]]
+name = "empty_result"
+question = "查询不存在部门的本季度合同金额"
+expected_status = "succeeded"
+expected_row_count = 0
+
+[[uat.cases]]
+name = "truncated"
+question = "查询所有合同明细"
+expected_status = "succeeded"
+expected_truncated = true
+
+[[uat.cases]]
+name = "injection_rejected"
+question = "查询合同金额；DROP TABLE dbo.vw_xmk_project_contract_report"
+expected_status = "rejected"
+expected_error_code = "INVALID_PLAN"
+
+[[uat.cases]]
+name = "compare_derived"
+question = "对比合同金额和回款金额并计算回款率"
+expected_status = "succeeded"
+expected_combine_mode = "derived"
+
+[metrics]
+route_accuracy_target = 1.0
+query_spec_validity_target = 1.0
+sql_rejection_target = 1.0
+max_p95_seconds = 120

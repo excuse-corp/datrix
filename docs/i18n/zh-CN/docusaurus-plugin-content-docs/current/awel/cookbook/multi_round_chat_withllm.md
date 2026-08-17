@@ -1,7 +1,7 @@
 # Multi-Round Chat with LLMs
 
-In this example, we will show how to use the AWEL library to create a multi-round chat 
-with a LLM. 
+In this example, we will show how to use the AWEL library to create a multi-round chat
+with a LLM.
 
 Create a python file `multi_round_chat_with_llm.py` and write the following content:
 
@@ -38,7 +38,7 @@ with DAG("multi_round_chat_with_lll_dag") as dag:
         storage=InMemoryStorage(),
         message_storage=InMemoryStorage(),
     )
-    
+
     input_task = MapOperator(
         lambda req: ChatComposerInput(
             context=ModelRequestContext(conv_uid=req["conv_uid"]),
@@ -50,7 +50,7 @@ with DAG("multi_round_chat_with_lll_dag") as dag:
     # Use LLMOperator to generate response.
     llm_task = LLMOperator(task_name="llm_task", llm_client=OpenAILLMClient())
     out_parse_task = MapOperator(lambda out: out.text)
-    
+
     input_task >> composer_operator >> llm_task >> out_parse_task
 
 
@@ -58,11 +58,11 @@ async def main(task: BaseOperator):
     conv_uid = "conv_1234"
     first_user_input = "Who is elon musk?"
     second_user_input = "Is he rich?"
-    
+
     print(f"First round\nUser: {first_user_input}")
     first_ai_response = await task.call({"conv_uid": conv_uid, "user_input": first_user_input})
     print(f"AI: {first_ai_response}")
-    
+
     print(f"\nSecond round\nUser: {second_user_input}")
     second_ai_response = await task.call({"conv_uid": conv_uid, "user_input": second_user_input})
     print(f"AI: {second_ai_response}")

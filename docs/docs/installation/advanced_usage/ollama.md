@@ -1,5 +1,5 @@
 # ollama
-ollama is a model serving platform that allows you to deploy models in a few seconds. 
+ollama is a model serving platform that allows you to deploy models in a few seconds.
 It is a great tool.
 
 ### Install ollama

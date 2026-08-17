@@ -3,7 +3,7 @@ sidebar_position: 0
 ---
 # Quickstart
 
-DB-GPT supports the installation and use of various open-source and closed-source models. Different models have different requirements for environment and resources. If local model deployment is required, GPU resources are necessary. The API proxy model requires relatively few resources and can be deployed and started on a CPU machine.
+Datrix supports the installation and use of various open-source and closed-source models. Different models have different requirements for environment and resources. If local model deployment is required, GPU resources are necessary. The API proxy model requires relatively few resources and can be deployed and started on a CPU machine.
 
 :::info note
 - Detailed installation and deployment tutorials can be found in [Installation](./installation).
@@ -15,7 +15,7 @@ DB-GPT supports the installation and use of various open-source and closed-sourc
 ### Download Source Code
 
 :::tip
-Download DB-GPT
+Download Datrix
 :::
 
 ```bash
@@ -24,9 +24,9 @@ git clone https://github.com/eosphoros-ai/DB-GPT.git
 
 ### Environment Setup
 
-- The default database uses SQLite, so there is no need to install a database in the 
-default startup mode. If you need to use other databases, please refer to the [advanced tutorials](./application/advanced_tutorial/rag.md) below. 
-Starting from version 0.7.0, DB-GPT uses uv for environment and package management, providing faster and more stable dependency management.
+- The default database uses SQLite, so there is no need to install a database in the
+default startup mode. If you need to use other databases, please refer to the [advanced tutorials](./application/advanced_tutorial/rag.md) below.
+Starting from version 0.7.0, Datrix uses uv for environment and package management, providing faster and more stable dependency management.
 
 
 :::info note
@@ -73,7 +73,7 @@ Then, you can run `uv --version` to check if uv is installed successfully.
 uv --version
 ```
 
-## Deploy DB-GPT 
+## Deploy Datrix
 :::tip
 If you are in the China region, you can add --index-url=https://pypi.tuna.tsinghua.edu.cn/simple at the end of the command.Like this:
 ```bash
@@ -121,7 +121,7 @@ uv sync --all-packages \
 
 ### Run Webserver
 
-To run DB-GPT with OpenAI proxy, you must provide the OpenAI API key in the `configs/dbgpt-proxy-openai.toml` configuration file or privide it in the environment variable with key `OPENAI_API_KEY`.
+To run Datrix with OpenAI proxy, you must provide the OpenAI API key in the `configs/dbgpt-proxy-openai.toml` configuration file or privide it in the environment variable with key `OPENAI_API_KEY`.
 
 ```toml
 # Model Configurations
@@ -161,7 +161,7 @@ uv sync --all-packages \
 
 ### Run Webserver
 
-To run DB-GPT with DeepSeek proxy, you must provide the DeepSeek API key in the `configs/dbgpt-proxy-deepseek.toml`.
+To run Datrix with DeepSeek proxy, you must provide the DeepSeek API key in the `configs/dbgpt-proxy-deepseek.toml`.
 
 And you can specify your embedding model in the `configs/dbgpt-proxy-deepseek.toml` configuration file, the default embedding model is `BAAI/bge-large-zh-v1.5`. If you want to use other embedding models, you can modify the `configs/dbgpt-proxy-deepseek.toml` configuration file and specify the `name` and `provider` of the embedding model in the `[[models.embeddings]]` section. The provider can be `hf`.Finally, you need to append `--extra "hf"` at the end of the dependency installation command. Here's the updated command:
 ```bash
@@ -223,7 +223,7 @@ uv sync --all-packages \
 
 ### Run Webserver
 
-To run DB-GPT with the local model. You can modify the `configs/dbgpt-local-glm.toml` configuration file to specify the model path and other parameters.
+To run Datrix with the local model. You can modify the `configs/dbgpt-local-glm.toml` configuration file to specify the model path and other parameters.
 
 ```toml
 # Model Configurations
@@ -269,7 +269,7 @@ uv sync --all-packages \
 
 ### Run Webserver
 
-To run DB-GPT with the local model. You can modify the `configs/dbgpt-local-vllm.toml` configuration file to specify the model path and other parameters.
+To run Datrix with the local model. You can modify the `configs/dbgpt-local-vllm.toml` configuration file to specify the model path and other parameters.
 
 ```toml
 # Model Configurations
@@ -331,7 +331,7 @@ uv sync --all-packages \
 
 ### Run Webserver
 
-To run DB-GPT with the local model. You can modify the `configs/dbgpt-local-llama-cpp.toml` configuration file to specify the model path and other parameters.
+To run Datrix with the local model. You can modify the `configs/dbgpt-local-llama-cpp.toml` configuration file to specify the model path and other parameters.
 
 ```toml
 # Model Configurations
@@ -373,7 +373,7 @@ uv sync --all-packages \
 
 ### Run Webserver
 
-To run DB-GPT with Ollama proxy, you must provide the Ollama API base in the `configs/dbgpt-proxy-ollama.toml` configuration file.
+To run Datrix with Ollama proxy, you must provide the Ollama API base in the `configs/dbgpt-proxy-ollama.toml` configuration file.
 
 ```toml
 # Model Configurations
@@ -403,7 +403,7 @@ uv run python packages/dbgpt-app/src/dbgpt_app/dbgpt_server.py --config configs/
 
 ## (Optional) More Configuration
 
-You can view the configuration in [Configuration](./config/config-reference) to learn more about 
+You can view the configuration in [Configuration](./config/config-reference) to learn more about
 the configuration options.
 
 For example, if you want to configure the LLM model, you can see all available options in the [LLM Configuration](./config-reference/llm/).
@@ -411,7 +411,7 @@ For example, if you want to configure the LLM model, you can see all available o
 And another example, if you want to how to configure the vllm model, you can see all available options in the [VLLM Configuration](./config-reference/llm/vllm_adapter_vllmdeploymodelparameters_1d4a24.mdx).
 
 
-## DB-GPT Install Help Tool
+## Datrix Install Help Tool
 
 If you need help with the installation, you can use the `uv` script to get help.
 
@@ -451,7 +451,7 @@ You can also run the web front-end separately:
 ```bash
 cd web && npm install
 cp .env.template .env
-// Set API_BASE_URL to your DB-GPT server address, usually http://localhost:5670
+// Set API_BASE_URL to your Datrix server address, usually http://localhost:5670
 npm run dev
 ```
 Open your browser and visit [`http://localhost:3000`](http://localhost:3000)

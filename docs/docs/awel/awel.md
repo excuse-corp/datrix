@@ -1,4 +1,4 @@
-# What is AWEL? 
+# What is AWEL?
 
 Agentic Workflow Expression Language(AWEL) is a set of intelligent agent workflow expression language specially designed for large model application
 development. It provides great functionality and flexibility. Through the AWEL API, you can focus on the development of business logic for LLMs applications
@@ -17,13 +17,13 @@ AWEL is divided into three levels in deign, namely the operator layer, AgentFrea
 to the three levels.
 
 - **Operator layer**
-The operator layer refers to the most basic operation atoms in the LLM application development process, 
-such as when developing a RAG application. Retrieval, vectorization, model interaction, prompt processing, etc. 
-are all basic operators. In the subsequent development, the framework will further abstract and standardize the design of operators. 
+The operator layer refers to the most basic operation atoms in the LLM application development process,
+such as when developing a RAG application. Retrieval, vectorization, model interaction, prompt processing, etc.
+are all basic operators. In the subsequent development, the framework will further abstract and standardize the design of operators.
 A set of operators can be quickly implemented based on standard APIs
 
 - **AgentFream layer**
-The AgentFream layer further encapsulates operators and can perform chain calculations based on operators. 
+The AgentFream layer further encapsulates operators and can perform chain calculations based on operators.
 This layer of chain computing also supports distribution, supporting a set of chain computing operations such as filter, join, map, reduce, etc. More calculation logic will be supported in the future.
 
 - **DSL layer**
@@ -34,7 +34,7 @@ The preliminary version of AWEL has alse been released, and we have provided som
 
 ## Operators
 
-### Example of API-RAG 
+### Example of API-RAG
 You can find [source code](https://github.com/eosphoros-ai/DB-GPT/blob/main/examples/awel/simple_rag_example.py) from `examples/awel/simple_rag_example.py`
 ```python
 with DAG("simple_rag_example") as dag:
@@ -97,18 +97,18 @@ result.write_to_sink(type='source_slink')
 ``` python
 CREATE WORKFLOW RAG AS
 BEGIN
-    DATA requestData = RECEIVE REQUEST FROM 
+    DATA requestData = RECEIVE REQUEST FROM
     		http_source("/examples/rags", method = "post");
-        
+
     DATA processedData = TRANSFORM requestData USING embedding(model = "text2vec");
-    DATA retrievedData = RETRIEVE DATA 
+    DATA retrievedData = RETRIEVE DATA
     		FROM vstore(database = "chromadb", key = processedData)
     		ON ERROR FAIL;
-        
-    DATA modelResult = APPLY LLM "vicuna-13b" 
+
+    DATA modelResult = APPLY LLM "vicuna-13b"
     		WITH DATA retrievedData AND PARAMETERS (temperature = 0.7)
     		ON ERROR RETRY 2 TIMES;
-        
+
     RESPOND TO http_source WITH modelResult
     		ON ERROR LOG "Failed to respond to request";
 END;

@@ -58,7 +58,7 @@ Options:
 Commands:
   delete  Delete your knowledge space or document in space
   list    List knowledge space
-  load    Load your local documents to DB-GPT
+  load    Load your local documents to Datrix
 ```
 
 #### Load command
@@ -69,7 +69,7 @@ Commands:
 Already connect 'dbgpt'
 Usage: dbgpt knowledge load [OPTIONS]
 
-  Load your local documents to DB-GPT
+  Load your local documents to Datrix
 
 Options:
   --space_name TEXT         Your knowledge space name  [default: default]

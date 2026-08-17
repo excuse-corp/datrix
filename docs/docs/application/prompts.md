@@ -17,10 +17,10 @@ Next, let's see how to create a new prompt. Click the **Add Prompt**  button and
   <img src={'/img/app/prompt_add_v0.6.jpg'} width="800px" />
 </p>
 
-We define four types of prompts: 
-- AGENT: Agent Prompt 
-- SCENE: Scene Prompt 
-- NORMAL: Normal prompt word 
+We define four types of prompts:
+- AGENT: Agent Prompt
+- SCENE: Scene Prompt
+- NORMAL: Normal prompt word
 - EVALUATE: Evaluation Mode Prompt
 
 When the AGENT type is selected, all registered agents can be seen in the drop-down list menu, and you can select an agent to set the prompt.
@@ -45,12 +45,12 @@ Enter the AWEL editing interface, as shown below, click **Application Management
   <img src={'/img/app/awel_create.6.jpg'} width="800px" />
 </p>
 
-Find the Agent resource and select the AWEL Layout Agent operator. We can see that each Agent contains the following information: 
+Find the Agent resource and select the AWEL Layout Agent operator. We can see that each Agent contains the following information:
 
 - Profile
 - Role
 - Goal
-- Resource (AWELResource): The resource that Agent depends on 
+- Resource (AWELResource): The resource that Agent depends on
 - AgentConfig(AWELAgentConfig) Agent Config
 - AgentPrompt: Prompt
 

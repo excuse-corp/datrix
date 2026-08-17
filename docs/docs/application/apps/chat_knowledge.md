@@ -1,6 +1,6 @@
 # Chat Knowledge Base
 
-`Chat knowledge Base` provides the ability to question and answer questions based on private domain knowledge, and can build intelligent question and answer systems, reading assistants and other products based on the `knowledge base`. `RAG` technology is also used in DB-GPT to enhance knowledge retrieval.
+`Chat knowledge Base` provides the ability to question and answer questions based on private domain knowledge, and can build intelligent question and answer systems, reading assistants and other products based on the `knowledge base`. `RAG` technology is also used in Datrix to enhance knowledge retrieval.
 
 
 ## Noun explanation
@@ -67,7 +67,7 @@ and click Process, it will take a few minutes to complete the document segmentat
 **Chunk size: The number of words in each segment of the document. The default is 512 words.**
     - chunk size: The number of words in each segment of the document. The default is 512 words.
     - chunk overlap: The number of words overlapped between each segment of the document. The default is 50 words.
-** Separator:segmentation by separator ** 
+** Separator:segmentation by separator **
     - separator: The separator of the document. The default is `\n`.
     - enable_merge: Whether to merge the separator chunks according to chunk_size after splits. The default is `False`.
 ** Page: page segmentation, only support .pdf and .pptx document.**

@@ -1,10 +1,10 @@
 ---
 id: docker-build-guide
-title: DB-GPT Docker 镜像构建指南
+title: Datrix Docker 镜像构建指南
 sidebar_label: Docker 镜像构建
-description: 全面介绍如何使用各种配置构建 DB-GPT Docker 镜像
+description: 全面介绍如何使用各种配置构建 Datrix Docker 镜像
 keywords:
-  - DB-GPT
+  - Datrix
   - Docker
   - Build
   - CUDA
@@ -17,60 +17,60 @@ import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 import CodeBlock from '@theme/CodeBlock';
 
-# DB-GPT Docker 镜像构建指南
+# Datrix Docker 镜像构建指南
 
-本指南详细介绍如何使用 `docker/base/build_image.sh` 脚本，以各种配置构建 DB-GPT Docker 镜像。
+本指南详细介绍如何使用 `docker/base/build_image.sh` 脚本，以各种配置构建 Datrix Docker 镜像。
 
 ## 概述
 
-DB-GPT 构建脚本允许你根据具体需求创建定制化的 Docker 镜像。你可以选择预定义的安装模式，也可以通过指定额外依赖、环境变量等参数来自定义构建。
+Datrix 构建脚本允许你根据具体需求创建定制化的 Docker 镜像。你可以选择预定义的安装模式，也可以通过指定额外依赖、环境变量等参数来自定义构建。
 
 ## 可用安装模式
 
 <Tabs>
   <TabItem value="default" label="默认模式" default>
     基于 CUDA 的标准功能镜像。
-    
+
     ```bash
     bash docker/base/build_image.sh
     ```
-    
+
     包含：CUDA 支持、代理集成（OpenAI、Ollama、智谱、Anthropic、千帆、通义）、RAG 能力、Graph RAG、Hugging Face 集成以及量化支持。
   </TabItem>
   <TabItem value="openai" label="OpenAI 模式">
     基于 CPU 的 OpenAI API 优化镜像。
-    
+
     ```bash
     bash docker/base/build_image.sh --install-mode openai
     ```
-    
+
     包含：基础功能、所有代理集成以及 RAG 能力，无需 GPU 加速。
   </TabItem>
   <TabItem value="vllm" label="VLLM 模式">
     基于 CUDA 的 VLLM 优化推理镜像。
-    
+
     ```bash
     bash docker/base/build_image.sh --install-mode vllm
     ```
-    
+
     包含：所有默认功能以及 VLLM 高性能推理支持。
   </TabItem>
   <TabItem value="llama-cpp" label="Llama-cpp 模式">
     基于 CUDA 的 Llama-cpp 支持镜像。
-    
+
     ```bash
     bash docker/base/build_image.sh --install-mode llama-cpp
     ```
-    
+
     包含：所有默认功能以及 Llama-cpp 和 Llama-cpp Server，通过 `CMAKE_ARGS="-DGGML_CUDA=ON"` 启用 CUDA 加速。
   </TabItem>
   <TabItem value="full" label="完整模式">
     基于 CUDA 的全功能镜像。
-    
+
     ```bash
     bash docker/base/build_image.sh --install-mode full
     ```
-    
+
     包含：其他所有模式的功能以及 Embedding 能力。
   </TabItem>
 </Tabs>
@@ -97,7 +97,7 @@ bash docker/base/build_image.sh --help
 
 ### Python 版本
 
-DB-GPT 要求 Python 3.10 或更高版本。默认使用 Python 3.11，你也可以指定其他版本：
+Datrix 要求 Python 3.10 或更高版本。默认使用 Python 3.11，你也可以指定其他版本：
 
 ```bash
 bash docker/base/build_image.sh --python-version 3.10
@@ -154,21 +154,21 @@ bash docker/base/build_image.sh --language zh
 <Tabs>
   <TabItem value="override" label="覆盖依赖" default>
     完全替换默认的额外依赖：
-    
+
     ```bash
     bash docker/base/build_image.sh --extras "base,proxy_openai,rag,storage_chromadb"
     ```
   </TabItem>
   <TabItem value="add" label="追加依赖">
     保留默认依赖并追加更多：
-    
+
     ```bash
     bash docker/base/build_image.sh --add-extras "storage_milvus,storage_elasticsearch,datasource_postgres"
     ```
   </TabItem>
   <TabItem value="mode-specific" label="按模式追加">
     为特定安装模式追加额外依赖：
-    
+
     ```bash
     bash docker/base/build_image.sh --install-mode vllm --add-extras "storage_milvus,datasource_postgres"
     ```
@@ -188,23 +188,23 @@ bash docker/base/build_image.sh --language zh
 | `llama_cpp` | Llama-cpp Python 绑定 |
 | `llama_cpp_server` | Llama-cpp HTTP 服务器 |
 
-你可以在本地 DB-GPT 仓库中运行 `uv run install_help.py list` 查看所有可用的额外依赖。
+你可以在本地 Datrix 仓库中运行 `uv run install_help.py list` 查看所有可用的额外依赖。
 
 ### 环境变量
 
-DB-GPT 构建支持通过环境变量进行特殊配置。主要使用的环境变量是 `CMAKE_ARGS`，对于 Llama-cpp 编译尤为重要。
+Datrix 构建支持通过环境变量进行特殊配置。主要使用的环境变量是 `CMAKE_ARGS`，对于 Llama-cpp 编译尤为重要。
 
 <Tabs>
   <TabItem value="override-env" label="覆盖环境变量" default>
     替换默认的环境变量：
-    
+
     ```bash
     bash docker/base/build_image.sh --env-vars "CMAKE_ARGS=\"-DGGML_CUDA=ON -DLLAMA_CUBLAS=ON\""
     ```
   </TabItem>
   <TabItem value="add-env" label="追加环境变量">
     追加额外的环境变量：
-    
+
     ```bash
     bash docker/base/build_image.sh --install-mode llama-cpp --add-env-vars "FORCE_CMAKE=1"
     ```
@@ -334,6 +334,6 @@ bash docker/base/build_image.sh --network host
 
 ## 相关资源
 
-- [DB-GPT 文档](https://github.com/eosphoros-ai/DB-GPT)
+- [Datrix 文档](https://github.com/eosphoros-ai/DB-GPT)
 - [Docker 文档](https://docs.docker.com/)
 - [CUDA 文档](https://docs.nvidia.com/cuda/)

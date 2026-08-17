@@ -85,9 +85,9 @@ un_stream ai response: True
 Turing (to User)-[gpt-3.5-turbo]:
 
 "```python\n# filename: calculate_multiplication.py\n\nresult = 321 * 123\nprint(result)\n```"
->>>>>>>>Turing Review info: 
+>>>>>>>>Turing Review info:
 Pass(None)
->>>>>>>>Turing Action report: 
+>>>>>>>>Turing Action report:
 execution succeeded,
 
 39483

@@ -25,7 +25,7 @@ python dbgpt_server service and the llm service are deployed on the same instanc
 
 ### Q3 how to use MultiGPUs
 
-DB-GPT will use all available gpu by default. And you can modify the setting `CUDA_VISIBLE_DEVICES=0,1` in `.env` file
+Datrix will use all available gpu by default. And you can modify the setting `CUDA_VISIBLE_DEVICES=0,1` in `.env` file
 to use the specific gpu IDs.
 
 Optionally, you can also specify the gpu ID to use before the starting command, as shown below:
@@ -42,7 +42,7 @@ You can modify the setting `MAX_GPU_MEMORY=xxGib` in `.env` file to configure th
 
 ### Q4 Not Enough Memory
 
-DB-GPT supported 8-bit quantization and 4-bit quantization.
+Datrix supported 8-bit quantization and 4-bit quantization.
 
 You can modify the setting `QUANTIZE_8bit=True` or `QUANTIZE_4bit=True` in `.env` file to use quantization(8-bit quantization is enabled by default).
 

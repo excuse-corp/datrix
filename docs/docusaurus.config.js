@@ -38,9 +38,9 @@ function getNextVersionName() {
 
 /** @type {import('@docusaurus/types').Config} */
 const config = {
-  title: 'DB-GPT',
-  tagline: 'Revolutionizing Database Interactions with Private LLM Technology',
-  favicon: 'img/eosphoros.jpeg',
+  title: 'Datrix',
+  tagline: '由智能体矩阵驱动的数据分析工具',
+  favicon: 'img/datrix-logo.svg',
 
   // Set the production url of your site here
   url: 'http://docs.dbgpt.cn',
@@ -51,7 +51,7 @@ const config = {
   // GitHub pages deployment config.
   // If you aren't using GitHub pages, you don't need these.
   organizationName: 'eosphoros-ai', // Usually your GitHub org/user name.
-  projectName: 'DB-GPT', // Usually your repo name.
+  projectName: 'Datrix', // Usually your repo name.
 
   onBrokenLinks: isDev ? 'throw' : 'warn',
   onBrokenMarkdownLinks: isDev ? 'throw' : 'warn',
@@ -205,9 +205,9 @@ const config = {
       navbar: {
         hideOnScroll: true,
         logo: {
-          alt: 'DB-GPT Logo',
-          src: 'img/dbgpt_logo.svg',
-          srcDark: 'img/DB-GPT_LOGO_White.svg',
+          alt: 'Datrix Logo',
+          src: 'img/datrix-logo.svg',
+          srcDark: 'img/datrix-logo-dark.svg',
           href: "/"
         },
 
@@ -236,17 +236,6 @@ const config = {
             dropdownItemsAfter: [{to: '/versions', label: 'All versions'}],
             dropdownActiveClassDisabled: true,
           },
-          {
-            href: 'https://github.com/eosphoros-ai/DB-GPT/releases',
-            position: 'right',
-            label: "Releases",
-          },
-          {
-            href: 'https://github.com/eosphoros-ai/DB-GPT',
-            position: 'right',
-            className: 'header-github-link',
-            'aria-label': 'GitHub repository',
-          },
         ],
       },
       footer: {
@@ -270,7 +259,7 @@ const config = {
             items: [
               {
                 label: 'Github',
-                href: 'https://github.com/eosphoros-ai/DB-GPT',
+                href: 'https://github.com/eosphoros-ai/community',
               },
               {
                 label: "HuggingFace",
@@ -292,7 +281,7 @@ const config = {
             ],
           },
         ],
-        copyright: `Copyright © ${new Date().getFullYear()} DB-GPT`,
+        copyright: `Copyright © ${new Date().getFullYear()} Datrix`,
       },
       prism: {
         theme: lightCodeTheme,

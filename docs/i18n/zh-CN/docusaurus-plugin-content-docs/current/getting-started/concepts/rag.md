@@ -5,7 +5,7 @@ title: RAG
 
 # RAG (Retrieval-Augmented Generation)
 
-RAG 会在生成答案之前，先从你的数据中检索相关上下文，从而增强 LLM 的回答效果。DB-GPT 提供了完整的 RAG 框架，并支持多种检索策略。
+RAG 会在生成答案之前，先从你的数据中检索相关上下文，从而增强 LLM 的回答效果。Datrix 提供了完整的 RAG 框架，并支持多种检索策略。
 
 ## RAG 如何工作
 
@@ -29,7 +29,7 @@ flowchart LR
 
 ## 知识库类型
 
-DB-GPT 默认支持多种知识库类型：
+Datrix 默认支持多种知识库类型：
 
 | 类型 | 存储方式 | 适合场景 |
 |---|---|---|
@@ -49,7 +49,7 @@ DB-GPT 默认支持多种知识库类型：
 
 ## RAG 流程
 
-DB-GPT 中完整的 RAG 流程如下：
+Datrix 中完整的 RAG 流程如下：
 
 ```mermaid
 flowchart TB
@@ -78,7 +78,7 @@ flowchart TB
 
 ## 快速开始使用 RAG
 
-1. 打开 DB-GPT Web UI
+1. 打开 Datrix Web UI
 2. 在侧边栏进入 **Knowledge Base**
 3. 创建一个新的知识库
 4. 上传你的文档

@@ -1,10 +1,18 @@
 import { ChartData } from '@/types/chat';
 import { Card, CardContent, Typography } from '@mui/joy';
+import dynamic from 'next/dynamic';
 import { useMemo } from 'react';
-import BarChart from './bar-chart';
-import LineChart from './line-chart';
-import PieChart from './pie-chart';
+import type { BackEndChartType } from './autoChart/helpers';
+import { getChartType } from './autoChart/helpers';
+import type { AutoChartProps } from './autoChart/types';
 import TableChart from './table-chart';
+const BarChart = dynamic(() => import('./bar-chart'), { ssr: false });
+const LineChart = dynamic(() => import('./line-chart'), { ssr: false });
+const PieChart = dynamic(() => import('./pie-chart'), { ssr: false });
+
+const AutoChart = dynamic<AutoChartProps>(() => import('./autoChart').then(module => module.AutoChart), {
+  ssr: false,
+});
 
 type Props = {
   chartsData: Array<ChartData>;
@@ -79,5 +87,6 @@ function Chart({ chartsData }: Props) {
   );
 }
 
-export * from './autoChart';
+export { AutoChart, getChartType };
+export type { AutoChartProps, BackEndChartType };
 export default Chart;

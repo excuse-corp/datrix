@@ -1,6 +1,6 @@
 # Installation FAQ
 
-### Q1: sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) unable to open database file 
+### Q1: sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) unable to open database file
 
 make sure you pull latest code or create directory with mkdir pilot/data
 
@@ -26,7 +26,7 @@ Open `url` with your browser to see the website.
 ### Q4: (Windows) execute `pip install -e .` error
 
 The error log like the following:
-``` 
+```
 × python setup.py bdist_wheel did not run successfully.
   │ exit code: 1
   ╰─> [11 lines of output]
@@ -90,7 +90,7 @@ Then you can upgrade your database with the following command.
 dbgpt db migration upgrade
 ```
 
-Every time you change the model or pull the latest code from DB-GPT repository, you need to create a new migration script.
+Every time you change the model or pull the latest code from Datrix repository, you need to create a new migration script.
 ```commandline
 
 dbgpt db migration migrate -m "your message"
@@ -120,14 +120,14 @@ dbgpt db migration clean -y
 
 **Solution 3:**
 
-If you have already run the above command, but the error still exists, 
+If you have already run the above command, but the error still exists,
 you can try the following command to clean the migration script, migration history and your data.
 warning: This command will delete all your data!!! Please use it with caution.
 
 ```commandline
 dbgpt db migration clean --drop_all_tables -y --confirm_drop_all_tables
 ```
-or 
+or
 ```commandline
 rm -rf pilot/meta_data/alembic/versions/*
 rm -rf pilot/meta_data/alembic/dbgpt.db

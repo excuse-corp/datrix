@@ -1,7 +1,7 @@
 # Sensory Memory
 
-Like human sensory memory, the sensory memory is registers perceptual inputs, and it 
-will receive the observations from the environment, some of sensory memory will be 
+Like human sensory memory, the sensory memory is registers perceptual inputs, and it
+will receive the observations from the environment, some of sensory memory will be
 transferred to short-term memory.
 
 :::tip NOTE
@@ -108,9 +108,9 @@ Because he wanted to go to high school!
 Joy (to User)-[gpt-4o]:
 
 "Sure, here's a fun joke for you:\n\nWhy did the kid bring a ladder to school?\n\nBecause he wanted to go to high school!"
->>>>>>>>Joy Review info: 
+>>>>>>>>Joy Review info:
 Pass(None)
->>>>>>>>Joy Action report: 
+>>>>>>>>Joy Action report:
 execution succeeded,
 Sure, here's a fun joke for you:
 
@@ -136,9 +136,9 @@ Because the teacher said it was a piece of cake!
 Joy (to User)-[gpt-4o]:
 
 "Sure, here's a joke for you:\n\nWhy did the student eat his homework?\n\nBecause the teacher said it was a piece of cake!"
->>>>>>>>Joy Review info: 
+>>>>>>>>Joy Review info:
 Pass(None)
->>>>>>>>Joy Action report: 
+>>>>>>>>Joy Action report:
 execution succeeded,
 Sure, here's a joke for you:
 
@@ -160,15 +160,15 @@ un_stream ai response: Based on your previous statements, you went to primary sc
 Joy (to User)-[gpt-4o]:
 
 "Based on your previous statements, you went to primary school for the first time when you were 4 years old."
->>>>>>>>Joy Review info: 
+>>>>>>>>Joy Review info:
 Pass(None)
->>>>>>>>Joy Action report: 
+>>>>>>>>Joy Action report:
 execution succeeded,
 Based on your previous statements, you went to primary school for the first time when you were 4 years old.
 ```
 
-In the above example, the agent remembers the previous conversation and can answer the 
-question based on the previous conversation, it is because the `buffer_size=2` in the 
+In the above example, the agent remembers the previous conversation and can answer the
+question based on the previous conversation, it is because the `buffer_size=2` in the
 `SensoryMemory` and the agent can remember the previous two conversations.
 
 ### Verifying Forget
@@ -220,9 +220,9 @@ Because he was outstanding in his field!
 Joy (to User)-[gpt-4o]:
 
 "Sure, here's a joke for you:\n\nWhy did the scarecrow become a successful student?\n\nBecause he was outstanding in his field!"
->>>>>>>>Joy Review info: 
+>>>>>>>>Joy Review info:
 Pass(None)
->>>>>>>>Joy Action report: 
+>>>>>>>>Joy Action report:
 execution succeeded,
 Sure, here's a joke for you:
 
@@ -248,9 +248,9 @@ Because it had too many problems!
 Joy (to User)-[gpt-4o]:
 
 "Of course! Here's a joke for you:\n\nWhy was the math book sad when it started middle school?\n\nBecause it had too many problems!"
->>>>>>>>Joy Review info: 
+>>>>>>>>Joy Review info:
 Pass(None)
->>>>>>>>Joy Action report: 
+>>>>>>>>Joy Action report:
 execution succeeded,
 Of course! Here's a joke for you:
 
@@ -276,9 +276,9 @@ Because she needed to find a new angle!
 Joy (to User)-[gpt-4o]:
 
 "Sure, here's a joke for you:\n\nWhy did the geometry teacher go to the beach?\n\nBecause she needed to find a new angle!"
->>>>>>>>Joy Review info: 
+>>>>>>>>Joy Review info:
 Pass(None)
->>>>>>>>Joy Action report: 
+>>>>>>>>Joy Action report:
 execution succeeded,
 Sure, here's a joke for you:
 
@@ -304,9 +304,9 @@ Because he was outstanding in his field! 🌾🎓😄
 Joy (to User)-[gpt-4o]:
 
 "Sure, here’s a college-themed joke for you:\n\nWhy did the scarecrow become a successful college student?\n\nBecause he was outstanding in his field! 🌾🎓😄"
->>>>>>>>Joy Review info: 
+>>>>>>>>Joy Review info:
 Pass(None)
->>>>>>>>Joy Action report: 
+>>>>>>>>Joy Action report:
 execution succeeded,
 Sure, here’s a college-themed joke for you:
 
@@ -332,9 +332,9 @@ Because it had too many problems! 📚😄
 Joy (to User)-[gpt-4o]:
 
 "Most people typically start primary school around 5 or 6 years old. But if you'd like a joke on that topic, here it goes:\n\nWhy did the math book look so sad on its first day of primary school?\n\nBecause it had too many problems! 📚😄"
->>>>>>>>Joy Review info: 
+>>>>>>>>Joy Review info:
 Pass(None)
->>>>>>>>Joy Action report: 
+>>>>>>>>Joy Action report:
 execution succeeded,
 Most people typically start primary school around 5 or 6 years old. But if you'd like a joke on that topic, here it goes:
 
@@ -343,9 +343,9 @@ Why did the math book look so sad on its first day of primary school?
 Because it had too many problems! 📚😄
 ```
 
-In the above example, the agent forgets the previous conversation and can't answer the 
+In the above example, the agent forgets the previous conversation and can't answer the
 question based on the previous conversation, it is because the `buffer_size=2` in this memory,
-**it will discard all the existing memories when the buffer is full**, this is a special 
-feature of the `SensoryMemory` that not like the common buffered memory(FIFO, keep the 
+**it will discard all the existing memories when the buffer is full**, this is a special
+feature of the `SensoryMemory` that not like the common buffered memory(FIFO, keep the
 latest buffer_size memories).
 

@@ -1,39 +1,18 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-# Exit immediately if a command exits with a non-zero status.
-set -e
+set -Eeuo pipefail
 
-SCRIPT_LOCATION=$0
-cd "$(dirname "$SCRIPT_LOCATION")"
-WORK_DIR=$(pwd)
-WORK_DIR="$WORK_DIR/.."
-TARGET_DIR="$WORK_DIR/packages/dbgpt-app/src/dbgpt_app/static/web"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+STATIC_TARGET="$ROOT_DIR/packages/dbgpt-app/src/dbgpt_app/static/web"
 
-echo "Building web static files"
-echo "Target directory: $TARGET_DIR"
+echo "[dataman] scripts/build_web_static.sh is deprecated; using legacy Next export path."
+echo "[dataman] Target directory: $STATIC_TARGET"
 
-cd $WORK_DIR/web
+(
+  cd "$ROOT_DIR/web"
+  NODE_OPTIONS='--max_old_space_size=8192 --experimental-require-module' ./node_modules/.bin/next build
+  NODE_OPTIONS='--experimental-require-module' ./node_modules/.bin/next export
+)
 
-source_env=".env"
-tmp_env=".env.copy"
-
-if [ -e "$source_env" ]; then
-  cp "$source_env" "$tmp_env"
-  rm -rf "$source_env"
-else
-  echo "Do not find .env"
-fi
-
-
-yarn install
-rm -rf ../web/out/
-yarn compile
-
-rm -rf $TARGET_DIR \
-  && mkdir -p $TARGET_DIR \
-  && cp -R ../web/out/* $TARGET_DIR
-
-if [ -e "$tmp_env" ]; then
-  cp "$tmp_env" "$source_env" 
-  rm -rf "$tmp_env"
-fi
+mkdir -p "$STATIC_TARGET"
+rsync -a --delete "$ROOT_DIR/web/out/" "$STATIC_TARGET/"

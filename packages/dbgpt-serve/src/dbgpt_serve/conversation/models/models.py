@@ -3,6 +3,7 @@ You can define your own models and DAOs here
 """
 
 import json
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Union
 
 from dbgpt.core import MessageStorageItem
@@ -13,6 +14,15 @@ from dbgpt.util import PaginationResult
 
 from ..api.schemas import ServeRequest, ServerResponse
 from ..config import ServeConfig
+
+
+def _serialize_utc_timestamp(value: Optional[datetime]) -> Optional[str]:
+    """Serialize legacy naive conversation timestamps as UTC."""
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 class ServeDao(BaseDao[ServeEntity, ServeRequest, ServerResponse]):
@@ -60,16 +70,8 @@ class ServeDao(BaseDao[ServeEntity, ServeRequest, ServerResponse]):
             RES: The response
         """
         # TODO implement your own logic here, transfer the entity to a response
-        gmt_created = (
-            entity.gmt_created.strftime("%Y-%m-%d %H:%M:%S")
-            if entity.gmt_created
-            else None
-        )
-        gmt_modified = (
-            entity.gmt_modified.strftime("%Y-%m-%d %H:%M:%S")
-            if entity.gmt_modified
-            else None
-        )
+        gmt_created = _serialize_utc_timestamp(entity.gmt_created)
+        gmt_modified = _serialize_utc_timestamp(entity.gmt_modified)
 
         return ServerResponse(
             app_code=entity.app_code,

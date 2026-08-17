@@ -1,5 +1,5 @@
 #!/bin/bash
-# This script is used for setting up the environment required for DB-GPT on https://www.autodl.com/
+# This script is used for setting up the environment required for Datrix on https://www.autodl.com/
 
 # Usage: source /etc/network_turbo && curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/eosphoros-ai/DB-GPT/main/scripts/setup_autodl_env.sh | bash
 

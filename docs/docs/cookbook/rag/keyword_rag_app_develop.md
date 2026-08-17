@@ -1,10 +1,10 @@
 # Keyword Search RAG User Manual
 
-In this example, we will show how to use the Full Text Search RAG framework in DB-GPT. Using traditional full-text search to implement RAG can, to some extent, alleviate the uncertainty and interpretability issues brought about by vector database retrieval.
+In this example, we will show how to use the Full Text Search RAG framework in Datrix. Using traditional full-text search to implement RAG can, to some extent, alleviate the uncertainty and interpretability issues brought about by vector database retrieval.
 
-You can refer to the python example file `DB-GPT/examples/rag/keyword_rag_example.py` in the source code. This example demonstrates how to load knowledge from a document and persist it in a full text store. Subsequently, it recalls knowledge relevant to your question by searching for keywords in the full text store.
+You can refer to the python example file `Datrix/examples/rag/keyword_rag_example.py` in the source code. This example demonstrates how to load knowledge from a document and persist it in a full text store. Subsequently, it recalls knowledge relevant to your question by searching for keywords in the full text store.
 
-### The Constraints of Vector Retrieve 
+### The Constraints of Vector Retrieve
 Vector Retrieve offers clear advantages, the technology does have some constraints:
 - Computationally Intensive - Generating vectors for entire corpora of documents and querying based on vector similarity requires significantly more processing power than keyword indexing and matching. Latency can be an issue if systems are not properly optimized.
 - Requires Massive Training Data - The semantic connections made by models like BERT rely on being trained on massive, diverse datasets over long periods. This data may not be readily available for specialized corpora, limiting the quality of vectors.
@@ -18,7 +18,7 @@ When to Use Vector Search
 Early stage research when query intent is vague or broad
 Need to grasp concepts and subject matter more than keywords
 Exploring a topic with loose information needs
-User search queries are more conversational 
+User search queries are more conversational
 The semantic capabilities of vector search allow it to shine for these use cases. It can point users in the right direction even with limited keywords or understanding of a topic.
 
 When to Use Keyword Search:
@@ -26,10 +26,10 @@ When to Use Keyword Search:
 - Looking for something ultra-specific and already understand the topic
 - Research is narrowly focused with clear objectives
 - Queries contain unique proper nouns like brand names
-- Needs require fast results more than exhaustive relevancy 
+- Needs require fast results more than exhaustive relevancy
 For precise or time-sensitive queries, keyword search will target the exact terms efficiently. Vector search may meander with unnecessary semantic expansion.
 
-The search method should align with the user's intent and specificity needs. Vector search for exploration, keyword search for precision. With both available, users get the best of both worlds. 
+The search method should align with the user's intent and specificity needs. Vector search for exploration, keyword search for precision. With both available, users get the best of both worlds.
 
 ### Install Dependencies
 
@@ -48,7 +48,7 @@ Install Elasticsearch refer https://www.elastic.co/guide/en/elasticsearch/refere
 
 ### Keyword Search Configuration
 
-Set variables below in `.env` file, let DB-GPT know how to connect to Full Text Search Engine Storage.
+Set variables below in `.env` file, let Datrix know how to connect to Full Text Search Engine Storage.
 
 ```
 ELASTICSEARCH_URL=localhost
@@ -61,7 +61,7 @@ ELASTICSEARCH_PASSWORD=dbgpt
 
 ### Load into Full Text Search Engine
 
-When using a `Elaticsearch` full text engine as the underlying knowledge storage platform, it is necessary to build document inverted index to facilitate the archiving and retrieval of documents.  
+When using a `Elaticsearch` full text engine as the underlying knowledge storage platform, it is necessary to build document inverted index to facilitate the archiving and retrieval of documents.
 
 The following code demonstrates how to create a connection to the Elasticsearch search engine.
 ```python

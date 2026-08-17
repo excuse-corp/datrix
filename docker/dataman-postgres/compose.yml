@@ -1,0 +1,24 @@
+services:
+  postgres:
+    image: public.ecr.aws/docker/library/postgres:16
+    container_name: dataman-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DATAMAN_POSTGRES_DB:-dataman_data}
+      POSTGRES_USER: ${DATAMAN_POSTGRES_USER:-dataman_admin}
+      POSTGRES_PASSWORD: ${DATAMAN_POSTGRES_PASSWORD:?set DATAMAN_POSTGRES_PASSWORD in .env}
+      DATAMAN_SYNC_PASSWORD: ${DATAMAN_SYNC_PASSWORD:?set DATAMAN_SYNC_PASSWORD in .env}
+      DATAMAN_READER_PASSWORD: ${DATAMAN_READER_PASSWORD:?set DATAMAN_READER_PASSWORD in .env}
+    ports:
+      - "${DATAMAN_POSTGRES_BIND_ADDRESS:-127.0.0.1}:${DATAMAN_POSTGRES_PORT:-54329}:5432"
+    volumes:
+      - dataman_postgres_data:/var/lib/postgresql/data
+      - ./init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+volumes:
+  dataman_postgres_data:

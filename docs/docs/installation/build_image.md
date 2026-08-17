@@ -1,10 +1,10 @@
 ---
 id: docker-build-guide
-title: DB-GPT Docker Build Guide
+title: Datrix Docker Build Guide
 sidebar_label: Docker Build Guide
-description: Comprehensive guide for building DB-GPT Docker images with various configurations
+description: Comprehensive guide for building Datrix Docker images with various configurations
 keywords:
-  - DB-GPT
+  - Datrix
   - Docker
   - Build
   - CUDA
@@ -17,60 +17,60 @@ import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 import CodeBlock from '@theme/CodeBlock';
 
-# DB-GPT Docker Build Guide
+# Datrix Docker Build Guide
 
-This guide provides comprehensive instructions for building DB-GPT Docker images with various configurations using the `docker/base/build_image.sh` script.
+This guide provides comprehensive instructions for building Datrix Docker images with various configurations using the `docker/base/build_image.sh` script.
 
 ## Overview
 
-The DB-GPT build script allows you to create Docker images tailored to your specific requirements. You can choose from predefined installation modes or customize the build with specific extras, environment variables, and other settings.
+The Datrix build script allows you to create Docker images tailored to your specific requirements. You can choose from predefined installation modes or customize the build with specific extras, environment variables, and other settings.
 
 ## Available Installation Modes
 
 <Tabs>
   <TabItem value="default" label="Default" default>
     CUDA-based image with standard features.
-    
+
     ```bash
     bash docker/base/build_image.sh
     ```
-    
+
     Includes: CUDA support, proxy integrations (OpenAI, Ollama, Zhipuai, Anthropic, Qianfan, Tongyi), RAG capabilities, graph RAG, Hugging Face integration, and quantization support.
   </TabItem>
   <TabItem value="openai" label="OpenAI">
     CPU-based image optimized for OpenAI API usage.
-    
+
     ```bash
     bash docker/base/build_image.sh --install-mode openai
     ```
-    
+
     Includes: Basic functionality, all proxy integrations, and RAG capabilities without GPU acceleration.
   </TabItem>
   <TabItem value="vllm" label="VLLM">
     CUDA-based image with VLLM for optimized inference.
-    
+
     ```bash
     bash docker/base/build_image.sh --install-mode vllm
     ```
-    
+
     Includes: All default features plus VLLM support for high-performance inference.
   </TabItem>
   <TabItem value="llama-cpp" label="Llama-cpp">
     CUDA-based image with Llama-cpp support.
-    
+
     ```bash
     bash docker/base/build_image.sh --install-mode llama-cpp
     ```
-    
+
     Includes: All default features plus Llama-cpp and Llama-cpp server with CUDA acceleration enabled via `CMAKE_ARGS="-DGGML_CUDA=ON"`.
   </TabItem>
   <TabItem value="full" label="Full">
     CUDA-based image with all available features.
-    
+
     ```bash
     bash docker/base/build_image.sh --install-mode full
     ```
-    
+
     Includes: All features from other modes plus embedding capabilities.
   </TabItem>
 </Tabs>
@@ -97,7 +97,7 @@ bash docker/base/build_image.sh --help
 
 ### Python Version
 
-DB-GPT requires Python 3.10 or higher. The default is Python 3.11, but you can specify a different version:
+Datrix requires Python 3.10 or higher. The default is Python 3.11, but you can specify a different version:
 
 ```bash
 bash docker/base/build_image.sh --python-version 3.10
@@ -154,21 +154,21 @@ You can customize the Python package extras installed in the image:
 <Tabs>
   <TabItem value="override" label="Override Extras" default>
     Completely replace the default extras with your own selection:
-    
+
     ```bash
     bash docker/base/build_image.sh --extras "base,proxy_openai,rag,storage_chromadb"
     ```
   </TabItem>
   <TabItem value="add" label="Add Extras">
     Keep the default extras and add more:
-    
+
     ```bash
     bash docker/base/build_image.sh --add-extras "storage_milvus,storage_elasticsearch,datasource_postgres"
     ```
   </TabItem>
   <TabItem value="mode-specific" label="Mode-Specific">
     Add specific extras to a particular installation mode:
-    
+
     ```bash
     bash docker/base/build_image.sh --install-mode vllm --add-extras "storage_milvus,datasource_postgres"
     ```
@@ -189,23 +189,23 @@ Here are some useful extras you can add:
 | `llama_cpp` | Llama-cpp Python bindings |
 | `llama_cpp_server` | Llama-cpp HTTP server |
 
-You can run `uv run install_help.py list` in your local DB-GPT repository to see all available extras.
+You can run `uv run install_help.py list` in your local Datrix repository to see all available extras.
 
 ### Environment Variables
 
-DB-GPT build supports environment variables for specialized builds. The main environment variable used is `CMAKE_ARGS` which is particularly important for Llama-cpp compilation.
+Datrix build supports environment variables for specialized builds. The main environment variable used is `CMAKE_ARGS` which is particularly important for Llama-cpp compilation.
 
 <Tabs>
   <TabItem value="override-env" label="Override Env Vars" default>
     Replace the default environment variables:
-    
+
     ```bash
     bash docker/base/build_image.sh --env-vars "CMAKE_ARGS=\"-DGGML_CUDA=ON -DLLAMA_CUBLAS=ON\""
     ```
   </TabItem>
   <TabItem value="add-env" label="Add Env Vars">
     Add additional environment variables:
-    
+
     ```bash
     bash docker/base/build_image.sh --install-mode llama-cpp --add-env-vars "FORCE_CMAKE=1"
     ```
@@ -234,7 +234,7 @@ bash docker/base/build_image.sh --dockerfile Dockerfile.custom
 
 ## Example Scenarios
 
-### Enterprise DB-GPT with PostgreSQL and Elasticsearch
+### Enterprise Datrix with PostgreSQL and Elasticsearch
 
 Build a full-featured enterprise version with PostgreSQL and Elasticsearch support:
 
@@ -335,6 +335,6 @@ bash docker/base/build_image.sh --network host
 
 ## Additional Resources
 
-- [DB-GPT Documentation](https://github.com/eosphoros-ai/DB-GPT)
+- [Datrix Documentation](https://github.com/eosphoros-ai/DB-GPT)
 - [Docker Documentation](https://docs.docker.com/)
 - [CUDA Documentation](https://docs.nvidia.com/cuda/)

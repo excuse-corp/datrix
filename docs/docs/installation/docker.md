@@ -5,9 +5,9 @@ import TabItem from '@theme/TabItem';
 
 ## Docker image preparation
 
-There are two ways to prepare a Docker image. 
-1. Pull from the official image 
-2. Build locally, see [Build Docker Image](./build_image.md) 
+There are two ways to prepare a Docker image.
+1. Pull from the official image
+2. Build locally, see [Build Docker Image](./build_image.md)
 
 You can **choose any one** during actual use.
 

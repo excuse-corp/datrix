@@ -1,13 +1,13 @@
-# Multimodal Support in DB-GPT
+# Multimodal Support in Datrix
 
-DB-GPT supports multimodal capabilities, allowing you to work with various data types such as text, images, and audio. This guide will help you set up and use multimodal features in DB-GPT.
+Datrix supports multimodal capabilities, allowing you to work with various data types such as text, images, and audio. This guide will help you set up and use multimodal features in Datrix.
 
 This guide includes run local model and proxy model.
 
 ## Run Local Model
 
 In this section, we will use the [Kimi-VL-A3B-Thinking](https://huggingface.co/moonshotai/Kimi-VL-A3B-Thinking)
-model as an example to demonstrate how to run a local multimodal model. 
+model as an example to demonstrate how to run a local multimodal model.
 
 ### Step 1: Install Dependencies
 
@@ -28,7 +28,7 @@ uv sync --all-packages \
 
 ### Step 2: Modify Configuration File
 
-After installing the dependencies, you can modify your configuration file to use the `Kimi-VL-A3B-Thinking` model. 
+After installing the dependencies, you can modify your configuration file to use the `Kimi-VL-A3B-Thinking` model.
 
 You can create a new configuration file or modify an existing one. Below is an example configuration file:
 
@@ -51,9 +51,9 @@ You can run the model using the following command:
 uv run dbgpt start webserver --config {your_config_file}
 ```
 
-### Step 4: Use The Model In DB-GPT
+### Step 4: Use The Model In Datrix
 
-Now, DB-GPT just support image input, and only the `Chat Normal` scenario is supported.
+Now, Datrix just support image input, and only the `Chat Normal` scenario is supported.
 
 You can click the `+` button in the chat window to upload an image. Then type your question in the input box and hit enter. The model will process the image and provide a response based on the content of the image.
 
@@ -134,7 +134,7 @@ You can run the model using the following command:
 uv run dbgpt start webserver --config {your_config_file}
 ```
 
-### Step 4: Use The Model In DB-GPT
+### Step 4: Use The Model In Datrix
 
 <p align="left">
   <img src={'/img/installation/advanced_usage/dbgpt-multimodal-proxy.jpg'} width="720px"/>

@@ -1,45 +1,45 @@
 # Observability
 
-**Observability** is a measure of how well internal states of a system can be inferred from 
-knowledge of its external outputs. In the context of a software system, observability 
-is the ability to understand the internal state of the system by examining its outputs. 
+**Observability** is a measure of how well internal states of a system can be inferred from
+knowledge of its external outputs. In the context of a software system, observability
+is the ability to understand the internal state of the system by examining its outputs.
 This is important for debugging, monitoring, and maintaining the system.
 
 
-## Observability In DB-GPT
+## Observability In Datrix
 
-DB-GPT provides observability through the following mechanisms:
-- **Logging**: DB-GPT logs various events and metrics to help you understand the internal state of the system.
-- **Tracing**: DB-GPT provides tracing capabilities to help you understand the flow of requests through the system.
+Datrix provides observability through the following mechanisms:
+- **Logging**: Datrix logs various events and metrics to help you understand the internal state of the system.
+- **Tracing**: Datrix provides tracing capabilities to help you understand the flow of requests through the system.
 
 ## Logging
 
-You can configure the logging level and storage location for DB-GPT logs. By default, 
-logs are stored in the `logs` directory in the DB-GPT root directory. You can change 
+You can configure the logging level and storage location for Datrix logs. By default,
+logs are stored in the `logs` directory in the Datrix root directory. You can change
 the log level and storage location by setting the `DBGPT_LOG_LEVEL` and `DBGPT_LOG_DIR` environment.
 
 
 ## Tracing
 
-DB-GPT has built-in tracing capabilities that allow you to trace the flow of requests 
-through the system. 
+Datrix has built-in tracing capabilities that allow you to trace the flow of requests
+through the system.
 
 
 ## Trace Storage
 
 ### Local Storage
 
-DB-GPT will store traces in the `traces` directory in the DB-GPT logs directory, by default, 
-they are located in `logs/dbgpt*.jsonl`. 
+Datrix will store traces in the `traces` directory in the Datrix logs directory, by default,
+they are located in `logs/dbgpt*.jsonl`.
 
-If you want to know more about the local storage of traces and how to use them, you 
+If you want to know more about the local storage of traces and how to use them, you
 can refer to the [Debugging](./debugging) documentation.
 
 
 ### OpenTelemetry Support
 
-DB-GPT also supports [OpenTelemetry](https://opentelemetry.io/) for distributed tracing. 
-Now, you can export traces to open-telemetry compatible backends like Jaeger, Zipkin, 
+Datrix also supports [OpenTelemetry](https://opentelemetry.io/) for distributed tracing.
+Now, you can export traces to open-telemetry compatible backends like Jaeger, Zipkin,
 and others with OpenTelemetry Protocol (OTLP).
 
 To enable OpenTelemetry support, you need install following packages:
@@ -51,19 +51,19 @@ pip install opentelemetry-api opentelemetry-sdk opentelemetry-exporter-otlp
 Then, modify your `.env` file to enable OpenTelemetry tracing:
 
 ```bash
-## Whether to enable DB-GPT send trace to OpenTelemetry
+## Whether to enable Datrix send trace to OpenTelemetry
 TRACER_TO_OPEN_TELEMETRY=True
 ## More details see https://opentelemetry-python.readthedocs.io/en/latest/exporter/otlp/otlp.html
 OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://localhost:4317
 ```
-In the above configuration, you can change the `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` to 
+In the above configuration, you can change the `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` to
 your OTLP collector or backend, we use gRPC endpoint by default.
 
-Here, we use Jaeger as an example to show how to use OpenTelemetry to trace DB-GPT.
+Here, we use Jaeger as an example to show how to use OpenTelemetry to trace Datrix.
 
 ### Jaeger Support
 
-Here is an example of how to use Jaeger to trace DB-GPT with docker:
+Here is an example of how to use Jaeger to trace Datrix with docker:
 
 Run the Jaeger all-in-one image:
 
@@ -89,7 +89,7 @@ TRACER_TO_OPEN_TELEMETRY=True
 OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://localhost:4317
 ```
 
-Start the DB-GPT server:
+Start the Datrix server:
 
 ```bash
 dbgpt start webserver
@@ -126,7 +126,7 @@ Here are some examples of screenshot of Jaeger UI:
 
 ### Jaeger Support With Docker Compose
 
-If you want to use docker-compose to start DB-GPT and Jaeger, you can use the following
+If you want to use docker-compose to start Datrix and Jaeger, you can use the following
 `docker-compose.yml` file:
 
 ```yaml
@@ -232,7 +232,7 @@ You can start the cluster with the following command:
 ```bash
 OPENAI_API_KEY="{your api key}" OPENAI_API_BASE="https://api.openai.com/v1" docker compose up -d
 ```
-Please replace `{your api key}` with your real OpenAI API key and `https://api.openai.com/v1` 
+Please replace `{your api key}` with your real OpenAI API key and `https://api.openai.com/v1`
 with your real OpenAI API base URL.
 You can see more details about the docker-compose file in the `docker/compose_examples/observability/docker-compose.yml` documentation.
 
@@ -244,4 +244,4 @@ After the cluster is started, you can access the Jaeger UI at `http://localhost:
   <img src={'/img/application/advanced_tutorial/observability_img5.png'} width="720px"/>
 </p>
 
-In the above screenshot, you can see the trace of cross-service communication between the DB-GPT controller, LLM worker, and webserver.
+In the above screenshot, you can see the trace of cross-service communication between the Datrix controller, LLM worker, and webserver.

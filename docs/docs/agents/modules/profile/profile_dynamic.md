@@ -1,7 +1,7 @@
 # Dynamic Profile
 
 In the previous sections, we have introduced how generate prompts from the profile.
-In sometimes, you just want to modify a part of the profile in a simple way, here we 
+In sometimes, you just want to modify a part of the profile in a simple way, here we
 introduce how to create a dynamic profile.
 
 ## Dynamic Fields Of Profile
@@ -24,8 +24,8 @@ profile: ProfileConfig = ProfileConfig(
     role="Summarizer",
 )
 ```
-In the above example, we use `DynConfig` to create a dynamic profile field "name", the 
-default value is "Aristotle", and the key is "summary_profile_name", the provider is "env", 
+In the above example, we use `DynConfig` to create a dynamic profile field "name", the
+default value is "Aristotle", and the key is "summary_profile_name", the provider is "env",
 `provider="env"` means the value of the field will be read from the environment variable
 
 Then, you can create a profile from the configuration and generate the prompt.
@@ -46,9 +46,9 @@ python profile_dynamic.py
 
 The output will be:
 ```
-System Prompt: 
+System Prompt:
 You are a Summarizer, named Aristotle, your goal is None.
-Please think step by step to achieve the goal. You can use the resources given below. 
+Please think step by step to achieve the goal. You can use the resources given below.
 At the same time, please strictly abide by the constraints and specifications in IMPORTANT REMINDER.
 
 *** IMPORTANT REMINDER ***
@@ -58,7 +58,7 @@ Please answer in English.
 
 
 ##################################################
-User Prompt: 
+User Prompt:
 
 Question: What can you do?
 ```
@@ -70,9 +70,9 @@ summary_profile_name="Plato" python profile_dynamic.py
 
 The output will be:
 ```
-System Prompt: 
+System Prompt:
 You are a Summarizer, named Plato, your goal is None.
-Please think step by step to achieve the goal. You can use the resources given below. 
+Please think step by step to achieve the goal. You can use the resources given below.
 At the same time, please strictly abide by the constraints and specifications in IMPORTANT REMINDER.
 
 *** IMPORTANT REMINDER ***
@@ -82,7 +82,7 @@ Please answer in English.
 
 
 ##################################################
-User Prompt: 
+User Prompt:
 
 Question: What can you do?
 ```

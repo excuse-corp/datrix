@@ -2,7 +2,7 @@
 
 
 ## Release Notes for Version 0.5.0
-After a period of intensive development, version 0.5.0 has taken over two months to come to fruition. This marks the first stable release that will be maintained over an extended period within the DB-GPT project. Concurrently, the long-term vision for DB-GPT has been officially set: it aims to be an AI native data application development framework utilizing Agentic Workflow Expression Language (AWEL) and agents.
+After a period of intensive development, version 0.5.0 has taken over two months to come to fruition. This marks the first stable release that will be maintained over an extended period within the Datrix project. Concurrently, the long-term vision for Datrix has been officially set: it aims to be an AI native data application development framework utilizing Agentic Workflow Expression Language (AWEL) and agents.
 In essence, this framework facilitates the creation of data-centric applications through an intelligent agent-based expression language.
 
 
@@ -13,7 +13,7 @@ In essence, this framework facilitates the creation of data-centric applications
 
 ## Introduction to Version Update
 
-In its early releases, the DB-GPT project offered six default use cases, namely:
+In its early releases, the Datrix project offered six default use cases, namely:
 - [ChatData](https://docs.dbgpt.site/docs/application/started_tutorial/chat_data)
 - [ChatExcel](https://docs.dbgpt.site/docs/application/started_tutorial/chat_excel)
 - [ChatDB](https://docs.dbgpt.site/docs/application/started_tutorial/chat_db)
@@ -24,7 +24,7 @@ In its early releases, the DB-GPT project offered six default use cases, namely:
 These scenarios were designed to satisfy basic and simple use requirements. However, for large-scale production deployment, particularly when dealing with complex business scenarios, it becomes necessary to develop custom scenarios tailored to specific business conditions. This presents significant challenges in terms of flexibility and development complexity.
 
 
-To further enhance the usability and flexibility of the business framework, we have built upon our existing features, including the multi-model management (SMMF), knowledge base, Agents, data sources, plugins, and Prompts. We have abstracted the capabilities of intelligent agent orchestration (AWEL) and application construction. Additionally, to facilitate application management and distribution, we have introduced the [dbgpts](https://github.com/eosphoros-ai/dbgpts) subproject, which specifically manages the construction of native intelligent data applications, AWEL common operators, AWEL generic workflow templates, and Agents on top of DB-GPT.
+To further enhance the usability and flexibility of the business framework, we have built upon our existing features, including the multi-model management (SMMF), knowledge base, Agents, data sources, plugins, and Prompts. We have abstracted the capabilities of intelligent agent orchestration (AWEL) and application construction. Additionally, to facilitate application management and distribution, we have introduced the [dbgpts](https://github.com/eosphoros-ai/dbgpts) subproject, which specifically manages the construction of native intelligent data applications, AWEL common operators, AWEL generic workflow templates, and Agents on top of Datrix.
 
 This version update will not affect the usage of the previously established six scenarios. However, with subsequent iterations, these default scenarios will gradually be rewritten as Data Apps. We also plan to incorporate them into the `dbgpts` project as default applications, making them readily available for installation and use.
 
@@ -32,10 +32,10 @@ Now, let's provide a systematic explanation of the main updates in this local re
 
 ### Glossary of Terms:
 
-1. **Data App**: an intelligent Data application built on DB-GPT. 
-2. **AWEL**: Agentic Workflow Expression Language, intelligent Workflow Expression Language 
-3. **AWEL Flow**: workflow orchestration using the intelligent workflow Expression Language 
-4. **SMMF**: a service-oriented multi-model management framework. 
+1. **Data App**: an intelligent Data application built on Datrix.
+2. **AWEL**: Agentic Workflow Expression Language, intelligent Workflow Expression Language
+3. **AWEL Flow**: workflow orchestration using the intelligent workflow Expression Language
+4. **SMMF**: a service-oriented multi-model management framework.
 5. **Datasource**: data sources, such as MySQL, PG, StarRocks, and Clickhouse.
 
 ## AWEL workflow and application
@@ -45,9 +45,9 @@ As shown in the following figure, in the left-side navigation pane, there is an 
   <img src={'/img/app/awel_flow_list.png'} width="720px" />
 </p>
 
-After the default installation, there is no content in the AWEL stream. You can build it in two ways. 
-1. Install it from the application repository provided by DB-GPT. 
-2. Create it yourself. The following describes the simple use of the following two methods. For more detailed use, see DB-GPT following tutorial.
+After the default installation, there is no content in the AWEL stream. You can build it in two ways.
+1. Install it from the application repository provided by Datrix.
+2. Create it yourself. The following describes the simple use of the following two methods. For more detailed use, see Datrix following tutorial.
 
 <p align="left">
   <img src={'/img/app/flow_detail.png'} width="720px" />
@@ -55,7 +55,7 @@ After the default installation, there is no content in the AWEL stream. You can 
 
 ### To install from the official repository:
 
-Ensure that you first install and deploy DB-GPT.
+Ensure that you first install and deploy Datrix.
 Following the installation and deployment, you can utilize the default `dbgpt` command for various operations.
 
 
@@ -80,7 +80,7 @@ Pass `dbgpt app` list-remote command, we can see that there are three AWEL workf
   <img src={'/img/app/dbgpts_app_install.png'} width="720px" />
 </p>
 
-After the installation is successful, restart the DB-GPT service (dynamic hot loading is on the way), refresh the page, and then `AWEL workflow page` see the corresponding workflow.
+After the installation is successful, restart the Datrix service (dynamic hot loading is on the way), refresh the page, and then `AWEL workflow page` see the corresponding workflow.
 
 <p align="left">
   <img src={'/img/app/dbgpts_flow_black.png'} width="720px" />
@@ -117,7 +117,7 @@ Creating the preceding application is very simple. On the application creation p
   <img src={'/img/app/app_awel.png'} width="720px" />
 </p>
 
-### Data analysis assistant 
+### Data analysis assistant
 Use Multi-Agents to write a data analysis Assistant application. The results are as follows.
 
 <p align="left">
@@ -155,8 +155,8 @@ These changes reflect ongoing improvements to the dbgpt project, enhancing its c
 
 ## Upgrade to V0.5.0
 
-If your current version is V0.4.6 or V0.4.7, you need to upgrade to V0.5.0. 
-1. Suspend Service 
+If your current version is V0.4.6 or V0.4.7, you need to upgrade to V0.5.0.
+1. Suspend Service
 2. upgrade the database table structure
 
 ```sql
@@ -257,9 +257,9 @@ We would like to express our deepest gratitude to all the contributors who made 
 
 @Aralhi, @Aries-ckt, @JoanFM, @csunny, @fangyinc, @Hzh_97, @junewgl, @lcxadml, @likenamehaojie, @xiuzhu9527 and @yhjun1026
 
-## Appendix 
-- DB-GPT framework: https://github.com/eosphoros-ai 
-- Text2SQL fine tuning: https://github.com/eosphoros-ai/DB-GPT-Hub 
-- DB-GPT-Web : https://github.com/eosphoros-ai/DB-GPT-Web 
-- official English documentation: http://docs.dbgpt.site/docs/overview 
+## Appendix
+- Datrix framework: https://github.com/eosphoros-ai
+- Text2SQL fine tuning: https://github.com/eosphoros-ai/DB-GPT-Hub
+- Datrix-Web : https://github.com/eosphoros-ai/DB-GPT-Web
+- official English documentation: http://docs.dbgpt.site/docs/overview
 - official Chinese documentation: https://www.yuque.com/eosphoros/dbgpt-docs/bex30nsv60ru0fmx

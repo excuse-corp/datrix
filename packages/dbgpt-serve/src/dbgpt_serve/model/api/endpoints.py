@@ -211,7 +211,11 @@ async def start_model(
     worker_manager: WorkerManager = Depends(get_worker_manager),
     model_storage: ModelStorage = Depends(get_model_storage),
 ):
-    """Start an existing model."""
+    """Start an existing model.
+
+    Starting an already running model is a successful no-op. The model page can
+    issue this request while its health status is being refreshed.
+    """
 
     try:
         models = model_storage.query_models(
@@ -226,7 +230,23 @@ async def start_model(
             return Result.failed(err_code="E000X", msg="model not found")
         if len(models) > 1:
             return Result.failed(err_code="E000X", msg="multiple models found")
-        await worker_manager.model_startup(models[0])
+        worker_type = request.worker_type.value
+        existing_workers = await worker_manager.get_model_instances(
+            worker_type, request.model, healthy_only=False
+        )
+        if existing_workers:
+            return Result.succ(True)
+
+        try:
+            await worker_manager.model_startup(models[0])
+        except Exception:
+            # Another request may have created the worker after the pre-check.
+            existing_workers = await worker_manager.get_model_instances(
+                worker_type, request.model, healthy_only=False
+            )
+            if existing_workers:
+                return Result.succ(True)
+            raise
         return Result.succ(True)
     except Exception as e:
         logger.error(f"model start failed {e}")

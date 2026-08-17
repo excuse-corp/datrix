@@ -1,8 +1,8 @@
-# DB-GPT V0.6.0, Defining new standards for AI-native data applications.
+# Datrix V0.6.0, Defining new standards for AI-native data applications.
 
 ## Introduction
 
-DB-GPT is an open source AI native data application development framework with AWEL and agents. In the V0.6.0 version, we further provide flexible and scalable AI native data application management and development capabilities around large models, which can help enterprises quickly build and deploy intelligent AI data applications, and achieve enterprise digital transformation and business growth through intelligent data analysis, insights and decisions
+Datrix is an open source AI native data application development framework with AWEL and agents. In the V0.6.0 version, we further provide flexible and scalable AI native data application management and development capabilities around large models, which can help enterprises quickly build and deploy intelligent AI data applications, and achieve enterprise digital transformation and business growth through intelligent data analysis, insights and decisions
 
 
 ### The V0.6.0 version mainly adds and enhances the following core features
@@ -47,16 +47,16 @@ AWEL (Agentic Workflow Expression Language) is an agent-based workflow expressio
 
 **GraphRAG supports graph community summarization and hybrid retrieval.**
 
-The graph construction and retrieval performance have obvious advantages compared to community solutions, and it supports cool visualization. GraphRAG is an enhanced retrieval generation system based on knowledge graphs. Through the construction and retrieval of knowledge graphs, it further enhances the accuracy of retrieval and the stability of recall, while reducing the illusion of large models and enhancing the effects of domain applications. DB-GPT combines with TuGraph to build efficient retrieval enhancement generation capabilities
+The graph construction and retrieval performance have obvious advantages compared to community solutions, and it supports cool visualization. GraphRAG is an enhanced retrieval generation system based on knowledge graphs. Through the construction and retrieval of knowledge graphs, it further enhances the accuracy of retrieval and the stability of recall, while reducing the illusion of large models and enhancing the effects of domain applications. Datrix combines with TuGraph to build efficient retrieval enhancement generation capabilities
 
 <p align="center">
   <img src={'/img/app/graph_rag_pipeline_v0.6.png'} width="800px" />
 </p>
 
-Based on the universal RAG framework launched in DB-GPT version 0.5.6 that integrates vector index, graph index, and full-text index, DB-GPT version 0.6.0 has enhanced the capabilities of graph index (GraphRAG) to support graph community summary and hybrid retrieval. ability. In the new version, we introduced TuGraph’s built-in Leiden community discovery algorithm, combined with large models to extract community subgraph summaries, and finally used similarity recall of community summaries to cope with generalized questioning scenarios, namely QFS (Query Focused Summarization). question. In addition, in the knowledge extraction stage, we upgraded the original triple extraction to graph extraction with point edge information summary, and optimized cross-text block associated information extraction through text block history to further enhance the information density of the knowledge graph.
+Based on the universal RAG framework launched in Datrix version 0.5.6 that integrates vector index, graph index, and full-text index, Datrix version 0.6.0 has enhanced the capabilities of graph index (GraphRAG) to support graph community summary and hybrid retrieval. ability. In the new version, we introduced TuGraph’s built-in Leiden community discovery algorithm, combined with large models to extract community subgraph summaries, and finally used similarity recall of community summaries to cope with generalized questioning scenarios, namely QFS (Query Focused Summarization). question. In addition, in the knowledge extraction stage, we upgraded the original triple extraction to graph extraction with point edge information summary, and optimized cross-text block associated information extraction through text block history to further enhance the information density of the knowledge graph.
 
 
-Based on the above design, we used the open source knowledge graph corpus (OSGraph) provided by the TuGraph community and the product introduction materials of DB-GPT and TuGraph (about 43k tokens in total), and conducted comparative tests with Microsoft's GraphRAG system. Finally, DB-GPT It only consumes 50% of the token overhead and generates a knowledge graph of the same scale. And on the premise that the quality of the question and answer test is equivalent, the global search performance has been significantly improved.
+Based on the above design, we used the open source knowledge graph corpus (OSGraph) provided by the TuGraph community and the product introduction materials of Datrix and TuGraph (about 43k tokens in total), and conducted comparative tests with Microsoft's GraphRAG system. Finally, Datrix It only consumes 50% of the token overhead and generates a knowledge graph of the same scale. And on the premise that the quality of the question and answer test is equivalent, the global search performance has been significantly improved.
 
 <p align="center">
   <img src={'/img/app/graph_rag_v0.6.png'} width="800px" />

@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 import logging
 import os
 import sys
@@ -52,6 +53,54 @@ replace_router(app)
 system_app = SystemApp(app)
 
 
+def configure_local_authentication(app: FastAPI) -> None:
+    """Enable DataMan local and CAS authentication from deployment settings."""
+    secret = os.getenv("DBGPT_AUTH_SECRET", "")
+    if not secret:
+        logger.info("Local authentication is disabled; DBGPT_AUTH_SECRET is not set")
+        return
+    from dbgpt_app.auth import ProviderConfig, configure_authentication
+
+    cas_base_url = os.getenv("DBGPT_AUTH_CAS_BASE_URL", "").rstrip("/")
+    cas_callback_url = os.getenv("DBGPT_AUTH_CAS_CALLBACK_URL", "")
+    providers = ()
+    if cas_base_url and cas_callback_url:
+        providers = (
+            ProviderConfig(
+                provider_id=os.getenv("DBGPT_AUTH_CAS_PROVIDER_ID", "cas"),
+                provider_type="cas",
+                display_name=os.getenv("DBGPT_AUTH_CAS_DISPLAY_NAME", "统一身份认证"),
+                base_url=cas_base_url,
+                callback_path=cas_callback_url,
+                subject_candidates=tuple(item.strip() for item in os.getenv("DBGPT_AUTH_CAS_SUBJECT_CANDIDATES", "ID_NUMBER,user").split(",") if item.strip()),
+                attribute_mapping={"username": os.getenv("DBGPT_AUTH_CAS_USERNAME_ATTRIBUTE", "ID_NUMBER"), "display_name": os.getenv("DBGPT_AUTH_CAS_DISPLAY_NAME_ATTRIBUTE", "USER_NAME")},
+                verify_tls=os.getenv("DBGPT_AUTH_CAS_VERIFY_TLS", "true").lower() in {"1", "true", "yes", "on"},
+            ),
+        )
+    store = configure_authentication(
+        app,
+        database_url=os.getenv("DBGPT_AUTH_DB", "sqlite:///pilot/meta_data/dbgpt_auth.db"),
+        secret=secret,
+        ttl_seconds=int(os.getenv("DBGPT_AUTH_TOKEN_TTL", "600")),
+        required=os.getenv("DBGPT_AUTH_REQUIRED", "true").lower() in {"1", "true", "yes", "on"},
+        mode=os.getenv("DBGPT_AUTH_MODE", "hybrid"),
+        issuer=os.getenv("DBGPT_AUTH_ISSUER", "dataman"),
+        audience=os.getenv("DBGPT_AUTH_AUDIENCE", "dataman-api"),
+        providers=providers,
+        refresh_ttl_seconds=int(os.getenv("DBGPT_AUTH_REFRESH_TOKEN_TTL", "28800")),
+        session_idle_timeout_seconds=int(os.getenv("DBGPT_AUTH_SESSION_IDLE_TIMEOUT", "3600")),
+        cookie_secure=os.getenv("DBGPT_AUTH_COOKIE_SECURE", "true").lower() in {"1", "true", "yes", "on"},
+    )
+    bootstrap_username = os.getenv("DBGPT_AUTH_BOOTSTRAP_USERNAME", "")
+    bootstrap_password = os.getenv("DBGPT_AUTH_BOOTSTRAP_PASSWORD", "")
+    if bootstrap_username and bootstrap_password:
+        try:
+            store.create_user(bootstrap_username, bootstrap_password, roles=("admin",))
+            logger.info("Created local authentication bootstrap administrator")
+        except Exception:
+            logger.info("Local authentication bootstrap administrator already exists")
+
+
 def mount_routers(app: FastAPI):
     """Lazy import to avoid high time cost"""
     from dbgpt_app.knowledge.api import router as knowledge_router
@@ -66,6 +115,8 @@ def mount_routers(app: FastAPI):
         router as python_upload_router,
     )
     from dbgpt_app.openapi.api_v2 import router as api_v2
+    from dbgpt_app.scene.ask_data.api.scenes import router as ask_data_router
+    from dbgpt_app.scene.ask_data.api.ontology import router as ontology_router
     from dbgpt_serve.agent.app.controller import router as gpts_v1
     from dbgpt_serve.agent.app.endpoints import router as app_v2
 
@@ -78,6 +129,8 @@ def mount_routers(app: FastAPI):
     app.include_router(python_upload_router, prefix="/api", tags=["PythonUpload"])
     app.include_router(examples_router, prefix="/api", tags=["Examples"])
     app.include_router(agentic_data_api, prefix="/api", tags=["AgenticData"])
+    app.include_router(ask_data_router)
+    app.include_router(ontology_router)
 
     app.include_router(knowledge_router, tags=["Knowledge"])
 
@@ -86,6 +139,39 @@ def mount_routers(app: FastAPI):
     )
 
     app.include_router(recommend_question_v1, prefix="/api", tags=["RecommendQuestion"])
+
+
+def configure_ask_data_metadata_backend() -> None:
+    """Persist AskData Scene metadata in the configured DB-GPT metadata DB."""
+    try:
+        from dbgpt.storage.metadata.db_manager import db
+        from dbgpt_app.scene.ask_data.api.scenes import (
+            _default_engine_resolver,
+            configure_sql_ask_data_services,
+            get_scene_service,
+        )
+        from dbgpt_app.scene.ask_data.scene.schema_inspector import (
+            SceneSchemaInspector,
+        )
+
+        inspector = SceneSchemaInspector()
+
+        def schema_resolver(scene_id: str, revision: int):
+            current_revision = get_scene_service().repository.get_revision(
+                scene_id, revision
+            )
+            engine = _default_engine_resolver(current_revision.data_source_name)
+            return inspector.inspect_engine(
+                engine,
+                current_revision.data_source_name,
+                current_revision.view_name,
+            )
+
+        configure_sql_ask_data_services(db, schema_resolver=schema_resolver)
+        logger.info("AskData metadata backend configured with SQL persistence")
+    except Exception:
+        logger.exception("Failed to configure AskData SQL metadata backend")
+        raise
 
 
 def mount_static_files(app: FastAPI, param: ApplicationConfig):
@@ -155,6 +241,7 @@ def initialize_app(param: ApplicationConfig, args: List[str] = None):
     )
 
     server_init(param, system_app)
+    configure_local_authentication(app)
     mount_routers(app)
     model_start_listener = _create_model_start_listener(system_app)
     initialize_components(
@@ -167,6 +254,7 @@ def initialize_app(param: ApplicationConfig, args: List[str] = None):
     _migration_db_storage(
         param.service.web.database, web_config.disable_alembic_upgrade
     )
+    configure_ask_data_metadata_backend()
 
     # After init, when the database is ready
     system_app.after_init()

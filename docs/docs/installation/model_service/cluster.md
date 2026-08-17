@@ -1,7 +1,7 @@
 # Cluster Deployment
 
 ## Install command line tools
-All the following operations are completed through the `dbgpt` command. To use the `dbgpt` command, you first need to install the `DB-GPT` project. You can install it through the following command
+All the following operations are completed through the `dbgpt` command. To use the `dbgpt` command, you first need to install the `Datrix` project. You can install it through the following command
 
 ```shell
 $ pip install -e ".[default]"
@@ -112,7 +112,7 @@ The model service deployed as above can be used through dbgpt_server. First modi
 dbgpt start webserver --light
 ```
 
-## Start Webserver 
+## Start Webserver
 
 ```shell
 LLM_MODEL=vicuna-13b-v1.5

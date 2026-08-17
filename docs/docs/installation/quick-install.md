@@ -1,9 +1,9 @@
 ---
 sidebar_position: 1
 title: Quick Install
-summary: "The fastest way to install DB-GPT with the installer script from the README"
+summary: "The fastest way to install Datrix with the installer script from the README"
 read_when:
-  - You want the shortest path to a working DB-GPT web UI
+  - You want the shortest path to a working Datrix web UI
   - You prefer the installer script over a manual source setup
 ---
 
@@ -11,11 +11,11 @@ import CommandCopyCard from "@site/src/components/mdx/CommandCopyCard";
 
 # Quick Install
 
-The fastest way to get DB-GPT running. The installer script prepares a local DB-GPT workspace, generates a provider profile, and gives you a ready-to-run webserver command.
+The fastest way to get Datrix running. The installer script prepares a local Datrix workspace, generates a provider profile, and gives you a ready-to-run webserver command.
 
 ## Recommended: installer script
 
-Use the installer script if you want the shortest path from zero to a working DB-GPT web UI.
+Use the installer script if you want the shortest path from zero to a working Datrix web UI.
 
 <CommandCopyCard command={`curl -fsSL https://raw.githubusercontent.com/eosphoros-ai/DB-GPT/main/scripts/install/install.sh | bash`} />
 
@@ -29,7 +29,7 @@ This quick-install flow is designed for:
 - an API key if you plan to use a hosted model provider immediately
 
 :::tip Best fit
-Choose this path if you want to try DB-GPT quickly without managing the repository structure yourself.
+Choose this path if you want to try Datrix quickly without managing the repository structure yourself.
 :::
 
 ## Install with a provider profile
@@ -53,7 +53,7 @@ If you already know which provider you want, pass the profile and API key direct
 
 ## Reuse an existing local checkout
 
-Already have a local DB-GPT repository? Reuse it instead of cloning into `~/.dbgpt/DB-GPT`.
+Already have a local Datrix repository? Reuse it instead of cloning into `~/.dbgpt/DB-GPT`.
 
 ### Reuse local repo with OpenAI
 
@@ -74,12 +74,12 @@ Already have a local DB-GPT repository? Reuse it instead of cloning into `~/.dbg
 
 The installer script sets up the common runtime layout for you:
 
-- a DB-GPT checkout under `~/.dbgpt/DB-GPT` unless `--repo-dir` is used
+- a Datrix checkout under `~/.dbgpt/DB-GPT` unless `--repo-dir` is used
 - generated provider configs under `~/.dbgpt/configs/`
-- the DB-GPT home directory under `~/.dbgpt/`
+- the Datrix home directory under `~/.dbgpt/`
 - a ready-to-run webserver command using the generated profile
 
-## Start DB-GPT after installation
+## Start Datrix after installation
 
 After installation completes, start the webserver with the generated profile config:
 
@@ -122,6 +122,6 @@ Use [CLI Install](/docs/getting-started/cli-quickstart) or [Source Install](/doc
 
 Use [Source Install](/docs/getting-started/deploy/source-code). It exposes the full repository layout and `uv sync` workflow.
 
-### The install completed, but DB-GPT does not start cleanly
+### The install completed, but Datrix does not start cleanly
 
 Check the generated config under `~/.dbgpt/configs/`, then see [Installation Issues](/docs/getting-started/troubleshooting/installation).

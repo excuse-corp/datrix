@@ -3,7 +3,7 @@
 language = "${env:DBGPT_LANG:-zh}"
 log_level = "INFO"
 api_keys = []
-encrypt_key = "your_secret_key"
+encrypt_key = "${env:DBGPT_ENCRYPT_KEY:-replace-with-a-long-random-value}"
 
 # Server Configurations
 [service.web]
@@ -14,23 +14,29 @@ port = 5670
 type = "sqlite"
 path = "pilot/meta_data/dbgpt.db"
 
+# Ask-data runtime limits are maintained in configs/ask-data.example.toml.
+# Keep this DB-GPT-native file limited to fields understood by the core app.
+
 [app]
 temperature = 0.6
 
-[[app.configs]]
-name = "chat_excel"
-temperature = 0.1
-duckdb_extensions_dir = []
-force_install = true
-
-[[app.configs]]
-name = "chat_normal"
-memory = {type="token", max_token_limit=20000}
-
-[[app.configs]]
-name = "chat_with_db_qa"
-schema_retrieve_top_k = 50
-memory = {type="token", max_token_limit=20000}
+# Legacy built-in chat apps are intentionally disabled for the ask-data profile.
+# The ask-data API must use its controlled Scene/Snapshot query path instead.
+# Enable these only when the corresponding legacy DB-GPT app is needed:
+# [[app.configs]]
+# name = "chat_excel"
+# temperature = 0.1
+# duckdb_extensions_dir = []
+# force_install = true
+#
+# [[app.configs]]
+# name = "chat_normal"
+# memory = {type="token", max_token_limit=20000}
+#
+# [[app.configs]]
+# name = "chat_with_db_qa"
+# schema_retrieve_top_k = 50
+# memory = {type="token", max_token_limit=20000}
 
 # Model Configurations
 [models]

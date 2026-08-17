@@ -1,12 +1,12 @@
 # Debugging
-DB-GPT provides a series of tools to help developers troubleshoot and solve some problems they may encounter.
+Datrix provides a series of tools to help developers troubleshoot and solve some problems they may encounter.
 
 ## View Trace Logs With Command
 
-DB-GPT writes some key system runtime information to trace logs. By default, they are located in `logs/dbgpt*.jsonl`.
+Datrix writes some key system runtime information to trace logs. By default, they are located in `logs/dbgpt*.jsonl`.
 
 
-DB-GPT also provides a command line tool `dbgpt trace` to help analyze these trace logs. You can check the specific usage through the following command:
+Datrix also provides a command line tool `dbgpt trace` to help analyze these trace logs. You can check the specific usage through the following command:
 
 
 ```python
@@ -94,7 +94,7 @@ The output is as follows:
 
 Invoke Trace Tree:
 
-Operation: DB-GPT-Web-Entry (Start: 2023-10-12 03:06:43.180, End: None)
+Operation: Datrix-Web-Entry (Start: 2023-10-12 03:06:43.180, End: None)
   Operation: get_chat_instance (Start: 2023-10-12 03:06:43.258, End: None)
   Operation: get_chat_instance (Start: 2023-10-12 03:06:43.258, End: 2023-10-12 03:06:43.424)
   Operation: stream_generator (Start: 2023-10-12 03:06:43.425, End: None)
@@ -107,7 +107,7 @@ Operation: DB-GPT-Web-Entry (Start: 2023-10-12 03:06:43.180, End: None)
       Operation: WorkerManager.generate_stream (Start: 2023-10-12 03:06:43.426, End: 2023-10-12 03:06:48.518)
     Operation: BaseChat.stream_call (Start: 2023-10-12 03:06:43.426, End: 2023-10-12 03:06:48.519)
   Operation: stream_generator (Start: 2023-10-12 03:06:43.425, End: 2023-10-12 03:06:48.519)
-Operation: DB-GPT-Web-Entry (Start: 2023-10-12 03:06:43.180, End: 2023-10-12 03:06:43.257)
+Operation: Datrix-Web-Entry (Start: 2023-10-12 03:06:43.180, End: 2023-10-12 03:06:43.257)
 +-------------------------------------------------------------------------------------------------------------------------------------------+
 |                                                             Chat Trace Details                                                            |
 +----------------+--------------------------------------------------------------------------------------------------------------------------+
@@ -188,7 +188,7 @@ dbgpt trace chat --help
 ```
 The output is as follows:
 ```python
-Operation: DB-GPT-Web-Entry (Start: 2023-10-12 03:22:10.592, End: None)
+Operation: Datrix-Web-Entry (Start: 2023-10-12 03:22:10.592, End: None)
   Operation: get_chat_instance (Start: 2023-10-12 03:22:10.594, End: None)
   Operation: get_chat_instance (Start: 2023-10-12 03:22:10.594, End: 2023-10-12 03:22:10.658)
   Operation: stream_generator (Start: 2023-10-12 03:22:10.659, End: None)
@@ -201,7 +201,7 @@ Operation: DB-GPT-Web-Entry (Start: 2023-10-12 03:22:10.592, End: None)
       Operation: WorkerManager.generate_stream (Start: 2023-10-12 03:22:10.660, End: 2023-10-12 03:22:16.130)
     Operation: BaseChat.stream_call (Start: 2023-10-12 03:22:10.659, End: 2023-10-12 03:22:16.130)
   Operation: stream_generator (Start: 2023-10-12 03:22:10.659, End: 2023-10-12 03:22:16.130)
-Operation: DB-GPT-Web-Entry (Start: 2023-10-12 03:22:10.592, End: 2023-10-12 03:22:10.673)
+Operation: Datrix-Web-Entry (Start: 2023-10-12 03:22:10.592, End: 2023-10-12 03:22:10.673)
 ```
 
 

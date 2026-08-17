@@ -1,8 +1,11 @@
 import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient
+from unittest.mock import AsyncMock, MagicMock
 
 from dbgpt.component import SystemApp
+from dbgpt.model.cluster import WorkerStartupRequest
+from dbgpt.model.parameter import WorkerType
 from dbgpt.storage.metadata import db
 from dbgpt_serve.core import BaseServeConfig
 from dbgpt_serve.core.tests.conftest import (  # noqa: F401
@@ -13,6 +16,7 @@ from dbgpt_serve.core.tests.conftest import (  # noqa: F401
 )
 
 from ..api.endpoints import init_endpoints, router
+from ..api.endpoints import start_model
 from ..config import SERVE_CONFIG_KEY_PREFIX
 
 
@@ -123,6 +127,50 @@ async def test_api_query(client: AsyncClient):
 async def test_api_query_by_page(client: AsyncClient):
     # TODO: implement your test case
     pass
+
+
+def _model_request() -> WorkerStartupRequest:
+    return WorkerStartupRequest(
+        host="127.0.0.1",
+        port=8001,
+        model="test-model",
+        worker_type=WorkerType.LLM,
+        params={},
+    )
+
+
+@pytest.mark.asyncio
+async def test_start_model_is_idempotent_for_running_worker():
+    request = _model_request()
+    worker_manager = MagicMock()
+    worker_manager.get_model_instances = AsyncMock(return_value=[MagicMock()])
+    worker_manager.model_startup = AsyncMock()
+    model_storage = MagicMock()
+    model_storage.query_models.return_value = [request]
+
+    response = await start_model(request, worker_manager, model_storage)
+
+    assert response.success is True
+    worker_manager.model_startup.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_start_model_handles_concurrent_start():
+    request = _model_request()
+    worker_manager = MagicMock()
+    worker_manager.get_model_instances = AsyncMock(
+        side_effect=[[], [MagicMock()]]
+    )
+    worker_manager.model_startup = AsyncMock(
+        side_effect=Exception("worker instances is exist")
+    )
+    model_storage = MagicMock()
+    model_storage.query_models.return_value = [request]
+
+    response = await start_model(request, worker_manager, model_storage)
+
+    assert response.success is True
+    worker_manager.model_startup.assert_awaited_once_with(request)
 
 
 # Add more test cases according to your own logic

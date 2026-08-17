@@ -1,6 +1,6 @@
 # QuickStart Basic AWEL Workflow
 
-## Install 
+## Install
 
 At first, install dbgpt, and necessary dependencies:
 
@@ -28,10 +28,10 @@ with DAG("simple_sdk_llm_example_dag") as dag:
     model_pre_handle_task = RequestBuilderOperator(model="gpt-3.5-turbo")
     llm_task = LLMOperator(OpenAILLMClient())
     prompt_task >> model_pre_handle_task >> llm_task
-    
+
 output = asyncio.run(
     llm_task.call({
-        "dialect": "MySQL", 
+        "dialect": "MySQL",
         "table_name": "users"
     }
 ))
@@ -56,7 +56,7 @@ The output will like this:
 ModelOutput(text='SELECT * FROM users;', error_code=0, model_context=None, finish_reason=None, usage={'completion_tokens': 5, 'prompt_tokens': 19, 'total_tokens': 24}, metrics=None)
 ```
 
-Congratulations! You have already mastered the basic usage of AWEL. For more examples, 
+Congratulations! You have already mastered the basic usage of AWEL. For more examples,
 please refer to the **[cookbook](/docs/awel/cookbook/)**.
 
 And we suggest you to read the book **[AWEL Tutorial](/docs/awel/tutorial/)** to learn more about AWEL.

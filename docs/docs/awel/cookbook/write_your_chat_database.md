@@ -1,23 +1,23 @@
 # Write Your Own `Chat Data` With `AWEL`
 
-In this guide, we will show you how to write your own `Chat Data` with `AWEL`, just 
-link the scene of `Chat Data` in DB-GPT.
+In this guide, we will show you how to write your own `Chat Data` with `AWEL`, just
+link the scene of `Chat Data` in Datrix.
 
 This guide is a little bit advanced, may take you some time to understand it. If you have any questions,
-please feel free to ask in the [DB-GPT issues](https://github.com/eosphoros-ai/DB-GPT/issues). 
+please feel free to ask in the [Datrix issues](https://github.com/eosphoros-ai/DB-GPT/issues).
 
 ## Introduction
 
-`Chat Data` is **chat with your database**. Its goal is to interact with the database 
+`Chat Data` is **chat with your database**. Its goal is to interact with the database
 through natural language, it includes the following steps:
 
 1. **Build knowledge base**: parse the database schema and other information to build a knowledge base.
 2. **Chat with database**: chat with the database through natural language.
 
 There are some steps of **Chat with database**:
-1. **Retrieve relevant information**: retrieve the relevant information from the 
+1. **Retrieve relevant information**: retrieve the relevant information from the
 database according to the user's query.
-2. **Generate response**: pass relevant information and user query to the LLM, and then 
+2. **Generate response**: pass relevant information and user query to the LLM, and then
 generate a response which includes some SQL and other information.
 3. **Execute SQL**: execute the SQL to get the final result.
 4. **Visualize result**: visualize the result and return it to the user.
@@ -37,7 +37,7 @@ pip install openai
 
 ### Prepare Embedding Model
 
-First, you need to prepare the embedding model, you can provide an embedding model 
+First, you need to prepare the embedding model, you can provide an embedding model
 according [Prepare Embedding Model](./first_rag_with_awel.md#prepare-embedding-model).
 
 Here we use OpenAI's embedding model.
@@ -136,7 +136,7 @@ print("Retrieved schema:\n", chunks)
 ## Chat With Database
 
 ### Prepare LLM
-We use LLM to generate SQL queries. Here we use OpenAI's LLM model, you can replace it 
+We use LLM to generate SQL queries. Here we use OpenAI's LLM model, you can replace it
 with other models according to [Prepare LLM](./first_rag_with_awel.md#prepare-llm).
 
 ```python
@@ -204,16 +204,16 @@ Database name:
     {db_name}
 Table structure definition:
     {table_info}
-    
+
 Constraint:
-1.Please understand the user's intention based on the user's question, and use the given table structure definition to create a grammatically correct {dialect} sql. If sql is not required, answer the user's question directly.. 
+1.Please understand the user's intention based on the user's question, and use the given table structure definition to create a grammatically correct {dialect} sql. If sql is not required, answer the user's question directly..
 2.Always limit the query to a maximum of {top_k} results unless the user specifies in the question the specific number of rows of data he wishes to obtain.
 3.You can only use the tables provided in the table structure information to generate sql. If you cannot generate sql based on the provided table structure, please say: "The table structure information provided is not enough to generate sql queries." It is prohibited to fabricate information at will.
 4.Please be careful not to mistake the relationship between tables and columns when generating SQL.
 5.Please check the correctness of the SQL and ensure that the query performance is optimized under correct conditions.
 6.Please choose the best one from the display methods given below for data rendering, and put the type name into the name parameter value that returns the required format. If you cannot find the most suitable one, use 'Table' as the display method.
 the available data display methods are as follows: {display_type}
- 
+
 User Question:
     {user_input}
 Please think step by step and respond according to the following JSON format:
@@ -246,18 +246,18 @@ with DAG("chat_data_dag") as chat_data_dag:
         top_k=1,
         index_store=vector_store,
     )
-    content_task = MapOperator(lambda cks: [c.content for c in cks]) 
-    merge_task = JoinOperator(lambda table_info, ext_dict: {"table_info": table_info, **ext_dict}) 
+    content_task = MapOperator(lambda cks: [c.content for c in cks])
+    merge_task = JoinOperator(lambda table_info, ext_dict: {"table_info": table_info, **ext_dict})
     prompt_task = PromptBuilderOperator(prompt)
     req_build_task = RequestBuilderOperator(model="gpt-3.5-turbo")
-    llm_task = LLMOperator(llm_client=llm_client) 
+    llm_task = LLMOperator(llm_client=llm_client)
     # Parse the pure json response, then transform it to the python dict
     sql_parse_task = SQLOutputParser()
- 
+
     input_task >> MapOperator(lambda x: x["user_input"]) >> retriever_task >> content_task >> merge_task
     input_task >> merge_task
     merge_task >> prompt_task >> req_build_task >> llm_task >> sql_parse_task
- 
+
 
 result = asyncio.run(sql_parse_task.call({
     "user_input": "Query the name and age of users younger than 18 years old",
@@ -293,7 +293,7 @@ from dbgpt.datasource.operators import DatasourceOperator
     # previous code ...
     db_query_task = DatasourceOperator(connector=db_conn)
     sql_parse_task >> MapOperator(lambda x: x["sql"]) >> db_query_task
-    
+
     db_result = asyncio.run(db_query_task.call({
         "user_input": "Query the name and age of users younger than 18 years old",
         "db_name": "user_management",
@@ -333,10 +333,10 @@ from dbgpt.core.awel import MapOperator, BranchOperator, JoinOperator, is_empty_
 class TwoSumOperator(MapOperator[pd.DataFrame, int]):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        
+
     async def map(self, df: pd.DataFrame) -> int:
         return await self.blocking_func_to_async(self._two_sum, df)
-    
+
     def _two_sum(self, df: pd.DataFrame) -> int:
         return df['age'].sum()
 
@@ -351,7 +351,7 @@ class DataDecisionOperator(BranchOperator[int, int]):
         super().__init__(**kwargs)
         self.odd_task_name = odd_task_name
         self.even_task_name = even_task_name
-        
+
     async def branches(self):
         return {
             branch_even: self.even_task_name,
@@ -375,7 +375,7 @@ class EvenOperator(MapOperator[int, str]):
 class MergeOperator(JoinOperator[str]):
     def __init__(self, **kwargs):
         super().__init__(combine_function=self.merge_func, **kwargs)
-        
+
     async def merge_func(self, odd: str, even: str) -> str:
         return odd if not is_empty_data(odd) else even
 ```
@@ -389,7 +389,7 @@ Let's add these operators to the DAG.
     odd_task = OddOperator(task_name="odd_task")
     even_task = EvenOperator(task_name="even_task")
     merge_task = MergeOperator()
-    
+
     db_query_task >> two_sum_task >> decision_task
     decision_task >> odd_task >> merge_task
     decision_task >> even_task >> merge_task
@@ -401,7 +401,7 @@ final_result = asyncio.run(merge_task.call({
     "dialect": "SQLite",
     "top_k": 1,
     "display_type": display_type,
-    "response": json.dumps(RESPONSE_FORMAT_SIMPLE, ensure_ascii=False, indent=4) 
+    "response": json.dumps(RESPONSE_FORMAT_SIMPLE, ensure_ascii=False, indent=4)
 }))
 print("The final result is:")
 print(final_result)
@@ -531,7 +531,7 @@ Table structure definition:
     {table_info}
 
 Constraint:
-1.Please understand the user's intention based on the user's question, and use the given table structure definition to create a grammatically correct {dialect} sql. If sql is not required, answer the user's question directly.. 
+1.Please understand the user's intention based on the user's question, and use the given table structure definition to create a grammatically correct {dialect} sql. If sql is not required, answer the user's question directly..
 2.Always limit the query to a maximum of {top_k} results unless the user specifies in the question the specific number of rows of data he wishes to obtain.
 3.You can only use the tables provided in the table structure information to generate sql. If you cannot generate sql based on the provided table structure, please say: "The table structure information provided is not enough to generate sql queries." It is prohibited to fabricate information at will.
 4.Please be careful not to mistake the relationship between tables and columns when generating SQL.

@@ -6,18 +6,18 @@ The application management panel provides many capabilities. Here we mainly intr
   <img src={'/img/app/app_manage_v0.6.jpg'} width="800px" />
 </p>
 
-As shown in the figure, the application management interface. First, let's take a look at the creation of an application. In DB-GPT, four application creation modes are provided. 
+As shown in the figure, the application management interface. First, let's take a look at the creation of an application. In Datrix, four application creation modes are provided.
 
 - Multi-agent automatic planning mode
-- Task flow orchestration mode 
-- Single Agent Mode 
+- Task flow orchestration mode
+- Single Agent Mode
 - Native application mode
 
 <p align="center">
   <img src={'/img/app/app_manage_mode_v0.6.jpg'} width="800px" />
 </p>
 
-Next, we will explain the creation of applications in each mode respectively. Native application mode In the early versions of DB-GPT, six types of native application scenarios were provided, such as `Chat DB`, `Chat Data`, `Chat Dashboard`, `Chat Knowledge Base`, `Chat Normal`, `Chat Excel`, etc. 
+Next, we will explain the creation of applications in each mode respectively. Native application mode In the early versions of Datrix, six types of native application scenarios were provided, such as `Chat DB`, `Chat Data`, `Chat Dashboard`, `Chat Knowledge Base`, `Chat Normal`, `Chat Excel`, etc.
 
 By creating a data intelligence application in the native application mode, you can quickly build a similar application based on your own database, knowledge base and other parameters. Click the upper right cornerCreate an applicationbutton, select **Native application mode**, enter the application name and description, click **Sure**
 

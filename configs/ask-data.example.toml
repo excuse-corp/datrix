@@ -1,0 +1,63 @@
+# Ask-data runtime configuration.
+#
+# This file is a companion configuration for the ask-data module.  It is not
+# loaded by Datrix's generic application config parser until the ask-data
+# service registration is enabled.  Keep secrets in .env.ask-data, not here.
+
+[ask_data]
+enabled = true
+default_response_mode = "full"
+default_include_chart = true
+timezone = "Asia/Shanghai"
+max_agents_per_query = 10
+max_parallel_agents_per_query = 5
+max_parallel_queries_per_datasource = 3
+max_concurrent_queries = 10
+query_queue_timeout_seconds = 30
+agent_timeout_seconds = 30
+query_total_timeout_seconds = 120
+rag_default_top_k = 4
+
+[ask_data.limits]
+max_rows_per_scene = 1000
+max_query_timeout_seconds = 120
+max_spec_attempts = 2
+
+[ask_data.rag]
+required_on_activate = true
+quality_gate_enabled = true
+knowledge_root = "${env:DBGPT_KNOWLEDGE_ROOT:-pilot/data}"
+
+[ask_data.snapshot]
+schema_version = "1"
+protocol_version = "1"
+compiler_version = "1"
+schema_check_interval_seconds = 900
+registry_poll_interval_seconds = 15
+
+# Local PostgreSQL query database. The third-party platform writes only to the
+# hidden sync table; DataMan reads only the reporting view with dataman_reader.
+[ask_data.sources.dataman_data]
+enabled = true
+type = "postgresql"
+database = "${env:DATAMAN_DATA_DB_NAME:-dataman_data}"
+host = "${env:DATAMAN_DATA_DB_HOST:-127.0.0.1}"
+port = "${env:DATAMAN_DATA_DB_PORT:-54329}"
+user = "${env:DATAMAN_DATA_DB_USER:-dataman_reader}"
+password = "${env:DATAMAN_DATA_DB_PASSWORD}"
+driver = "psycopg"
+readonly = true
+connect_timeout_seconds = 10
+query_timeout_seconds = 120
+pool_size = 3
+max_overflow = 0
+view = "reporting.vw_information_project_contract_report"
+
+[ask_data.security]
+require_readonly_datasource = true
+allow_raw_sql = false
+# A user may ask for several authorized business scenes in one request. Each
+# Scene remains independently permission-checked and bound to its own Snapshot.
+allow_cross_scene_query = true
+expose_physical_schema_to_user = false
+expose_credentials = false

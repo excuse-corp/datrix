@@ -50,9 +50,9 @@ APP_ID="{YOUR_APP_ID}"
 client = Client(api_key=DBGPT_API_KEY)
 
 async for data in client.chat_stream(
-    messages="Introduce AWEL", 
-    model="gpt-4o", 
-    chat_mode="chat_app", 
+    messages="Introduce AWEL",
+    model="gpt-4o",
+    chat_mode="chat_app",
     chat_param=APP_ID
 ):
     print(data)

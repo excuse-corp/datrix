@@ -1,6 +1,6 @@
 # Resource Introduction
 
-Resources are a bridge for DB-GPT agents to interact with the outside world. They include
+Resources are a bridge for Datrix agents to interact with the outside world. They include
 tools, databases, knowledge bases, etc.
 
 ## What Includes In Resources?
@@ -16,10 +16,10 @@ tools, databases, knowledge bases, etc.
 ## Resource Pack
 
 The resource pack is a collection of resources that can be used by agents. It usually contains some
-tools, databases, knowledge bases, etc. 
+tools, databases, knowledge bases, etc.
 
 You can wrap optional tools into `ToolPack`, or wrap all resources into `ResourcePack`.
 
 ## What's Next?
 
-In following sections, we will introduce most of the resources that can be used in DB-GPT.
+In following sections, we will introduce most of the resources that can be used in Datrix.

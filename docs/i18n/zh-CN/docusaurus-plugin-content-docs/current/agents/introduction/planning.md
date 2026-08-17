@@ -13,7 +13,7 @@ Here is a simple architecture diagram of the planning module:
   <img src={'/img/agents/introduction/agents_planning.png'} width="720px" />
 </p>
 
-In the above diagram, the planning module will receive the task from the user, then it will 
+In the above diagram, the planning module will receive the task from the user, then it will
 decompose the task into subtasks and assign them to the corresponding agents(Agent1, Agent2,...).
 
 ## Analysis Your Database With Agents
@@ -24,7 +24,7 @@ To run this example, please install the dependencies according to [previous inst
 
 ### Prepare The Database
 
-For simplicity, we will use a temporary SQLite database to store the data. The database 
+For simplicity, we will use a temporary SQLite database to store the data. The database
 will be created in the temporary directory and will be deleted after the program exits.
 
 Fist, create a temporary SQLite database and create some tables and insert some data:
@@ -127,7 +127,7 @@ from dbgpt.agent import (
     LLMConfig,
     UserProxyAgent,
 )
-from dbgpt.agent.expand.data_scientist_agent import DataScientistAgent 
+from dbgpt.agent.expand.data_scientist_agent import DataScientistAgent
 from dbgpt.model.proxy import OpenAILLMClient
 
 async def main():
@@ -209,9 +209,9 @@ un_stream ai response: [
 Planner (to AutoPlanChatManager)-[gpt-3.5-turbo]:
 
 "[\n    {\n        \"serial_number\": \"1\",\n        \"agent\": \"DataScientist\",\n        \"content\": \"Retrieve student scores data from the database including scores for each subject, overall performance, and attendance records.\",\n        \"rely\": \"\"\n    },\n    {\n        \"serial_number\": \"2\",\n        \"agent\": \"DataScientist\",\n        \"content\": \"Analyze student scores data to identify trends and patterns in academic performance, subject-wise scores, and attendance correlation.\",\n        \"rely\": \"1\"\n    },\n    {\n        \"serialjson_number\": \"3\",\n        \"agent\": \"DataScientist\",\n        \"content\": \"Visualize the analyzed data using appropriate graphs and charts to represent the student scores from different dimensions effectively.\",\n        \"rely\": \"2\"\n    }\n]"
->>>>>>>>Planner Review info: 
+>>>>>>>>Planner Review info:
 Pass(None)
->>>>>>>>Planner Action report: 
+>>>>>>>>Planner Action report:
 execution succeeded,
 [
     {
@@ -254,9 +254,9 @@ un_stream ai response: {
 Edgar (to AutoPlanChatManager)-[gpt-3.5-turbo]:
 
 "{\n  \"display_type\": \"response_table\",\n  \"sql\": \"SELECT s.student_id, s.student_name, s.major, s.year_of_enrollment, s.student_age, c.course_name, c.credit, sc.score, sc.semester FROM students s JOIN scores sc ON s.student_id = sc.student_id JOIN courses c ON sc.course_id = c.course_id\",\n  \"thought\": \"I have crafted a SQL query that retrieves student scores data including scores for each subject, overall performance, and attendance records by joining the 'students', 'scores', and 'courses' tables on their respective keys.\"\n}"
->>>>>>>>Edgar Review info: 
+>>>>>>>>Edgar Review info:
 Pass(None)
->>>>>>>>Edgar Action report: 
+>>>>>>>>Edgar Action report:
 execution succeeded,
 {"display_type":"response_table","sql":"SELECT s.student_id, s.student_name, s.major, s.year_of_enrollment, s.student_age, c.course_name, c.credit, sc.score, sc.semester FROM students s JOIN scores sc ON s.student_id = sc.student_id JOIN courses c ON sc.course_id = c.course_id","thought":"I have crafted a SQL query that retrieves student scores data including scores for each subject, overall performance, and attendance records by joining the 'students', 'scores', and 'courses' tables on their respective keys."}
 
@@ -280,9 +280,9 @@ un_stream ai response: {
 Edgar (to AutoPlanChatManager)-[gpt-3.5-turbo]:
 
 "{\n  \"display_type\": \"response_table\",\n  \"sql\": \"SELECT student_id, student_name, course_name, credit, AVG(score) AS average_score, COUNT(score) AS total_scores, MAX(score) AS highest_score, MIN(score) AS lowest_score, SUM(score) AS total_score, AVG(semester) AS average_semester FROM (SELECT s.student_id, s.student_name, c.course_name, c.credit, sc.score, sc.semester FROM students s JOIN scores sc ON s.student_id = sc.student_id JOIN courses c ON sc.course_id = c.course_id) GROUP BY student_id, course_name\",\n  \"thought\": \"I have created a SQL query that analyzes student scores data to identify trends and patterns in academic performance, subject-wise scores, and attendance correlation. The query calculates average score, total scores, highest score, lowest score, total score, and average semester for each student in each course.\"\n}"
->>>>>>>>Edgar Review info: 
+>>>>>>>>Edgar Review info:
 Pass(None)
->>>>>>>>Edgar Action report: 
+>>>>>>>>Edgar Action report:
 execution succeeded,
 {"display_type":"response_table","sql":"SELECT student_id, student_name, course_name, credit, AVG(score) AS average_score, COUNT(score) AS total_scores, MAX(score) AS highest_score, MIN(score) AS lowest_score, SUM(score) AS total_score, AVG(semester) AS average_semester FROM (SELECT s.student_id, s.student_name, c.course_name, c.credit, sc.score, sc.semester FROM students s JOIN scores sc ON s.student_id = sc.student_id JOIN courses c ON sc.course_id = c.course_id) GROUP BY student_id, course_name","thought":"I have created a SQL query that analyzes student scores data to identify trends and patterns in academic performance, subject-wise scores, and attendance correlation. The query calculates average score, total scores, highest score, lowest score, total score, and average semester for each student in each course."}
 
@@ -306,9 +306,9 @@ un_stream ai response: {
 Edgar (to AutoPlanChatManager)-[gpt-3.5-turbo]:
 
 "{\n  \"display_type\": \"response_table\",\n  \"sql\": \"SELECT student_id, student_name, course_name, credit, AVG(score) AS average_score, COUNT(score) AS total_scores, MAX(score) AS highest_score, MIN(score) AS lowest_score, SUM(score) AS total_score, AVG(semester) AS average_semester FROM (SELECT s.student_id, s.student_name, c.course_name, c.credit, sc.score, sc.semester FROM students s JOIN scores sc ON s.student_id = sc.student_id JOIN courses c ON sc.course_id = c.course_id) GROUP BY student_id, course_name\",\n  \"thought\": \"The SQL query provided will generate a table with the analyzed data including average score, total scores, highest score, lowest score, total score, and average semester for each student in each course. This table can be further used for visualization purposes to represent student scores from different dimensions effectively.\"\n}"
->>>>>>>>Edgar Review info: 
+>>>>>>>>Edgar Review info:
 Pass(None)
->>>>>>>>Edgar Action report: 
+>>>>>>>>Edgar Action report:
 execution succeeded,
 {"display_type":"response_table","sql":"SELECT student_id, student_name, course_name, credit, AVG(score) AS average_score, COUNT(score) AS total_scores, MAX(score) AS highest_score, MIN(score) AS lowest_score, SUM(score) AS total_score, AVG(semester) AS average_semester FROM (SELECT s.student_id, s.student_name, c.course_name, c.credit, sc.score, sc.semester FROM students s JOIN scores sc ON s.student_id = sc.student_id JOIN courses c ON sc.course_id = c.course_id) GROUP BY student_id, course_name","thought":"The SQL query provided will generate a table with the analyzed data including average score, total scores, highest score, lowest score, total score, and average semester for each student in each course. This table can be further used for visualization purposes to represent student scores from different dimensions effectively."}
 
@@ -318,9 +318,9 @@ execution succeeded,
 AutoPlanChatManager (to User)-[]:
 
 "Analyze student scores from at least three dimensions"
->>>>>>>>AutoPlanChatManager Review info: 
+>>>>>>>>AutoPlanChatManager Review info:
 Pass(None)
->>>>>>>>AutoPlanChatManager Action report: 
+>>>>>>>>AutoPlanChatManager Action report:
 execution succeeded,
 ```vis-db-chart
 {"sql": "SELECT student_id, student_name, course_name, credit, AVG(score) AS average_score, COUNT(score) AS total_scores, MAX(score) AS highest_score, MIN(score) AS lowest_score, SUM(score) AS total_score, AVG(semester) AS average_semester FROM (SELECT s.student_id, s.student_name, c.course_name, c.credit, sc.score, sc.semester FROM students s JOIN scores sc ON s.student_id = sc.student_id JOIN courses c ON sc.course_id = c.course_id) GROUP BY student_id, course_name", "type": "response_table", "title": "", "describe": "The SQL query provided will generate a table with the analyzed data including average score, total scores, highest score, lowest score, total score, and average semester for each student in each course. This table can be further used for visualization purposes to represent student scores from different dimensions effectively.", "data": [{"student_id": 1, "student_name": "Zhang San", "course_name": "Data Structures", "credit": 4.0, "average_score": 85.0, "total_scores": 1, "highest_score": 85, "lowest_score": 85, "total_score": 85, "average_semester": 0.0}, {"student_id": 1, "student_name": "Zhang San", "course_name": "Introduction to Computer Science", "credit": 3.0, "average_score": 90.0, "total_scores": 1, "highest_score": 90, "lowest_score": 90, "total_score": 90, "average_semester": 0.0}, {"student_id": 2, "student_name": "Li Si", "course_name": "Data Structures", "credit": 4.0, "average_score": 90.0, "total_scores": 1, "highest_score": 90, "lowest_score": 90, "total_score": 90, "average_semester": 0.0}, {"student_id": 2, "student_name": "Li Si", "course_name": "Introduction to Computer Science", "credit": 3.0, "average_score": 88.0, "total_scores": 1, "highest_score": 88, "lowest_score": 88, "total_score": 88, "average_semester": 0.0}, {"student_id": 3, "student_name": "Wang Wu", "course_name": "Advanced Physics", "credit": 3.0, "average_score": 92.0, "total_scores": 1, "highest_score": 92, "lowest_score": 92, "total_score": 92, "average_semester": 0.0}, {"student_id": 3, "student_name": "Wang Wu", "course_name": "Linear Algebra", "credit": 4.0, "average_score": 85.0, "total_scores": 1, "highest_score": 85, "lowest_score": 85, "total_score": 85, "average_semester": 0.0}, {"student_id": 4, "student_name": "Zhao Liu", "course_name": "Advanced Physics", "credit": 3.0, "average_score": 88.0, "total_scores": 1, "highest_score": 88, "lowest_score": 88, "total_score": 88, "average_semester": 0.0}, {"student_id": 4, "student_name": "Zhao Liu", "course_name": "Linear Algebra", "credit": 4.0, "average_score": 86.0, "total_scores": 1, "highest_score": 86, "lowest_score": 86, "total_score": 86, "average_semester": 0.0}, {"student_id": 5, "student_name": "Zhou Qi", "course_name": "Data Structures", "credit": 4.0, "average_score": 87.0, "total_scores": 1, "highest_score": 87, "lowest_score": 87, "total_score": 87, "average_semester": 0.0}, {"student_id": 5, "student_name": "Zhou Qi", "course_name": "Introduction to Computer Science", "credit": 3.0, "average_score": 90.0, "total_scores": 1, "highest_score": 90, "lowest_score": 90, "total_score": 90, "average_semester": 0.0}]}
@@ -383,5 +383,5 @@ useful results.
 }
 ```
 
-Of course, it will include the data after the execution of the SQL query if you run 
+Of course, it will include the data after the execution of the SQL query if you run
 above code, here we not show the data because it is too long.

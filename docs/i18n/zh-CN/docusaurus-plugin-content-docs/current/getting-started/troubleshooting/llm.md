@@ -74,7 +74,7 @@ ollama serve
 # 或检查：curl http://localhost:11434/api/tags
 ```
 
-2. 如果 DB-GPT 运行在 Docker 中，请不要使用 `localhost`，而应改为宿主机地址：
+2. 如果 Datrix 运行在 Docker 中，请不要使用 `localhost`，而应改为宿主机地址：
 
 ```toml
 [[models.llms]]

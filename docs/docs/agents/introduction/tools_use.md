@@ -1,19 +1,19 @@
 # Tool Use
 
-While LLMs can complete a wide range of tasks, they may not work well for the domains 
-which need comprehensive expert knowledge. In addition, LLMs may also encounter 
+While LLMs can complete a wide range of tasks, they may not work well for the domains
+which need comprehensive expert knowledge. In addition, LLMs may also encounter
 hallucination problems, which are hard to be resolved by themselves.
 
 So, we need to use some tools to help LLMs to complete the tasks.
 
 :::note
-In DB-GPT agents, most LLMs support tool calls as long as their own capabilities are not too weak.
+In Datrix agents, most LLMs support tool calls as long as their own capabilities are not too weak.
 (Such as `glm-4-9b-chat`, `Yi-1.5-34B-Chat`, `Qwen2-72B-Instruct`, etc.)
 :::
 
 ## Writing Tools
 
-Sometimes, LLMs may not be able to complete the calculation tasks directly, so we can 
+Sometimes, LLMs may not be able to complete the calculation tasks directly, so we can
 write a simple calculator tool to help them.
 ```python
 from dbgpt.agent.resource import tool
@@ -53,7 +53,7 @@ def count_directory_files(path: Annotated[str, Doc("The directory path")]) -> in
 ## Wrap Your Tools To `ToolPack`
 
 Most of the time, you may have multiple tools, so you can wrap them to a `ToolPack`.
-`ToolPack` is a collection of tools, you can use it to manage your tools, and the agent 
+`ToolPack` is a collection of tools, you can use it to manage your tools, and the agent
 can select the appropriate tool from the `ToolPack` according to the task requirements.
 
 ```python
@@ -109,7 +109,7 @@ async def main():
 
     # dbgpt-vis message infos
     print(await agent_memory.gpts_memory.app_link_chat_message("test123"))
-    
+
 if __name__ == "__main__":
     asyncio.run(main())
 
@@ -136,9 +136,9 @@ un_stream ai response: {
 LuBan (to User)-[gpt-3.5-turbo]:
 
 "{\n  \"thought\": \"To calculate the product of 10 and 99, we need to use a tool that can perform multiplication operation.\",\n  \"tool_name\": \"simple_calculator\",\n  \"args\": {\n    \"first_number\": 10,\n    \"second_number\": 99,\n    \"operator\": \"*\"\n  }\n}"
->>>>>>>>LuBan Review info: 
+>>>>>>>>LuBan Review info:
 Pass(None)
->>>>>>>>LuBan Action report: 
+>>>>>>>>LuBan Action report:
 execution succeeded,
 990
 
@@ -162,9 +162,9 @@ un_stream ai response: {
 LuBan (to User)-[gpt-3.5-turbo]:
 
 "{\n  \"thought\": \"To count the number of files in /tmp directory, we should use a tool that can perform this operation.\",\n  \"tool_name\": \"count_directory_files\",\n  \"args\": {\n    \"path\": \"/tmp\"\n  }\n}"
->>>>>>>>LuBan Review info: 
+>>>>>>>>LuBan Review info:
 Pass(None)
->>>>>>>>LuBan Action report: 
+>>>>>>>>LuBan Action report:
 execution succeeded,
 19
 
@@ -176,7 +176,7 @@ In the above code, we use the `ToolAssistantAgent` to select and call the approp
 
 ## More Details?
 
-In the above code, we use the `tool` decorator to define the tool function. It will wrap the function to a 
+In the above code, we use the `tool` decorator to define the tool function. It will wrap the function to a
 `FunctionTool` object. And `FunctionTool` is a subclass of `BaseTool`, which is a base class of all tools.
 
-Actually, **tool** is a special **resource** in the `DB-GPT` agent. You will see more details in the [Resource](../modules/resource/resource.md) section.
+Actually, **tool** is a special **resource** in the `Datrix` agent. You will see more details in the [Resource](../modules/resource/resource.md) section.

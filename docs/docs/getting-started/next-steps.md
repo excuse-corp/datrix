@@ -1,7 +1,7 @@
 ---
 sidebar_position: 99
 title: Next Steps
-summary: "Where to go after the first successful DB-GPT setup"
+summary: "Where to go after the first successful Datrix setup"
 read_when:
   - You already completed the quick start and want the next useful docs
   - You are deciding whether to go deeper into apps, APIs, deployment, or operations
@@ -60,8 +60,8 @@ You have the basics working. Use this page to jump to the next useful docs.
 | Discussions | [GitHub Discussions](https://github.com/orgs/eosphoros-ai/discussions) |
 | Slack | [Join Slack](https://join.slack.com/t/slack-inu2564/shared_invite/zt-29rcnyw2b-N~ubOD9kFc7b7MDOAM1otA) |
 | Twitter/X | [@DBGPT_AI](https://x.com/DBGPT_AI) |
-| Paper | [DB-GPT Paper (arXiv)](https://arxiv.org/pdf/2312.17449.pdf) |
-| DeepWiki | [DB-GPT DeepWiki](https://deepwiki.com/eosphoros-ai/DB-GPT) |
+| Paper | [Datrix Paper (arXiv)](https://arxiv.org/pdf/2312.17449.pdf) |
+| DeepWiki | [Datrix DeepWiki](https://deepwiki.com/eosphoros-ai/DB-GPT) |
 
 ## FAQ
 

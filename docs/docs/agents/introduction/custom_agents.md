@@ -2,7 +2,7 @@
 
 ## Introduction
 
-In this example, we will show you how to create a custom agent that can be used as a 
+In this example, we will show you how to create a custom agent that can be used as a
 summarizer.
 
 ## Installations
@@ -31,7 +31,7 @@ class MySummarizerAgent(ConversableAgent):
 
 ### Define the profile
 
-Before designing each Agent, it is necessary to define its role, identity, and 
+Before designing each Agent, it is necessary to define its role, identity, and
 functional role. The specific definitions are as follows:
 
 ```python
@@ -48,7 +48,7 @@ class MySummarizerAgent(ConversableAgent):
             "Summarize answer summaries based on user questions from provided "
             "resource information or from historical conversation memories."
         ),
-        # Introduction and description of the agent, used for task assignment and display. 
+        # Introduction and description of the agent, used for task assignment and display.
         # If it is empty, the goal content will be used.
         desc=(
             "You can summarize provided text content according to user's questions"
@@ -61,7 +61,7 @@ class MySummarizerAgent(ConversableAgent):
 
 ### Supplementary Prompt Constraints
 
-Agent's prompt is assembled using a fixed template by default(an external template can 
+Agent's prompt is assembled using a fixed template by default(an external template can
 be bound if there are some special requirements). which mainly includes:
 1. Identity definition(automatically constructed)
 2. Resource information(automatically constructed)
@@ -85,13 +85,13 @@ class MySummarizerAgent(ConversableAgent):
             "Summarize answer summaries based on user questions from provided "
             "resource information or from historical conversation memories."
         ),
-        # Introduction and description of the agent, used for task assignment and display. 
+        # Introduction and description of the agent, used for task assignment and display.
         # If it is empty, the goal content will be used.
         desc=(
             "You can summarize provided text content according to user's questions"
             " and output the summarization."
         ),
-        # Refer to the following. It can contain multiple constraints and reasoning 
+        # Refer to the following. It can contain multiple constraints and reasoning
         # restriction logic, and supports the use of parameter template {{ param_name }}.
         constraints=[
             "Prioritize the summary of answers to user questions from the improved resource"
@@ -113,8 +113,8 @@ class MySummarizerAgent(ConversableAgent):
 
 ### Prompt Template Format
 
-If dynamic parameters are used in the prompt, the actual dialogue process is required 
-to assemble the values, and the following interface (`_init_reply_message`) needs to be 
+If dynamic parameters are used in the prompt, the actual dialogue process is required
+to assemble the values, and the following interface (`_init_reply_message`) needs to be
 overloaded and implemented:
 
 ```python
@@ -169,9 +169,9 @@ class MySummarizerAgent(ConversableAgent):
 
 ### Resource Preloading (Optional)
 
-If there are some specific resources, the bound resources must be loaded in advance 
-when the agent is initialized. You can refer to the following implementation. 
-It is determined based on the actual situation of the resources. In most cases, it is 
+If there are some specific resources, the bound resources must be loaded in advance
+when the agent is initialized. You can refer to the following implementation.
+It is determined based on the actual situation of the resources. In most cases, it is
 not necessary.
 
 ```python
@@ -188,8 +188,8 @@ class MySummarizerAgent(ConversableAgent):
 
 ### Result Checking (Optional)
 
-If the action execution results need to be strictly verified and verified, there are 
-two modes: code logic verification and LLM verification. Of course, verification is not 
+If the action execution results need to be strictly verified and verified, there are
+two modes: code logic verification and LLM verification. Of course, verification is not
 necessary and the default pass is not implemented. Here is an example using LL verification:
 
 ```python
@@ -237,7 +237,7 @@ class MySummarizerAgent(ConversableAgent):
             ],
             prompt=CHECK_RESULT_SYSTEM_MESSAGE,
         )
-        
+
         fail_reason = ""
         if check_result and (
             "true" in check_result.lower() or "yes" in check_result.lower()
@@ -264,9 +264,9 @@ class MySummarizerAgent(ConversableAgent):
 
 ### Initialize The Action
 
-All Agent's operations on the external environment and the real world are implemented 
-through `Action`. Action defines the Agent's output content structure and actually 
-performs the corresponding operations. The specific `Action` implementation inherits 
+All Agent's operations on the external environment and the real world are implemented
+through `Action`. Action defines the Agent's output content structure and actually
+performs the corresponding operations. The specific `Action` implementation inherits
 the `Action` base class, as follows:
 
 ```python
@@ -294,13 +294,13 @@ class SummaryAction(Action[SummaryActionInput]):
         # The resource type that the current Agent needs to use
         # here we do not need to use resources, just return None
         return None
-    
+
     @property
     def render_protocol(self) -> Optional[Vis]:
         # The visualization rendering protocol that the current Agent needs to use
         # here we do not need to use visualization rendering, just return None
         return None
-    
+
     @property
     def out_model_type(self):
         return SummaryActionInput
@@ -314,9 +314,9 @@ class SummaryAction(Action[SummaryActionInput]):
         **kwargs,
     ) -> ActionOutput:
         """Perform the action.
-        
-        The entry point for actual execution of Action. Action execution will be 
-        automatically initiated after model inference. 
+
+        The entry point for actual execution of Action. Action execution will be
+        automatically initiated after model inference.
         """
         try:
             # Parse the input message
@@ -329,7 +329,7 @@ class SummaryAction(Action[SummaryActionInput]):
             )
         # Check if the summary content is not related to user questions
         if param.summary and cmp_string_equal(
-            param.summary, 
+            param.summary,
             NOT_RELATED_MESSAGE,
             ignore_case=True,
             ignore_punctuation=True,
@@ -349,7 +349,7 @@ class SummaryAction(Action[SummaryActionInput]):
 
 ### Binding Action to Agent
 
-After the development and definition of agent and action are completed, 
+After the development and definition of agent and action are completed,
 bind the action to the corresponding agent.
 
 ```python
@@ -393,12 +393,12 @@ class SummaryAction(Action[SummaryActionInput]):
         # Read the extended parameters passed in by the agent
         extra_param = kwargs.get("action_extra_param_key", None)
         pass
-    
+
 class MySummarizerAgent(ConversableAgent):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._init_actions([SummaryAction])
-    
+
     def prepare_act_param(
         self,
         received_message: Optional[AgentMessage],
@@ -444,7 +444,7 @@ async def main():
     )
 
     user_proxy = await UserProxyAgent().bind(agent_memory).bind(context).build()
-  
+
 
     await user_proxy.initiate_chat(
         recipient=summarizer,

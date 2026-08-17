@@ -1,10 +1,10 @@
-# 🚀 DB-GPT V0.8.1 — Production-Ready AI Data Assistant: Scheduling, Connectors, and Long-Running Agents
+# 🚀 Datrix V0.8.1 — Production-Ready AI Data Assistant: Scheduling, Connectors, and Long-Running Agents
 
 V0.8.1 continues the direction introduced by the V0.8.0 AI Data Assistant. It turns one-off analysis into production-oriented workflows that are **schedulable, connectable, observable, and easier to operate**.
 
 ## Introduction
 
-DB-GPT V0.8.0 moved the product experience from "conversational Q&A" to "task delivery." V0.8.1 focuses on the practical questions teams face when they use the AI Data Assistant continuously in real environments:
+Datrix V0.8.0 moved the product experience from "conversational Q&A" to "task delivery." V0.8.1 focuses on the practical questions teams face when they use the AI Data Assistant continuously in real environments:
 
 - A successful analysis is valuable. How can it be **rerun on a schedule** without repeating the conversation each time?
 - An agent connected only to databases is limited. How can it **safely connect to external systems and business tools**?
@@ -13,7 +13,7 @@ DB-GPT V0.8.0 moved the product experience from "conversational Q&A" to "task de
 
 To address these needs, this release introduces **Scheduled Tasks**, **MCP Connectors**, and **context management with task-plan tracking**. It also expands the model, datasource, vector-store, and cache ecosystem, and includes a set of production-focused performance, security, and compatibility fixes.
 
-The core value of V0.8.1 is straightforward: DB-GPT AI Data Assistant moves from completing one complex analysis to supporting repeatable, long-running, team-ready workflows.
+The core value of V0.8.1 is straightforward: Datrix AI Data Assistant moves from completing one complex analysis to supporting repeatable, long-running, team-ready workflows.
 
 ### Key Highlights
 
@@ -30,7 +30,7 @@ The core value of V0.8.1 is straightforward: DB-GPT AI Data Assistant moves from
 
 Many data analysis jobs are naturally recurring: daily business reports, weekly risk checks, monthly financial summaries, or diagnostics repeated over fresh database snapshots. V0.8.1 introduces **Scheduled Tasks**, allowing a successful analysis conversation to become a repeatable task.
 
-Run the analysis once, save the conversation as a task, and DB-GPT will replay the full ReAct Agent flow on a cron schedule. Each run creates a new conversation and report while preserving execution history for auditing, review, and team sharing.
+Run the analysis once, save the conversation as a task, and Datrix will replay the full ReAct Agent flow on a cron schedule. Each run creates a new conversation and report while preserving execution history for auditing, review, and team sharing.
 
 #### Save a Conversation as a Recurring Task
 
@@ -51,7 +51,7 @@ Every scheduled run records its status, duration, result summary, and generated 
 
 ### 🔌 MCP Connectors: Safely Connect Agents to External Tools
 
-V0.8.1 extends DB-GPT Agents beyond databases and local Skills through **MCP Connectors**. Agents can now access external tools through the Model Context Protocol, while users control which connectors are attached to each conversation.
+V0.8.1 extends Datrix Agents beyond databases and local Skills through **MCP Connectors**. Agents can now access external tools through the Model Context Protocol, while users control which connectors are attached to each conversation.
 
 Built-in connector templates currently include Feishu, DingTalk, Yuque, GitHub, Notion, Linear, Tavily, and DeepWiki. You can also connect any custom MCP server that supports SSE or Streamable HTTP.
 
@@ -64,7 +64,7 @@ Built-in connector templates currently include Feishu, DingTalk, Yuque, GitHub, 
 | Per-conversation connector selection | Agents only receive tools relevant to the current task, reducing noise and token usage |
 | Tool transparency | Inspect each connector's tool names, descriptions, and input parameters |
 | Human confirmation | Write actions from built-in connectors ask for confirmation before execution |
-| Encrypted credentials | Connector credentials are encrypted in DB-GPT metadata and restored after service restart |
+| Encrypted credentials | Connector credentials are encrypted in Datrix metadata and restored after service restart |
 
 <img alt="MCP connector list" src="/img/mcp/mcp_list.png" width="720px" />
 
@@ -88,15 +88,15 @@ Agentic data analysis is rarely a short conversation. It often involves multi-st
 
 Under the hood, `ContextManager` orchestrates **progressive multi-layer compaction** driven by token-budget state. As usage crosses warning and error thresholds, compaction becomes more aggressive: from truncating earlier observations, to dropping earlier rounds, to generating structured summaries with an LLM. If the model still reports `context_too_long`, an emergency fallback layer is available.
 
-These improvements make DB-GPT better suited for complex data analysis workflows that require multi-step reasoning, retries, and intermediate artifact management.
+These improvements make Datrix better suited for complex data analysis workflows that require multi-step reasoning, retries, and intermediate artifact management.
 
 ### 🧱 Broader Model, Datasource, and Storage Ecosystem
 
-V0.8.1 expands the ecosystem around DB-GPT, making it easier for teams to reuse existing model, database, vector-store, and cache infrastructure.
+V0.8.1 expands the ecosystem around Datrix, making it easier for teams to reuse existing model, database, vector-store, and cache infrastructure.
 
 #### LiteLLM Embedded AI Gateway
 
-DB-GPT adds **LiteLLM** as an embedded proxy provider, registered as `proxy/litellm`. It is not a separate proxy service; DB-GPT calls LiteLLM in process, giving you a unified entry point to OpenAI, Anthropic, Vertex AI, Bedrock, Azure, Cohere, Mistral, Groq, Ollama, and other LiteLLM-supported backends.
+Datrix adds **LiteLLM** as an embedded proxy provider, registered as `proxy/litellm`. It is not a separate proxy service; Datrix calls LiteLLM in process, giving you a unified entry point to OpenAI, Anthropic, Vertex AI, Bedrock, Azure, Cohere, Mistral, Groq, Ollama, and other LiteLLM-supported backends.
 
 ```toml
 [[models.llms]]
@@ -110,7 +110,7 @@ provider = "proxy/litellm"
 - **Valkey vector store**: Use Valkey and `valkey-search` to build vector retrieval pipelines.
 - **Valkey cache storage**: Support LLM response caching and embedding caching scenarios.
 - **Configurable distance metrics**: Configure vector-search distance metrics as needed.
-- **Valkey vector client `CLIENT SETNAME`**: Make DB-GPT connections easier to identify in Valkey monitoring tools.
+- **Valkey vector client `CLIENT SETNAME`**: Make Datrix connections easier to identify in Valkey monitoring tools.
 
 #### New Datasource and Model Support
 
@@ -236,9 +236,9 @@ uv sync --all-packages --extra "storage_qdrant"
 uv sync --all-packages --extra "storage_valkey"
 ```
 
-### Restart DB-GPT
+### Restart Datrix
 
-Restart DB-GPT using your usual startup method. After startup, we recommend checking that:
+Restart Datrix using your usual startup method. After startup, we recommend checking that:
 
 - Existing conversations load correctly.
 - MCP Connector pages can list, activate, and test connectors.
@@ -247,7 +247,7 @@ Restart DB-GPT using your usual startup method. After startup, we recommend chec
 
 ## References
 
-- [DB-GPT V0.8.0 Release Notes](http://docs.dbgpt.cn/docs/next/changelog/Released_V0.8.0)
+- [Datrix V0.8.0 Release Notes](http://docs.dbgpt.cn/docs/next/changelog/Released_V0.8.0)
 - [Quick Start](http://docs.dbgpt.cn/docs/overview/)
 - [Installation Guide](http://docs.dbgpt.cn/docs/next/installation/)
 - [Scheduled Tasks](http://docs.dbgpt.cn/docs/next/application/scheduled_tasks)

@@ -5,7 +5,7 @@
 因此，我们需要使用一些工具来帮助 LLM 完成任务。
 
 :::note
-在 DB-GPT 智能体中，大多数 LLM 都支持工具调用，只要其自身能力不是太弱即可。
+在 Datrix 智能体中，大多数 LLM 都支持工具调用，只要其自身能力不是太弱即可。
 （例如 `glm-4-9b-chat`、`Yi-1.5-34B-Chat`、`Qwen2-72B-Instruct` 等）
 :::
 
@@ -106,7 +106,7 @@ async def main():
 
     # dbgpt-vis 消息信息
     print(await agent_memory.gpts_memory.app_link_chat_message("test123"))
-    
+
 if __name__ == "__main__":
     asyncio.run(main())
 
@@ -134,9 +134,9 @@ un_stream ai response: {
 LuBan (to User)-[gpt-3.5-turbo]:
 
 "{\n  \"thought\": \"To calculate the product of 10 and 99, we need to use a tool that can perform multiplication operation.\",\n  \"tool_name\": \"simple_calculator\",\n  \"args\": {\n    \"first_number\": 10,\n    \"second_number\": 99,\n    \"operator\": \"*\"\n  }\n}"
->>>>>>>>LuBan Review info: 
+>>>>>>>>LuBan Review info:
 Pass(None)
->>>>>>>>LuBan Action report: 
+>>>>>>>>LuBan Action report:
 execution succeeded,
 990
 
@@ -160,9 +160,9 @@ un_stream ai response: {
 LuBan (to User)-[gpt-3.5-turbo]:
 
 "{\n  \"thought\": \"To count the number of files in /tmp directory, we should use a tool that can perform this operation.\",\n  \"tool_name\": \"count_directory_files\",\n  \"args\": {\n    \"path\": \"/tmp\"\n  }\n}"
->>>>>>>>LuBan Review info: 
+>>>>>>>>LuBan Review info:
 Pass(None)
->>>>>>>>LuBan Action report: 
+>>>>>>>>LuBan Action report:
 execution succeeded,
 19
 
@@ -175,4 +175,4 @@ execution succeeded,
 
 在上面的代码中，我们使用 `tool` 装饰器来定义工具函数。它会将函数封装为一个 `FunctionTool` 对象。而 `FunctionTool` 是 `BaseTool` 的子类，`BaseTool` 是所有工具的基类。
 
-实际上，**工具**是 `DB-GPT` 智能体中一种特殊的**资源**。你可以在[资源](../modules/resource/resource.md)章节中了解更多细节。
+实际上，**工具**是 `Datrix` 智能体中一种特殊的**资源**。你可以在[资源](../modules/resource/resource.md)章节中了解更多细节。

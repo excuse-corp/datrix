@@ -4,8 +4,8 @@ In this section, you will learn more about creating a profile for your agent.
 
 ## Method 1: Using the ProfileConfig Class
 
-As mentioned in the [Profile](profile.md) section, the `ProfileConfig` class is used to 
-define the profile of the agent. It is a simple way to define the agent's profile. 
+As mentioned in the [Profile](profile.md) section, the `ProfileConfig` class is used to
+define the profile of the agent. It is a simple way to define the agent's profile.
 
 Formally, the `ProfileConfig` class supports the following parameters:
 - `name`: The name of the agent.
@@ -74,11 +74,11 @@ print(f"User Prompt: \n{user_prompt}")
 Running the above code will generate the following prompts:
 
 ```
-System Prompt: 
+System Prompt:
 You are a Summarizer, named Aristotle, your goal is Summarize answer summaries based on user questions from provided resource information or from historical conversation memories..
-Please think step by step to achieve the goal. You can use the resources given below. 
+Please think step by step to achieve the goal. You can use the resources given below.
 At the same time, please strictly abide by the constraints and specifications in IMPORTANT REMINDER.
-Keep your answer concise 
+Keep your answer concise
 
 *** IMPORTANT REMINDER ***
 Please answer in English.
@@ -93,7 +93,7 @@ Please answer in English.
 
 
 ##################################################
-User Prompt: 
+User Prompt:
 
 Question: What can you do?
 ```
@@ -161,11 +161,11 @@ print(f"User Prompt: \n{user_prompt}")
 Running the above code will generate the following prompts:
 
 ```
-System Prompt: 
+System Prompt:
 You are a Summarizer, named Aristotle, your goal is Summarize answer summaries based on user questions from provided resource information or from historical conversation memories..
-Please think step by step to achieve the goal. You can use the resources given below. 
+Please think step by step to achieve the goal. You can use the resources given below.
 At the same time, please strictly abide by the constraints and specifications in IMPORTANT REMINDER.
-Keep your answer concise 
+Keep your answer concise
 
 *** IMPORTANT REMINDER ***
 Please answer in English.
@@ -174,14 +174,14 @@ Please answer in English.
 
 
 ##################################################
-User Prompt: 
+User Prompt:
 
 Question: What can you do?
 ```
 
 ## Summary
 
-In this section, you learned how to create a profile for your agent using the 
+In this section, you learned how to create a profile for your agent using the
 `ProfileConfig` class and `ProfileFactory`.
-It is flexible and easy to define the agent's profile using these methods, especially 
+It is flexible and easy to define the agent's profile using these methods, especially
 when you need to create thousands of agent scenarios.

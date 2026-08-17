@@ -1,10 +1,10 @@
 # Proxy LLMs
 
-DB-GPT can be deployed on servers with lower hardware requirements through proxy LLMs. DB-GPT supports many proxy LLMs, such as OpenAI, Azure, DeepSeek, Ollama, and more.
+Datrix can be deployed on servers with lower hardware requirements through proxy LLMs. Datrix supports many proxy LLMs, such as OpenAI, Azure, DeepSeek, Ollama, and more.
 
 ## Installation and Configuration
 
-Installing DB-GPT with proxy LLM support requires using the `uv` package manager for a faster and more stable dependency management experience.
+Installing Datrix with proxy LLM support requires using the `uv` package manager for a faster and more stable dependency management experience.
 
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';

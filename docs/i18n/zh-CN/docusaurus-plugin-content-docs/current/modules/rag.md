@@ -8,7 +8,7 @@
 
 **检索增强生成（RAG）** 通过从外部知识源中检索相关信息，并将其作为上下文提供给 LLM，从而确保回答基于真实数据而非记忆中的模式。
 
-DB-GPT 实现了 **多源 RAG（MS-RAG）** 框架，超越了基本的文档问答。它支持多种知识来源（文档、URL、数据库、知识图谱）、多种检索策略（向量、关键词、图谱、混合），并与 DB-GPT 的智能体和工作流生态深度集成。
+Datrix 实现了 **多源 RAG（MS-RAG）** 框架，超越了基本的文档问答。它支持多种知识来源（文档、URL、数据库、知识图谱）、多种检索策略（向量、关键词、图谱、混合），并与 Datrix 的智能体和工作流生态深度集成。
 
 # 架构设计
 
@@ -33,7 +33,7 @@ MS-RAG 流水线由四个阶段组成：
 Knowledge.load() → ChunkManager.split() → Assembler.persist() → Assembler.as_retriever()
 ```
 
-DB-GPT 提供了四种专用的 Assembler：
+Datrix 提供了四种专用的 Assembler：
 
 | Assembler | 用途 | 索引后端 |
 |---|---|---|
@@ -44,7 +44,7 @@ DB-GPT 提供了四种专用的 Assembler：
 
 # 知识来源
 
-DB-GPT 支持从多种数据源加载知识。在 Web UI 中，上传时可以选择数据源类型：
+Datrix 支持从多种数据源加载知识。在 Web UI 中，上传时可以选择数据源类型：
 
 <p align="center">
   <img src={'/img/rag/knowledge_datasource_type_zh.png'} width="720px" />
@@ -116,7 +116,7 @@ DB-GPT 支持从多种数据源加载知识。在 Web UI 中，上传时可以�
 
 # 检索策略
 
-DB-GPT 提供多种检索模式。可以在知识库设置中配置检索模式：
+Datrix 提供多种检索模式。可以在知识库设置中配置检索模式：
 
 <p align="center">
   <img src={'/img/rag/embedding_retrieve_mode_zh.png'} width="720px" />
@@ -131,7 +131,7 @@ DB-GPT 提供多种检索模式。可以在知识库设置中配置检索模式�
 
 ## 查询增强
 
-除了基础检索，DB-GPT 还提供高级查询处理能力：
+除了基础检索，Datrix 还提供高级查询处理能力：
 
 - **查询改写（Query Rewrite）** — 使用 LLM 将原始查询扩展和改写为多个搜索查询，提升召回率。
 - **重排序（Reranking）** — 初步检索后，使用 Reranker 模型对结果重新评分和排序，提高精准度。
@@ -148,7 +148,7 @@ DB-GPT 提供多种检索模式。可以在知识库设置中配置检索模式�
 
 # 分块策略
 
-文档分块是影响 RAG 质量的关键步骤。DB-GPT 支持多种分块策略：
+文档分块是影响 RAG 质量的关键步骤。Datrix 支持多种分块策略：
 
 <p align="center">
   <img src={'/img/rag/file_chunk_zh.png'} width="720px" />
@@ -179,7 +179,7 @@ DB-GPT 提供多种检索模式。可以在知识库设置中配置检索模式�
 
 # 嵌入模型
 
-DB-GPT 支持多种嵌入模型，将文本转换为向量表示：
+Datrix 支持多种嵌入模型，将文本转换为向量表示：
 
 ## 本地模型
 
@@ -202,7 +202,7 @@ DB-GPT 支持多种嵌入模型，将文本转换为向量表示：
 
 # 知识图谱 RAG
 
-除了传统的向量 RAG，DB-GPT 还支持 **知识图谱 RAG**，用于结构化知识检索。
+除了传统的向量 RAG，Datrix 还支持 **知识图谱 RAG**，用于结构化知识检索。
 
 ## 工作原理
 
@@ -251,7 +251,7 @@ DB-GPT 支持多种嵌入模型，将文本转换为向量表示：
 
 ### 第 5 步 — 配置检索策略（可选）
 
-您可以为知识库配置检索策略。DB-GPT 支持多种检索模式 — **Semantic（语义检索）**、**Keyword（关键词检索）**、**Hybrid（混合检索）** 和 **Tree（树状检索）** — 以适应不同的查询场景。在知识库设置中选择最适合您使用场景的模式。
+您可以为知识库配置检索策略。Datrix 支持多种检索模式 — **Semantic（语义检索）**、**Keyword（关键词检索）**、**Hybrid（混合检索）** 和 **Tree（树状检索）** — 以适应不同的查询场景。在知识库设置中选择最适合您使用场景的模式。
 
 <p align="center">
   <img src={'/img/rag/embedding_retrieve_mode_zh.png'} width="720px" />
