@@ -55,6 +55,7 @@ htmlcov/
 .coverage
 .coverage.*
 .cache
+.ruff_cache/
 nosetests.xml
 coverage.xml
 *.cover
@@ -76,6 +77,13 @@ db.sqlite3-journal
 # Flask stuff:
 instance/
 .webassets-cache
+
+# Local secrets and credentials
+.env.github.local
+.env.local
+.env.*.local
+*.pem
+*.key
 
 # Scrapy stuff:
 .scrapy
@@ -123,6 +131,9 @@ env.bak/
 venv.bak/
 .venv.make/
 
+# Local project reference files
+/dataman1111/
+
 # Spyder project settings
 .spyderproject
 .spyproject
@@ -168,6 +179,16 @@ thirdparty
 # next.js
 /web/.next/
 /web/out/
+/web/.next.bak.*/
+/web/out.bak.*/
+
+# Generated exported frontend bundles copied into backend static assets.
+# Existing tracked assets stay tracked; this prevents new untracked build chunks
+# from being accidentally added during local rebuilds.
+/packages/dbgpt-app/src/dbgpt_app/static/web/_next/data/*/
+/packages/dbgpt-app/src/dbgpt_app/static/web/_next/static/*/
+/packages/dbgpt-app/src/dbgpt_app/static/web/_next/static/chunks/*.js
+/packages/dbgpt-app/src/dbgpt_app/static/web/_next/static/css/*.css
 
 # production
 /web/build
@@ -176,6 +197,9 @@ thirdparty
 /web/npm-debug.log*
 /web/yarn-debug.log*
 /web/yarn-error.log*
+*.bak
+*.tmp
+*.swp
 
 # local env files
 /web/.env.prod

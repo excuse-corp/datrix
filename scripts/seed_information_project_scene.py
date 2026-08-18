@@ -21,7 +21,7 @@ def main() -> int:
     payload = {
         "scene_id": "information_project_contract_report",
         "name": "信息化项目合同分析",
-        "description": "查询信息化项目、合同金额、付款、项目阶段及负责人分布。",
+        "description": "查询信息化项目、合同金额、付款、项目状态及负责人分布。",
         "data_source_name": "dataman_data",
         "view_name": "reporting.vw_information_project_contract_report",
         "semantic_md": semantic_path.read_text(encoding="utf-8"),

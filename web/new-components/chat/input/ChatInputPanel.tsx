@@ -30,7 +30,6 @@ const ChatInputPanel: React.ForwardRefRenderFunction<any, { ctrl: AbortControlle
     temperatureValue,
     maxNewTokensValue,
     resourceValue,
-    knowledgeValue,
     setResourceValue,
     refreshDialogList,
   } = useContext(ChatContentContext);
@@ -60,10 +59,6 @@ const ChatInputPanel: React.ForwardRefRenderFunction<any, { ctrl: AbortControlle
         typeof resourceValue === 'string'
           ? resourceValue
           : JSON.stringify(resourceValue) || currentDialogue.select_param,
-    }),
-    // Include knowledge space in ext_info for RAG
-    ...(knowledgeValue && {
-      ext_info: { knowledge_space: knowledgeValue },
     }),
   });
 

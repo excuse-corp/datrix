@@ -35,13 +35,11 @@ interface ChatContentProps {
   temperatureValue: any;
   maxNewTokensValue: any;
   resourceValue: any;
-  knowledgeValue: string | null; // 选中的知识库
   modelValue: string;
   setModelValue: React.Dispatch<React.SetStateAction<string>>;
   setTemperatureValue: React.Dispatch<React.SetStateAction<any>>;
   setMaxNewTokensValue: React.Dispatch<React.SetStateAction<any>>;
   setResourceValue: React.Dispatch<React.SetStateAction<any>>;
-  setKnowledgeValue: React.Dispatch<React.SetStateAction<string | null>>; // 设置选中的知识库
   setAppInfo: React.Dispatch<React.SetStateAction<IApp>>;
   setAgent: React.Dispatch<React.SetStateAction<string>>;
   setCanAbort: React.Dispatch<React.SetStateAction<boolean>>;
@@ -70,11 +68,9 @@ export const ChatContentContext = createContext<ChatContentProps>({
   temperatureValue: 0.5,
   maxNewTokensValue: 1024,
   resourceValue: {},
-  knowledgeValue: null,
   modelValue: '',
   setModelValue: () => {},
   setResourceValue: () => {},
-  setKnowledgeValue: () => {},
   setTemperatureValue: () => {},
   setMaxNewTokensValue: () => {},
   setAppInfo: () => {},
@@ -124,7 +120,6 @@ const Chat: React.FC = () => {
   const [temperatureValue, setTemperatureValue] = useState();
   const [maxNewTokensValue, setMaxNewTokensValue] = useState();
   const [resourceValue, setResourceValue] = useState<any>();
-  const [knowledgeValue, setKnowledgeValue] = useState<string | null>(null);
   const [modelValue, setModelValue] = useState<string>('');
 
   // Auto-send init message if present
@@ -409,11 +404,9 @@ const Chat: React.FC = () => {
         temperatureValue,
         maxNewTokensValue,
         resourceValue,
-        knowledgeValue,
         modelValue,
         setModelValue,
         setResourceValue,
-        setKnowledgeValue,
         setTemperatureValue,
         setMaxNewTokensValue,
         setAppInfo,

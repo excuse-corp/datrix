@@ -237,7 +237,7 @@ const buildAskDataFallbackSteps = (resultPayload: any): any[] => {
           id: getAskDataStageId(callId, `sql-gen-${sceneId}`),
           title: `${failed ? 'SQL 生成失败' : 'SQL 生成成功'}：${sceneId}`,
           detail: failed ? scene?.error || scene?.message || '查询失败' : '已通过绑定表/视图校验',
-          action: 'sql_query',
+          action: 'ask_data_stage',
           status: failed ? 'failed' : 'done',
           askDataCallId: callId,
           parentId: `ask-data-${callId}`,
@@ -256,7 +256,7 @@ const buildAskDataFallbackSteps = (resultPayload: any): any[] => {
       id: getAskDataStageId(callId, 'querying'),
       title: '场景 SQL 执行完成',
       detail: `已执行 ${scenes.length} 个场景`,
-      action: 'sql_query',
+      action: 'ask_data_stage',
       status: 'done',
       askDataCallId: callId,
       parentId: `ask-data-${callId}`,
@@ -277,7 +277,7 @@ const buildAskDataFallbackSteps = (resultPayload: any): any[] => {
         id: getAskDataStageId(callId, `sql-exec-${sceneId}`),
         title: `${failed ? 'SQL 执行失败' : 'SQL 执行成功'}：${sceneId}`,
         detail,
-        action: 'sql_query',
+        action: 'ask_data_stage',
         status: failed ? 'failed' : 'done',
         askDataCallId: callId,
         parentId: `ask-data-${callId}`,
@@ -505,9 +505,7 @@ function notifyChatDialogueRefresh() {
   window.dispatchEvent(new CustomEvent(CHAT_DIALOGUE_REFRESH_EVENT));
 }
 
-function getAskDataStageAction(stage: unknown, title: unknown): string {
-  const text = `${String(stage || '')} ${String(title || '')}`.toLowerCase();
-  if (text.includes('sql')) return 'sql_query';
+function getAskDataStageAction(): string {
   return 'ask_data_stage';
 }
 
@@ -713,7 +711,6 @@ const convertToManusFormat = (
     )
       return 'skill';
     if (actionLower === 'shell_interpreter') return 'bash';
-    if (actionLower === 'sql_query') return 'sql';
     if (actionLower === 'ask_data_stage') return 'task';
     if (actionLower === 'question') return 'question';
 
@@ -726,7 +723,6 @@ const convertToManusFormat = (
       lower.includes('select_skill')
     )
       return 'skill';
-    if (lower.includes('sql_query') || lower.includes('sql query') || lower.includes('sql查询')) return 'sql';
     if (lower.includes('read') || lower.includes('load')) return 'read';
     if (lower.includes('edit')) return 'edit';
     if (lower.includes('write') || lower.includes('save')) return 'write';
@@ -2083,7 +2079,7 @@ const Playground: NextPage = () => {
                     title: payload.title || '正在查询业务数据',
                     detail: stageDetail,
                     status: stageStatus,
-                    action: getAskDataStageAction(payload.stage, payload.title),
+                    action: getAskDataStageAction(),
                     askDataCallId: callId,
                     parentId: `ask-data-${callId}`,
                   },
@@ -2226,7 +2222,7 @@ const Playground: NextPage = () => {
                 steps: nextSteps,
                 outputs: { ...current.outputs, [id]: current.outputs[id] || [] },
                 stepThoughts: nextThoughts,
-                // Only auto-focus for existing step updates (e.g., "思考中" -> "sql_query").
+                // Only auto-focus for existing step updates.
                 // New placeholder steps wait for step.meta to get real content before stealing focus.
                 activeStepId: existingStepIndex >= 0 ? id : current.activeStepId || id,
               },

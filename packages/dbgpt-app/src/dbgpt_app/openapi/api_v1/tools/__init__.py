@@ -15,7 +15,6 @@ from .question import make_question
 from .select_skill import make_select_skill
 from .shell_interpreter import make_shell_interpreter
 from .skill_tools import make_execute_skill_script_file, make_load_skill
-from .sql_query import make_sql_query
 from .todowrite import make_todowrite
 
 __all__ = [
@@ -33,6 +32,5 @@ __all__ = [
     "make_shell_interpreter",
     "make_execute_skill_script_file",
     "make_load_skill",
-    "make_sql_query",
     "make_todowrite",
 ]

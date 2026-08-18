@@ -29,7 +29,6 @@ from dbgpt_app.openapi.api_view_model import (
     ConversationVo,
     Result,
 )
-from dbgpt_serve.datasource.manages import ConnectorManager
 from dbgpt_serve.utils.auth import UserRequest, get_user_from_headers
 
 router = APIRouter()
@@ -1200,20 +1199,11 @@ async def _react_agent_stream(
         user_input = str(user_input or "")
 
     file_path = None
-    knowledge_space = None
     skill_name = None
-    database_name = None
     run_id = None
     if dialogue.ext_info and isinstance(dialogue.ext_info, dict):
         file_path = dialogue.ext_info.get("file_path")
         skill_name = dialogue.ext_info.get("skill_name")
-        # Support multiple field names for knowledge space
-        knowledge_space = (
-            dialogue.ext_info.get("knowledge_space")
-            or dialogue.ext_info.get("knowledge_space_name")
-            or dialogue.ext_info.get("knowledge_space_id")
-        )
-        database_name = dialogue.ext_info.get("database_name")
         run_id = dialogue.ext_info.get("client_run_id") or dialogue.ext_info.get(
             "run_id"
         )
@@ -1398,8 +1388,6 @@ async def _react_agent_stream(
                 break
 
         action_lower = (action or "").lower()
-        if action_lower == "sql_query":
-            return "正在查询数据库信息"
         if action_lower == "code_interpreter":
             return "正在生成分析代码"
         if action_lower == "html_interpreter":
@@ -1430,49 +1418,11 @@ async def _react_agent_stream(
     except Exception:
         pass  # If no business tools, continue with empty list
 
-    # Step 3: Knowledge retrieval tool is temporarily disabled.
-    knowledge_context = ""
-    if knowledge_space:
-        logger.info(
-            "Knowledge space '%s' was provided but knowledge retrieval is disabled",
-            knowledge_space,
-        )
-
-    # Step 4: Load database connector if specified in ext_info
-    database_connector = None
-    database_context = ""
-    if database_name:
-        try:
-            local_db_manager = ConnectorManager.get_instance(CFG.SYSTEM_APP)
-            database_connector = local_db_manager.get_connector(database_name)
-            table_names = list(database_connector.get_table_names())
-            table_info = database_connector.get_table_info_no_throw()
-            database_context = f"""
-## 数据库信息
-- 数据库名: {database_name}
-- 可用表: {", ".join(table_names)}
-- 表结构:
-{table_info}
-- 使用 'sql_query' 工具执行 SQL 查询
-- **只允许 SELECT 查询，禁止 INSERT/UPDATE/DELETE/DROP/ALTER/TRUNCATE**
-"""
-            logger.info(
-                f"Loaded database connector: {database_name} "
-                f"(tables: {', '.join(table_names)})"
-            )
-        except Exception as e:
-            logger.warning(f"Failed to load database connector: {e}", exc_info=e)
-            database_context = f"""
-## 数据库
-- 警告: 加载数据库 '{database_name}' 失败。错误: {str(e)}
-"""
-
     react_state: Dict[str, Any] = {
         "skills_loaded": True,  # Skills are pre-loaded now
         "matched": None,
         "skill_prompt": None,
         "file_path": file_path,
-        "ask_data_sql_guard": False,
         "run_id": run_id,
         "cancel_event": cancel_event,
         "turn_id": uuid.uuid4().hex,
@@ -1947,7 +1897,6 @@ print(json.dumps(summary, ensure_ascii=False))
         make_load_tools,
         make_question,
         make_shell_interpreter,
-        make_sql_query,
         make_todowrite,
     )
     # ── Build tool instances via factory functions ──────────────────────────
@@ -1967,7 +1916,6 @@ print(json.dumps(summary, ensure_ascii=False))
     execute_analysis_tool = make_execute_analysis(react_state)
     load_tools_tool = make_load_tools(react_state)
     execute_tool_tool = make_execute_tool(react_state)
-    sql_query_tool = make_sql_query(react_state, database_connector)
     code_interpreter_tool = make_code_interpreter(react_state)
     shell_interpreter_tool = make_shell_interpreter(react_state)
     html_interpreter_tool = make_html_interpreter(react_state, DEFAULT_SKILLS_DIR)
@@ -2041,19 +1989,10 @@ print(json.dumps(summary, ensure_ascii=False))
                 "- If a Recent AskData Result block is available and the latest request only asks to report, visualize, summarize, or format already queried data, do not call `ask_data_query` again.",
             ],
         )
-        business_markers = ("合同", "项目", "部门", "金额", "统计", "汇总", "指标")
-        explicit_sql = "sql" in user_input.lower()
-        react_state["ask_data_sql_guard"] = (
-            database_connector is not None
-            and "没有可用" not in capability_summary
-            and not explicit_sql
-            and any(marker in user_input for marker in business_markers)
-        )
         ask_data_prompt_context = f"""
 ## Trusted Business Data Query
 {capability_summary}
 - For covered business metrics, statistics, contracts, projects, departments, or time-based aggregation, you MUST call `ask_data_query` unless a Recent AskData Result block already answers the data scope and the latest request only asks for reporting, visualization, summarization, or formatting.
-- Never use `sql_query` as a substitute for a covered business-data question.
 - `ask_data_query` accepts only a natural-language question. Never pass SQL, table names, fields, views, data-source names, or Snapshot IDs.
 - Before calling `ask_data_query`, rewrite the user's latest request into a self-contained natural-language business question if chat history is needed for pronouns, ellipses, or follow-up references.
 - When AskData returns data JSON, use it as the evidence for your final answer. You may call other built-in tools afterwards when the user asked for formatting or visualization.
@@ -2065,8 +2004,6 @@ print(json.dumps(summary, ensure_ascii=False))
 """
     # Keep local aliases for backward compatibility (SSE loop references these names)
     execute_skill_script_file_tool = make_execute_skill_script_file(react_state)
-
-    _todo_action_history: Dict[int, List[str]] = {}
 
     def _active_todo_index() -> Optional[int]:
         for idx, item in enumerate(_todo_list):
@@ -2116,10 +2053,6 @@ print(json.dumps(summary, ensure_ascii=False))
             else ""
         )
 
-        history = _todo_action_history.setdefault(active_idx, [])
-        if action_lower:
-            history.append(action_lower)
-
         transition_markers = [
             "next step",
             "now i need",
@@ -2147,25 +2080,6 @@ print(json.dumps(summary, ensure_ascii=False))
             if next_todo and next_todo in thought_lower:
                 return True
             if _is_report_like(next_todo) and _is_report_like(thought_lower):
-                return True
-
-        if action_lower == "sql_query":
-            sql_calls = sum(1 for item in history if item == "sql_query")
-            if sql_calls < 3:
-                return False
-
-            if next_todo and any(
-                token and token in thought_lower for token in next_todo.split()
-            ):
-                return True
-
-            if _is_report_like(next_todo) and (
-                "summary" in thought_lower
-                or "summarize" in thought_lower
-                or "整理" in thought_lower
-                or "汇总" in thought_lower
-                or "报告" in thought_lower
-            ):
                 return True
 
             if current_todo and not _is_report_like(current_todo):
@@ -2209,11 +2123,9 @@ print(json.dumps(summary, ensure_ascii=False))
         if active_idx is not None:
             _todo_list[active_idx]["status"] = "completed"
             changed = True
-            _todo_action_history.pop(active_idx, None)
             for next_item in _todo_list[active_idx + 1 :]:
                 if next_item.get("status") == "pending":
                     next_item["status"] = "in_progress"
-                    _todo_action_history.pop(active_idx + 1, None)
                     break
         else:
             for item in _todo_list:
@@ -2486,22 +2398,20 @@ to this tool.
 If template_path returns "Template not found", immediately switch to the default
 `html` parameter usage.
    {available_images_hint}
-6. **sql_query**: Execute a read-only SQL query against the selected database.
-Parameters: {{"sql": "SELECT statement"}}
-7. **todowrite**: Create and manage a structured task list. Use for complex tasks
+6. **todowrite**: Create and manage a structured task list. Use for complex tasks
 (3+ steps) to plan and track progress. Pass the FULL list every time. Each item:
 {{"content": "description", "status": "pending|in_progress|completed|cancelled",
 "priority": "high|medium|low"}}. Only ONE task in_progress at a time.
 IMPORTANT: You MUST call todowrite again after EACH task completes to update status.
 The user sees progress in real time — never skip an update.
 Parameters: {{"todos": [{{...}}]}}
-8. **question**: Ask the user a question and wait for their response. Use this tool
+7. **question**: Ask the user a question and wait for their response. Use this tool
    when you need user input, clarification, or a decision to proceed. The tool blocks
    until the user answers.
    Parameters: {{"questions": [{{"question": "...", "header": "...", "options": [
    {{"label": "...", "description": "..."}}, ...]}}]}}. Set multiple=true to allow
    multiple selections. The tool returns the user's selected answers.
-9. **terminate**: Return the final answer when the task is completed. Action Input
+8. **terminate**: Return the final answer when the task is completed. Action Input
 must be {{"result": "your final answer content"}}.
 
 ## Task Management
@@ -2524,8 +2434,6 @@ Example flow for 3 tasks:
 - Finish task3: [task1=completed, task2=completed, task3=completed] → call todowrite
 
 {file_context}
-{knowledge_context}
-{database_context}
 {ask_data_prompt_context}
 {recent_ask_data_context}
 ## ReAct Output Format
@@ -2548,7 +2456,6 @@ Action Input: The JSON format of tool parameters
                 execute_skill_script_file_tool,
                 shell_interpreter_tool,
                 html_interpreter_tool,
-                sql_query_tool,
                 todowrite_tool,
                 question_tool,
                 Terminate(),
@@ -2649,34 +2556,30 @@ Parameters: {{"code": "python code string"}}
 7. **load_file**: Load uploaded file info. Parameters: none.
 8. **execute_analysis**: Execute quick analysis on uploaded Excel/CSV file.
 Parameters: none.
-9. **sql_query**: Execute a read-only SQL query against the selected database.
-Parameters: {{"sql": "SELECT statement"}}
-10. **load_tools**: Resolve required tools for the selected skill. Parameters: none.
-11. **execute_tool**: Execute a tool by name with JSON args.
+9. **load_tools**: Resolve required tools for the selected skill. Parameters: none.
+10. **execute_tool**: Execute a tool by name with JSON args.
 Parameters: {{"tool_name": "tool name", "args": {{parameters}}}}
-12. **html_interpreter**: Render HTML as an interactive web report (the ONLY way
+11. **html_interpreter**: Render HTML as an interactive web report (the ONLY way
 to display reports on the right panel). Default usage:
 {{"html": "<html>complete HTML code</html>", "title": "title"}}. Template mode:
 {{"template_path": "skill/templates/xxx.html", "data": {{...}}, "title": "title"}}.
 File mode: {{"file_path": "/path/to/report.html"}}
-13. **todowrite**: Create and manage a structured task list. Use for complex tasks
+12. **todowrite**: Create and manage a structured task list. Use for complex tasks
 (3+ steps) to plan and track progress. Pass the FULL list every time. Each item:
 {{"content": "description", "status": "pending|in_progress|completed|cancelled",
 "priority": "high|medium|low"}}. Only ONE task in_progress at a time.
 IMPORTANT: You MUST call todowrite again after EACH task completes to update status.
 The user sees progress in real time — never skip an update.
 Parameters: {{"todos": [{{...}}]}}
-14. **question**: Ask the user a question and wait for their response. Use this tool
+13. **question**: Ask the user a question and wait for their response. Use this tool
    when you need user input, clarification, or a decision to proceed. The tool blocks
    until the user answers.
    Parameters: {{"questions": [{{"question": "...", "header": "...", "options": [
    {{"label": "...", "description": "..."}}, ...]}}]}}. Set multiple=true to allow
    multiple selections. The tool returns the user's selected answers.
-15. **terminate**: Finish the task. Parameters: {{"result": "final answer"}}
+14. **terminate**: Finish the task. Parameters: {{"result": "final answer"}}
 
 {file_context}
-{knowledge_context}
-{database_context}
 {ask_data_prompt_context}
 {recent_ask_data_context}
 
@@ -2705,7 +2608,6 @@ Action Input: The JSON format of tool parameters
                 execute_analysis_tool,
                 shell_interpreter_tool,
                 html_interpreter_tool,
-                sql_query_tool,
                 todowrite_tool,
                 execute_tool_tool,
                 question_tool,
@@ -2864,7 +2766,7 @@ Action Input: The JSON format of tool parameters
         duration_ms = event.get("duration_ms")
         status_raw = str(event.get("status") or "").lower()
         status = "failed" if status_raw in {"failed", "error"} else "done"
-        action = "sql_query" if "sql" in f"{stage} {title}".lower() else "ask_data_stage"
+        action = "ask_data_stage"
         step_id = f"ask-data-{call_id}-{stage}"
         output_lines = [f"### {title}", f"- 阶段：`{stage}`", f"- 状态：`{status}`"]
         if isinstance(duration_ms, (int, float)):
