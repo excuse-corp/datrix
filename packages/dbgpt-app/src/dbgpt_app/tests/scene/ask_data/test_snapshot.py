@@ -154,6 +154,23 @@ Contract amount excludes tax.
     )
 
 
+def test_snapshot_filters_deprecated_allow_detail_from_query_limits():
+    document = DOCUMENT.replace(
+        "guidance:\n",
+        "query:\n  max_rows: 123\n  allow_detail: false\n  timeout_seconds: 30\nguidance:\n",
+    )
+
+    snapshot = SnapshotBuilder().build(
+        scene_id="contracts",
+        revision_id="rev-query-limits",
+        markdown=document,
+        view_schema=_schema(),
+    )
+
+    assert snapshot.runtime_config["query_limits"]["max_rows"] == 123
+    assert "allow_detail" not in snapshot.runtime_config["query_limits"]
+
+
 def test_snapshot_derives_query_capabilities_from_schema_without_structured_yaml():
     snapshot = SnapshotBuilder().build(
         scene_id="contracts",

@@ -707,12 +707,19 @@ def _summary(scene: Scene, service: SceneLifecycleService) -> SceneSummary:
     )
 
 
+def _public_query_limits(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    return {key: item for key, item in value.items() if key != "allow_detail"}
+
+
 def _error(exc: SceneRepositoryError) -> HTTPException:
     status = {
         "SCENE_ID_CONFLICT": 409,
         "SCENE_NOT_FOUND": 404,
         "SCENE_NOT_ACTIVE": 409,
         "SCENE_HAS_NO_ACTIVE_SNAPSHOT": 409,
+        "SCENE_HAS_UNVALIDATED_DRAFT": 409,
         "SCENE_MUST_BE_INACTIVE_TO_EDIT": 409,
     }.get(str(exc), 400)
     return HTTPException(
@@ -1301,7 +1308,7 @@ def get_scene(
         config = revision.parsed_config_json
         data["metrics"] = config.get("metrics", [])
         data["dimensions"] = config.get("dimensions", [])
-        data["limits"] = config.get("query_limits", {})
+        data["limits"] = _public_query_limits(config.get("query_limits", {}))
     return {"request_id": _request_id(), "status": "succeeded", "data": data}
 
 
@@ -1326,7 +1333,9 @@ def get_scene_api_spec(
             "capabilities": revision.parsed_config_json.get("agent", {})
             if revision.parsed_config_json
             else {},
-            "limits": revision.parsed_config_json.get("query_limits", {})
+            "limits": _public_query_limits(
+                revision.parsed_config_json.get("query_limits", {})
+            )
             if revision.parsed_config_json
             else {},
         },

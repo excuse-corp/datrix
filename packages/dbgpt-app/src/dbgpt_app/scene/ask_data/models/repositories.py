@@ -231,6 +231,8 @@ class InMemorySceneRepository:
             scene = self.get_scene(scene_id)
             if scene.current_snapshot_id is None or scene.active_revision is None:
                 raise SceneRepositoryError("SCENE_HAS_NO_ACTIVE_SNAPSHOT")
+            if scene.active_revision != scene.latest_revision:
+                raise SceneRepositoryError("SCENE_HAS_UNVALIDATED_DRAFT")
             updated = scene.model_copy(update={"status": SceneStatus.ACTIVE})
             self._scenes[scene_id] = updated
             return updated
@@ -321,7 +323,8 @@ class SqlSceneRepository:
         scene = self.get_scene(scene_id, include_deleted=True)
         return self.get_revision(scene_id, scene.latest_revision)
 
-    def update_draft(self, **values):
+    def update_draft(self, scene_id: str, **values):
+        values = {**values, "scene_id": scene_id}
         with self.db_manager.session() as session:
             scene_entity = (
                 session.query(AskDataSceneEntity)
@@ -347,10 +350,12 @@ class SqlSceneRepository:
                 revision_entity = AskDataSceneRevisionEntity(
                     scene_id=values["scene_id"],
                     revision=revision_number,
+                    status=RevisionStatus.DRAFT.value,
                     data_source_name=values["data_source_name"],
                     view_name=values["view_name"],
                     semantic_md=values["semantic_md"],
                     created_by=values["updated_by"],
+                    created_at=datetime.now(timezone.utc),
                 )
                 session.add(revision_entity)
                 scene_entity.latest_revision = revision_number
@@ -515,6 +520,8 @@ class SqlSceneRepository:
         scene = self.get_scene(scene_id)
         if scene.current_snapshot_id is None or scene.active_revision is None:
             raise SceneRepositoryError("SCENE_HAS_NO_ACTIVE_SNAPSHOT")
+        if scene.active_revision != scene.latest_revision:
+            raise SceneRepositoryError("SCENE_HAS_UNVALIDATED_DRAFT")
         return self.set_scene_status(scene_id, SceneStatus.ACTIVE)
 
     def soft_delete(self, scene_id: str) -> Scene:

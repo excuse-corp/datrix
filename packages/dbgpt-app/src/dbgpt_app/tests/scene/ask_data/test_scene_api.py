@@ -131,6 +131,14 @@ def test_scene_management_api_lifecycle():
     assert updated.status_code == 200
     assert updated.json()["revision"] == 2
 
+    stale_enable = client.post("/api/v1/ask-data/scenes/api_contracts/enable")
+    assert stale_enable.status_code == 409
+    assert stale_enable.json()["detail"]["code"] == "SCENE_HAS_UNVALIDATED_DRAFT"
+
+    validated = client.post("/api/v1/ask-data/scenes/api_contracts/revisions/2/validate")
+    assert validated.status_code == 200
+    assert validated.json()["data"]["scene_status"] == "active"
+
     deleted = client.delete("/api/v1/ask-data/scenes/api_contracts")
     assert deleted.status_code == 200
     assert client.get("/api/v1/ask-data/scenes/api_contracts").status_code == 404
@@ -150,6 +158,36 @@ def test_scene_api_returns_conflict_for_duplicate_scene_id():
     duplicate = client.post("/api/v1/ask-data/scenes", json=payload)
     assert duplicate.status_code == 409
     assert duplicate.json()["detail"]["code"] == "SCENE_ID_CONFLICT"
+
+
+def test_scene_api_hides_deprecated_allow_detail_limit():
+    client = _client_with_scene_services()
+    semantic_md = _document("api_limits").replace(
+        "dimensions:\n",
+        "query:\n  max_rows: 50\n  allow_detail: false\n  timeout_seconds: 30\ndimensions:\n",
+    )
+    created = client.post(
+        "/api/v1/ask-data/scenes",
+        json={
+            "scene_id": "api_limits",
+            "name": "Contracts",
+            "description": "Contract analysis",
+            "data_source_name": "ecology",
+            "view_name": "dbo.vw_contracts",
+            "semantic_md": semantic_md,
+        },
+    )
+    assert created.status_code == 200
+
+    scene = client.get("/api/v1/ask-data/scenes/api_limits")
+    assert scene.status_code == 200
+    assert scene.json()["data"]["limits"]["max_rows"] == 50
+    assert "allow_detail" not in scene.json()["data"]["limits"]
+
+    api_spec = client.get("/api/v1/ask-data/scenes/api_limits/api-spec")
+    assert api_spec.status_code == 200
+    assert api_spec.json()["data"]["limits"]["max_rows"] == 50
+    assert "allow_detail" not in api_spec.json()["data"]["limits"]
 
 
 def test_scene_publish_api_validates_enables_and_disables_system_snapshot():

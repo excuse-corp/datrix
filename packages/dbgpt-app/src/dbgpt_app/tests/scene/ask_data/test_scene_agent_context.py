@@ -22,3 +22,20 @@ def test_scene_agent_context_contains_both_full_documents():
     assert "| contract_id | 合同编号 |" in context
     assert "合同金额为空时不可按零处理。" in context
     assert "never output SQL" in context
+
+
+def test_scene_agent_context_filters_deprecated_allow_detail_limit():
+    current = build_test_snapshot("contracts", "rev-limits")
+    current = current.model_copy(
+        update={
+            "runtime_config": {
+                **current.runtime_config,
+                "query_limits": {"max_rows": 2, "allow_detail": False},
+            }
+        }
+    )
+
+    context = build_scene_agent_context(current, "查询合同明细")
+
+    assert "max_rows" in context
+    assert "allow_detail" not in context

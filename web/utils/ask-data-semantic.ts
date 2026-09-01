@@ -6,7 +6,6 @@ export type QueryLimits = {
   max_cell_bytes: number;
   max_result_bytes: number;
   timeout_seconds: number;
-  allow_detail: boolean;
   max_spec_attempts: number;
 };
 
@@ -16,7 +15,6 @@ export const defaultQueryLimits: QueryLimits = {
   max_cell_bytes: 16_384,
   max_result_bytes: 4 * 1024 * 1024,
   timeout_seconds: 30,
-  allow_detail: false,
   max_spec_attempts: 2,
 };
 
@@ -75,12 +73,6 @@ export const queryLimitDefinitions: Array<{
     unit: '秒',
   },
   {
-    key: 'allow_detail',
-    label: '允许明细查询',
-    description: '是否允许返回明细行；关闭时更偏向汇总类问数。',
-    type: 'boolean',
-  },
-  {
     key: 'max_spec_attempts',
     label: '查询生成尝试次数',
     description: '查询规格校验失败后允许自动修正并重试的次数上限。',
@@ -111,10 +103,6 @@ export const normalizeQueryLimits = (limits?: Partial<Record<keyof QueryLimits, 
   const result = { ...defaultQueryLimits };
   queryLimitDefinitions.forEach(definition => {
     const value = limits?.[definition.key];
-    if (definition.key === 'allow_detail') {
-      result.allow_detail = value === true;
-      return;
-    }
     const numeric = Number(value);
     result[definition.key] = Number.isFinite(numeric) ? numeric : defaultQueryLimits[definition.key];
   });

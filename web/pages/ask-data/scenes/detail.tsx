@@ -28,6 +28,7 @@ import {
   Spin,
   Tabs,
   Tag,
+  Tooltip,
   Typography,
   message,
 } from 'antd';
@@ -37,7 +38,6 @@ import { useCallback, useEffect, useState } from 'react';
 const errorMessage = (error: unknown) => (error instanceof Error ? error.message : '操作失败');
 
 const formatLimitValue = (key: keyof QueryLimits, value: unknown) => {
-  if (key === 'allow_detail') return value === true ? '允许' : '关闭';
   const definition = queryLimitDefinitions.find(item => item.key === key);
   const numeric = Number(value ?? defaultQueryLimits[key]);
   return `${Number.isFinite(numeric) ? numeric.toLocaleString() : '-'}${definition?.unit ? ` ${definition.unit}` : ''}`;
@@ -132,6 +132,17 @@ export default function SceneDetailPage() {
     scene.limits && Object.keys(scene.limits).length
       ? (scene.limits as Partial<Record<keyof QueryLimits, unknown>>)
       : (documents.query_limits ?? defaultQueryLimits);
+  const hasValidatedLatest = scene.active_revision === scene.latest_revision && Boolean(scene.current_snapshot_id);
+  const hasUnvalidatedDraft = scene.active_revision !== scene.latest_revision;
+  const enableDisabled = scene.status !== 'active' && !hasValidatedLatest;
+  const enableTooltip =
+    scene.status === 'active'
+      ? undefined
+      : hasUnvalidatedDraft
+        ? '有未校验草稿，请先校验后启用'
+        : !scene.current_snapshot_id
+          ? '没有可启用的已校验快照'
+          : undefined;
   return (
     <main className='ask-data-page-scroll h-full min-h-0 flex-1 overflow-y-auto bg-[#f7f9fc] pb-24 dark:bg-[#111827]'>
       <div className='mx-auto max-w-6xl p-4 pb-16 md:p-6'>
@@ -153,19 +164,24 @@ export default function SceneDetailPage() {
             >
               编辑
             </Button>
-            <Button onClick={() => void execute(() => validateRevision(sceneId, revision), '校验通过，场景已启用')}>
+            <Button onClick={() => void execute(() => validateRevision(sceneId, revision), '校验通过，新版本已启用')}>
               校验
             </Button>
-            <Button
-              onClick={() =>
-                void execute(
-                  () => changeSceneStatus(sceneId, scene.status === 'active' ? 'disable' : 'enable'),
-                  scene.status === 'active' ? '场景已停用' : '场景已启用',
-                )
-              }
-            >
-              {scene.status === 'active' ? '停用' : '启用'}
-            </Button>
+            <Tooltip title={enableTooltip}>
+              <span>
+                <Button
+                  disabled={enableDisabled}
+                  onClick={() =>
+                    void execute(
+                      () => changeSceneStatus(sceneId, scene.status === 'active' ? 'disable' : 'enable'),
+                      scene.status === 'active' ? '场景已停用' : '场景已启用',
+                    )
+                  }
+                >
+                  {scene.status === 'active' ? '停用' : '启用'}
+                </Button>
+              </span>
+            </Tooltip>
             <Popconfirm
               title='确认软删除？历史运行记录仍会保留。'
               onConfirm={() =>
@@ -178,6 +194,15 @@ export default function SceneDetailPage() {
         </div>
         {scene.status === 'invalid' && (
           <Alert className='mb-4' type='error' showIcon message='场景无效或发生 Schema 漂移，请先修复并重新发布。' />
+        )}
+        {hasUnvalidatedDraft && (
+          <Alert
+            className='mb-4'
+            type='warning'
+            showIcon
+            message='存在未校验草稿，请先校验后启用。'
+            description={`latest ${scene.latest_revision} / active ${scene.active_revision ?? '-'}`}
+          />
         )}
         <Descriptions
           bordered

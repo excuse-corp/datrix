@@ -150,7 +150,9 @@ class SnapshotBuilder:
             ],
             "value_mapping": config.value_mapping,
             "documents": documents,
-            "query_limits": config.query_limits.model_dump(mode="json"),
+            "query_limits": config.query_limits.model_dump(
+                mode="json", exclude={"allow_detail"}
+            ),
             "rag": {
                 **config.rag.model_dump(mode="json"),
                 "knowledge_space": knowledge_space,

@@ -90,7 +90,9 @@ def named_filters(snapshot: Snapshot | dict[str, Any]) -> list[dict[str, Any]]:
 
 def query_limits(snapshot: Snapshot | dict[str, Any]) -> dict[str, Any]:
     value = runtime_dict(snapshot).get("query_limits", {})
-    return value if isinstance(value, dict) else {}
+    if not isinstance(value, dict):
+        return {}
+    return {key: item for key, item in value.items() if key != "allow_detail"}
 
 
 def schema_config(snapshot: Snapshot | dict[str, Any]) -> dict[str, Any]:

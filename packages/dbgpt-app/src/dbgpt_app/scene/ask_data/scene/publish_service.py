@@ -315,10 +315,15 @@ class ScenePublishService:
     def enable(self, scene_id: str):
         try:
             scene = self.repository.get_scene(scene_id)
-            if not scene.current_snapshot_id:
+            if not scene.current_snapshot_id or scene.active_revision is None:
                 raise ScenePublishError(
                     "SCENE_HAS_NO_ACTIVE_SNAPSHOT",
                     "Scene has no validated snapshot to enable",
+                )
+            if scene.active_revision != scene.latest_revision:
+                raise ScenePublishError(
+                    "SCENE_HAS_UNVALIDATED_DRAFT",
+                    "Latest scene revision must be validated before enabling",
                 )
             snapshot, registry_version = self.activate(
                 scene_id, scene.current_snapshot_id

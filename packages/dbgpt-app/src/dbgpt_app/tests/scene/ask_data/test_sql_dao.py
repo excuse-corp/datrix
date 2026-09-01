@@ -22,6 +22,7 @@ from dbgpt_app.scene.ask_data.models.entities import (
 from dbgpt_app.scene.ask_data.models.repositories import SqlSceneRepository
 from dbgpt_app.scene.ask_data.models.run_repository import SqlRunRepository
 from dbgpt_app.scene.ask_data.models.runs import AgentRun, QueryRun, RunStatus
+from dbgpt_app.scene.ask_data.scene.service import SceneLifecycleService
 from dbgpt_app.scene.ask_data.schemas.snapshot import (
     Snapshot,
     SnapshotSourceHashes,
@@ -132,8 +133,9 @@ def test_sql_scene_repository_uses_transactional_metadata(tmp_path):
     )
     assert scene.latest_revision == 1
     assert revision.status == RevisionStatus.DRAFT
-    updated_scene, updated_revision = repository.update_draft(
-        scene_id="contracts_repo",
+    service = SceneLifecycleService(repository)
+    updated_scene, updated_revision = service.update_draft(
+        "contracts_repo",
         name="Contracts v2",
         description="Updated",
         data_source_name="ecology",
@@ -144,6 +146,38 @@ def test_sql_scene_repository_uses_transactional_metadata(tmp_path):
     assert updated_scene.name == "Contracts v2"
     assert updated_revision.revision == 1
     assert repository.get_scene("contracts_repo").name == "Contracts v2"
+
+
+def test_sql_scene_repository_update_draft_creates_initialized_revision(tmp_path):
+    db.init_db(f"sqlite:///{tmp_path / 'askdata-repository-new-draft.db'}")
+    create_ask_data_tables(db)
+    repository = SqlSceneRepository(db)
+    service = SceneLifecycleService(repository)
+    scene, revision = repository.create_scene(
+        scene_id="contracts_repo_new_draft",
+        name="Contracts",
+        description="Contract analysis",
+        data_source_name="ecology",
+        view_name="dbo.vw_contracts",
+        semantic_md="---\nscene_id: contracts_repo_new_draft\n---",
+        created_by="test",
+    )
+    repository.save_revision(revision.model_copy(update={"status": RevisionStatus.READY}))
+
+    updated_scene, updated_revision = service.update_draft(
+        "contracts_repo_new_draft",
+        name="Contracts v2",
+        description="Updated",
+        data_source_name="ecology",
+        view_name="dbo.vw_contracts",
+        semantic_md="---\nscene_id: contracts_repo_new_draft\nname: Contracts v2\n---",
+        updated_by="test",
+    )
+
+    assert updated_scene.latest_revision == 2
+    assert updated_revision.revision == 2
+    assert updated_revision.status == RevisionStatus.DRAFT
+    assert updated_revision.created_at is not None
 
 
 def test_sql_run_repository_supports_idempotency_and_agent_lookup(tmp_path):

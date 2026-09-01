@@ -48,6 +48,35 @@ const issueText = (issues: OntologyIssue[]) =>
 
 const sourceName = (source?: Partial<OntologySourceRef>) => source?.scene_name || source?.scene_id || '-';
 
+const buildSourceRefreshNotice = (
+  revision: OntologyRevision,
+  activeSources: OntologySourceRef[],
+): OntologySourceRefresh | undefined => {
+  const previous = new Map(revision.source_scene_snapshots.map(source => [source.scene_id, source]));
+  const incoming = new Map(activeSources.map(source => [source.scene_id, source]));
+  const sceneIds = Array.from(new Set([...previous.keys(), ...incoming.keys()])).sort();
+  const changes: OntologySourceRefresh['changes'] = [];
+
+  sceneIds.forEach(sceneId => {
+    const before = previous.get(sceneId);
+    const after = incoming.get(sceneId);
+    if (!before && after) {
+      changes.push({ scene_id: sceneId, kind: 'added', after });
+      return;
+    }
+    if (before && !after) {
+      changes.push({ scene_id: sceneId, kind: 'removed', before });
+      return;
+    }
+    if (before && after && before.snapshot_id !== after.snapshot_id) {
+      changes.push({ scene_id: sceneId, kind: 'changed', before, after });
+    }
+  });
+
+  if (!changes.length) return undefined;
+  return { pending_count: changes.length, changes, generation: null, revision };
+};
+
 const downloadMarkdown = (content: string, revision: number) => {
   const url = URL.createObjectURL(new Blob([content], { type: 'text/markdown;charset=utf-8' }));
   const anchor = document.createElement('a');
@@ -93,6 +122,7 @@ export default function OntologyPage() {
       setActive(data.active_snapshot);
       setMarkdown(data.draft.markdown);
       setSourceScenes(data.source_scenes);
+      setSourceRefresh(buildSourceRefreshNotice(data.draft, data.source_scenes));
       await loadGraph(data.draft.revision, true);
     } catch (error) {
       message.error(error instanceof Error ? error.message : '加载 Ontology 失败');
@@ -142,6 +172,7 @@ export default function OntologyPage() {
       const result = await saveOntologyDraft(markdown, draft.revision);
       setDraft(result);
       setMarkdown(result.markdown);
+      setSourceRefresh(buildSourceRefreshNotice(result, sourceScenes));
       await loadGraph(result.revision);
       message.success('Ontology 草稿已保存');
     } catch (error) {
@@ -218,7 +249,7 @@ export default function OntologyPage() {
       const result = await generateOntologyFromScenes(draft.revision, true);
       setDraft(result.revision);
       setMarkdown(result.revision.markdown);
-      setSourceRefresh(result);
+      setSourceRefresh(undefined);
       setLastGeneration(result.generation);
       setSourceRefreshOpen(false);
       await loadGraph(result.revision.revision);
@@ -352,6 +383,20 @@ export default function OntologyPage() {
         {issues.length > 0 && (
           <Alert className='m-4 mb-0' type='warning' showIcon message='编译检查提醒' description={issueText(issues)} />
         )}
+        {sourceRefresh?.pending_count ? (
+          <Alert
+            className='m-4 mb-0'
+            type='info'
+            showIcon
+            message={`检测到 ${sourceRefresh.pending_count} 个已激活场景版本变更`}
+            description='已有新的 Scene Snapshot，建议重新生成全局本体草稿，审核后再发布。'
+            action={
+              <Button size='small' type='primary' onClick={() => void inspectSourceChanges()} loading={saving}>
+                查看变更
+              </Button>
+            }
+          />
+        ) : null}
         {lastGeneration && (
           <Alert
             className='m-4 mb-0'

@@ -20,7 +20,7 @@ import ConfirmDialog from '@/new-components/connector/ConfirmDialog';
 import { AttachedConnector, ConnectorInstance } from '@/new-components/connector/types';
 import { useConfirmPolling } from '@/new-components/connector/useConfirmPolling';
 import FromTaskBanner from '@/new-components/scheduled-task/FromTaskBanner';
-import type { AskDataQueryResponse } from '@/utils/ask-data';
+import { listScenes, type AskDataQueryResponse, type SceneSummary } from '@/utils/ask-data';
 import axios from '@/utils/ctx-axios';
 import {
   ArrowUpOutlined,
@@ -77,28 +77,145 @@ const getAskDataSceneResults = (resultPayload: any): any[] => {
   return [];
 };
 
-const formatAskDataStageOutput = (stage: {
-  stage?: string;
-  title?: string;
-  detail?: string;
-  status?: string;
-  duration_ms?: number;
-  scene?: any;
-  resultPayload?: any;
-}): string => {
+type AskDataSceneNameLookup = Record<string, string>;
+
+const INTERNAL_SCENE_ID_REGEX = /scene_[a-zA-Z0-9_-]+/;
+
+const textValue = (value: unknown): string => (typeof value === 'string' && value.trim() ? value.trim() : '');
+
+const getAskDataSceneId = (scene?: any): string => {
+  const sceneId = textValue(scene?.scene_id);
+  if (sceneId) return sceneId;
+  const taskId = textValue(scene?.task_id);
+  if (!taskId) return '';
+  return taskId.match(INTERNAL_SCENE_ID_REGEX)?.[0] || taskId;
+};
+
+const getAskDataStageSceneId = (stage?: unknown, title?: unknown, detail?: unknown): string => {
+  const source = [stage, title, detail].map(textValue).filter(Boolean).join('\n');
+  const internalSceneId = source.match(INTERNAL_SCENE_ID_REGEX)?.[0];
+  if (internalSceneId) return internalSceneId;
+
+  const stageText = textValue(stage);
+  return stageText.match(/^(?:subagent|sql-gen|sql-exec)-(.+)$/)?.[1] || '';
+};
+
+const getAskDataSceneName = (scene?: any, sceneNameById: AskDataSceneNameLookup = {}): string => {
+  const sceneId = getAskDataSceneId(scene);
+  return (
+    textValue(scene?.name) ||
+    textValue(scene?.scene_name) ||
+    textValue(scene?.display_name) ||
+    (sceneId ? sceneNameById[sceneId] : '') ||
+    sceneId ||
+    '业务场景'
+  );
+};
+
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const replaceAskDataSceneId = (text: string, sceneId: string, sceneName: string): string => {
+  if (!sceneId || !sceneName || sceneId === sceneName) return text;
+  return text.replace(new RegExp(escapeRegExp(sceneId), 'g'), sceneName);
+};
+
+const replaceAskDataSceneIdsWithNames = (value: string, sceneNameById: AskDataSceneNameLookup = {}): string => {
+  return Object.entries(sceneNameById).reduce(
+    (text, [sceneId, sceneName]) => replaceAskDataSceneId(text, sceneId, sceneName),
+    value,
+  );
+};
+
+const buildAskDataSceneNameLookup = (
+  resultPayload: any,
+  baseLookup: AskDataSceneNameLookup = {},
+): AskDataSceneNameLookup => {
+  const lookup: AskDataSceneNameLookup = { ...baseLookup };
+  const addScene = (scene: any) => {
+    const sceneId = getAskDataSceneId(scene);
+    if (!sceneId) return;
+    const sceneName = getAskDataSceneName(scene, lookup);
+    if (sceneName && sceneName !== sceneId) lookup[sceneId] = sceneName;
+  };
+
+  getAskDataSceneResults(resultPayload).forEach(addScene);
+  if (Array.isArray(resultPayload?.results)) resultPayload.results.forEach(addScene);
+  if (Array.isArray(resultPayload?.scenes)) resultPayload.scenes.forEach(addScene);
+  if (Array.isArray(resultPayload?.scene_summaries)) resultPayload.scene_summaries.forEach(addScene);
+  return lookup;
+};
+
+const normalizeAskDataVisibleText = (
+  value: string | undefined,
+  sceneNameById: AskDataSceneNameLookup = {},
+  sceneId?: string,
+): string | undefined => {
+  if (!value) return value;
+  const namedSceneId = sceneId || getAskDataStageSceneId(undefined, value, undefined);
+  const namedSceneName = namedSceneId ? sceneNameById[namedSceneId] : '';
+  const replaced = namedSceneName ? replaceAskDataSceneId(value, namedSceneId, namedSceneName) : value;
+  return replaceAskDataSceneIdsWithNames(replaced, sceneNameById);
+};
+
+const getAskDataStageDisplay = (stage?: unknown, sceneNameById: AskDataSceneNameLookup = {}): string => {
+  const stageText = textValue(stage);
+  if (!stageText) return '';
+  if (stageText === 'routing') return '业务场景语义选择';
+  if (stageText === 'planning') return '业务场景规划';
+  if (stageText === 'querying') return '场景 SQL 执行';
+
+  const sceneId = getAskDataStageSceneId(stageText);
+  const sceneName = sceneId ? sceneNameById[sceneId] || sceneId : '';
+  if (stageText.startsWith('subagent-')) return sceneName ? `场景子 Agent：${sceneName}` : '场景子 Agent';
+  if (stageText.startsWith('sql-gen-')) return sceneName ? `SQL 生成：${sceneName}` : 'SQL 生成';
+  if (stageText.startsWith('sql-exec-')) return sceneName ? `SQL 执行：${sceneName}` : 'SQL 执行';
+  return replaceAskDataSceneIdsWithNames(stageText, sceneNameById);
+};
+
+const normalizeAskDataOutputContent = (content: any, sceneNameById: AskDataSceneNameLookup = {}): any => {
+  if (typeof content === 'string') return replaceAskDataSceneIdsWithNames(content, sceneNameById);
+  return content;
+};
+
+const isAskDataStageStep = (step?: Partial<ExecutionStep> | null): boolean =>
+  String(step?.action || '').toLowerCase() === 'ask_data_stage' || String(step?.id || '').startsWith('ask-data-');
+
+const formatAskDataStageOutput = (
+  stage: {
+    stage?: string;
+    title?: string;
+    detail?: string;
+    status?: string;
+    duration_ms?: number;
+    scene?: any;
+    resultPayload?: any;
+  },
+  sceneNameById: AskDataSceneNameLookup = {},
+): string => {
   const lines: string[] = [];
-  const title = stage.title || 'AskData 阶段';
+  const scene = stage.scene;
+  const stageSceneId = getAskDataStageSceneId(stage.stage, stage.title, stage.detail) || getAskDataSceneId(scene);
+  const stageSceneName =
+    textValue(scene?.name) ||
+    textValue(scene?.scene_name) ||
+    textValue(scene?.display_name) ||
+    (stageSceneId ? sceneNameById[stageSceneId] : '');
+  const localSceneNameById =
+    stageSceneId && stageSceneName && stageSceneName !== stageSceneId
+      ? { ...sceneNameById, [stageSceneId]: stageSceneName }
+      : sceneNameById;
+  const title = normalizeAskDataVisibleText(stage.title, localSceneNameById, stageSceneId) || 'AskData 阶段';
   const status = stage.status || stage.scene?.status || stage.resultPayload?.status;
   lines.push(`### ${title}`);
-  if (stage.stage) lines.push(`- 阶段：\`${stage.stage}\``);
+  if (stage.stage) lines.push(`- 阶段：\`${getAskDataStageDisplay(stage.stage, localSceneNameById)}\``);
   if (status) lines.push(`- 状态：\`${status}\``);
   if (typeof stage.duration_ms === 'number') lines.push(`- 耗时：${(stage.duration_ms / 1000).toFixed(2)} 秒`);
-  if (stage.detail) lines.push(`- 说明：${stage.detail}`);
+  const detail = normalizeAskDataVisibleText(stage.detail, localSceneNameById, stageSceneId);
+  if (detail) lines.push(`- 说明：${detail}`);
 
-  const scene = stage.scene;
   if (scene && typeof scene === 'object') {
-    const sceneId = scene.scene_id || scene.task_id;
-    if (sceneId) lines.push(`- 场景：\`${sceneId}\``);
+    const sceneName = getAskDataSceneName(scene, localSceneNameById);
+    if (sceneName) lines.push(`- 场景：\`${sceneName}\``);
     if (scene.snapshot_id) lines.push(`- Snapshot：\`${scene.snapshot_id}\``);
     if (scene.row_count !== undefined) lines.push(`- 返回行数：${scene.row_count}`);
     if (scene.truncated !== undefined) lines.push(`- 是否截断：${scene.truncated ? '是' : '否'}`);
@@ -120,18 +237,21 @@ const formatAskDataStageOutput = (stage: {
   return lines.join('\n');
 };
 
-const buildAskDataStageOutput = (stage: {
-  stage?: string;
-  title?: string;
-  detail?: string;
-  status?: string;
-  duration_ms?: number;
-  scene?: any;
-  resultPayload?: any;
-}): ExecutionOutput[] => [
+const buildAskDataStageOutput = (
+  stage: {
+    stage?: string;
+    title?: string;
+    detail?: string;
+    status?: string;
+    duration_ms?: number;
+    scene?: any;
+    resultPayload?: any;
+  },
+  sceneNameById: AskDataSceneNameLookup = {},
+): ExecutionOutput[] => [
   {
     output_type: 'markdown',
-    content: formatAskDataStageOutput(stage),
+    content: formatAskDataStageOutput(stage, sceneNameById),
   },
 ];
 
@@ -172,12 +292,13 @@ const collapseDuplicateAskDataSteps = (rawSteps: any[]): any[] => {
   });
 };
 
-const buildAskDataFallbackSteps = (resultPayload: any): any[] => {
+const buildAskDataFallbackSteps = (resultPayload: any, sceneNameById: AskDataSceneNameLookup = {}): any[] => {
   const scenes = getAskDataSceneResults(resultPayload);
   if (!scenes.length) return [];
 
   const callId = getAskDataCallId(resultPayload);
-  const sceneIds = scenes.map((scene: any) => scene?.scene_id || scene?.task_id || 'unknown');
+  const payloadSceneNameById = buildAskDataSceneNameLookup(resultPayload, sceneNameById);
+  const sceneNames = scenes.map((scene: any) => getAskDataSceneName(scene, payloadSceneNameById));
   return [
     {
       id: getAskDataStageId(callId, 'routing'),
@@ -187,68 +308,81 @@ const buildAskDataFallbackSteps = (resultPayload: any): any[] => {
       status: 'done',
       askDataCallId: callId,
       parentId: `ask-data-${callId}`,
-      outputs: buildAskDataStageOutput({
-        stage: 'routing',
-        title: '业务场景语义选择完成',
-        detail: '基于用户问题和场景 Snapshot 完成判断',
-        status: resultPayload.status,
-        resultPayload,
-      }),
+      outputs: buildAskDataStageOutput(
+        {
+          stage: 'routing',
+          title: '业务场景语义选择完成',
+          detail: '基于用户问题和场景 Snapshot 完成判断',
+          status: resultPayload.status,
+          resultPayload,
+        },
+        payloadSceneNameById,
+      ),
     },
     {
       id: getAskDataStageId(callId, 'planning'),
       title: '已选中业务场景',
-      detail: sceneIds.join('、'),
+      detail: sceneNames.join('、'),
       action: 'ask_data_stage',
       status: 'done',
       askDataCallId: callId,
       parentId: `ask-data-${callId}`,
-      outputs: buildAskDataStageOutput({
-        stage: 'planning',
-        title: '已选中业务场景',
-        detail: sceneIds.join('、'),
-        status: resultPayload.status,
-        resultPayload,
-      }),
+      outputs: buildAskDataStageOutput(
+        {
+          stage: 'planning',
+          title: '已选中业务场景',
+          detail: sceneNames.join('、'),
+          status: resultPayload.status,
+          resultPayload,
+        },
+        payloadSceneNameById,
+      ),
     },
     ...scenes.flatMap((scene: any) => {
-      const sceneId = scene?.scene_id || scene?.task_id || 'unknown';
+      const sceneId = getAskDataSceneId(scene) || 'unknown';
+      const sceneName = getAskDataSceneName(scene, payloadSceneNameById);
       const status = String(scene?.status || resultPayload.status || '').toLowerCase();
       const failed = status === 'failed' || status === 'error';
       return [
         {
           id: getAskDataStageId(callId, `subagent-${sceneId}`),
-          title: `场景子 Agent：${sceneId}`,
+          title: `场景子 Agent：${sceneName}`,
           detail: '读取数据字典和业务语义文档',
           action: 'ask_data_stage',
           status: failed ? 'failed' : 'done',
           askDataCallId: callId,
           parentId: `ask-data-${callId}`,
-          outputs: buildAskDataStageOutput({
-            stage: `subagent-${sceneId}`,
-            title: `场景子 Agent：${sceneId}`,
-            detail: '读取数据字典和业务语义文档',
-            status: failed ? 'failed' : 'done',
-            scene,
-            resultPayload,
-          }),
+          outputs: buildAskDataStageOutput(
+            {
+              stage: `subagent-${sceneId}`,
+              title: `场景子 Agent：${sceneName}`,
+              detail: '读取数据字典和业务语义文档',
+              status: failed ? 'failed' : 'done',
+              scene,
+              resultPayload,
+            },
+            payloadSceneNameById,
+          ),
         },
         {
           id: getAskDataStageId(callId, `sql-gen-${sceneId}`),
-          title: `${failed ? 'SQL 生成失败' : 'SQL 生成成功'}：${sceneId}`,
+          title: `${failed ? 'SQL 生成失败' : 'SQL 生成成功'}：${sceneName}`,
           detail: failed ? scene?.error || scene?.message || '查询失败' : '已通过绑定表/视图校验',
           action: 'ask_data_stage',
           status: failed ? 'failed' : 'done',
           askDataCallId: callId,
           parentId: `ask-data-${callId}`,
-          outputs: buildAskDataStageOutput({
-            stage: `sql-gen-${sceneId}`,
-            title: `${failed ? 'SQL 生成失败' : 'SQL 生成成功'}：${sceneId}`,
-            detail: failed ? scene?.error || scene?.message || '查询失败' : '已通过绑定表/视图校验',
-            status: failed ? 'failed' : 'done',
-            scene,
-            resultPayload,
-          }),
+          outputs: buildAskDataStageOutput(
+            {
+              stage: `sql-gen-${sceneId}`,
+              title: `${failed ? 'SQL 生成失败' : 'SQL 生成成功'}：${sceneName}`,
+              detail: failed ? scene?.error || scene?.message || '查询失败' : '已通过绑定表/视图校验',
+              status: failed ? 'failed' : 'done',
+              scene,
+              resultPayload,
+            },
+            payloadSceneNameById,
+          ),
         },
       ];
     }),
@@ -260,55 +394,86 @@ const buildAskDataFallbackSteps = (resultPayload: any): any[] => {
       status: 'done',
       askDataCallId: callId,
       parentId: `ask-data-${callId}`,
-      outputs: buildAskDataStageOutput({
-        stage: 'querying',
-        title: '场景 SQL 执行完成',
-        detail: `已执行 ${scenes.length} 个场景`,
-        status: resultPayload.status,
-        resultPayload,
-      }),
+      outputs: buildAskDataStageOutput(
+        {
+          stage: 'querying',
+          title: '场景 SQL 执行完成',
+          detail: `已执行 ${scenes.length} 个场景`,
+          status: resultPayload.status,
+          resultPayload,
+        },
+        payloadSceneNameById,
+      ),
     },
     ...scenes.map((scene: any) => {
-      const sceneId = scene?.scene_id || scene?.task_id || 'unknown';
+      const sceneId = getAskDataSceneId(scene) || 'unknown';
+      const sceneName = getAskDataSceneName(scene, payloadSceneNameById);
       const status = String(scene?.status || resultPayload.status || '').toLowerCase();
       const failed = status === 'failed' || status === 'error';
       const detail = failed ? scene?.error || scene?.message || '查询失败' : `${scene?.row_count ?? 0} 行`;
       return {
         id: getAskDataStageId(callId, `sql-exec-${sceneId}`),
-        title: `${failed ? 'SQL 执行失败' : 'SQL 执行成功'}：${sceneId}`,
+        title: `${failed ? 'SQL 执行失败' : 'SQL 执行成功'}：${sceneName}`,
         detail,
         action: 'ask_data_stage',
         status: failed ? 'failed' : 'done',
         askDataCallId: callId,
         parentId: `ask-data-${callId}`,
-        outputs: buildAskDataStageOutput({
-          stage: `sql-exec-${sceneId}`,
-          title: `${failed ? 'SQL 执行失败' : 'SQL 执行成功'}：${sceneId}`,
-          detail,
-          status: failed ? 'failed' : 'done',
-          scene,
-          resultPayload,
-        }),
+        outputs: buildAskDataStageOutput(
+          {
+            stage: `sql-exec-${sceneId}`,
+            title: `${failed ? 'SQL 执行失败' : 'SQL 执行成功'}：${sceneName}`,
+            detail,
+            status: failed ? 'failed' : 'done',
+            scene,
+            resultPayload,
+          },
+          payloadSceneNameById,
+        ),
       };
     }),
   ];
 };
 
-const mergeAskDataFallbackSteps = (rawSteps: any[], resultPayload: any): any[] => {
+const normalizeAskDataStepRecord = (step: any, sceneNameById: AskDataSceneNameLookup = {}) => {
+  if (!isAskDataStageStep(step)) return step;
+  const stageSceneId = getAskDataStageSceneId(step?.id, step?.title, step?.detail);
+  return {
+    ...step,
+    title: normalizeAskDataVisibleText(step?.title, sceneNameById, stageSceneId) || step?.title,
+    detail: normalizeAskDataVisibleText(step?.detail, sceneNameById, stageSceneId) || step?.detail,
+    outputs: Array.isArray(step?.outputs)
+      ? step.outputs.map((output: ExecutionOutput) => ({
+          ...output,
+          content: normalizeAskDataOutputContent(output.content, sceneNameById),
+        }))
+      : step?.outputs,
+  };
+};
+
+const mergeAskDataFallbackSteps = (
+  rawSteps: any[],
+  resultPayload: any,
+  sceneNameById: AskDataSceneNameLookup = {},
+): any[] => {
   const safeRawSteps = Array.isArray(rawSteps) ? rawSteps : [];
-  const fallbackSteps = buildAskDataFallbackSteps(resultPayload);
+  const payloadSceneNameById = buildAskDataSceneNameLookup(resultPayload, sceneNameById);
+  const fallbackSteps = buildAskDataFallbackSteps(resultPayload, payloadSceneNameById);
   if (!fallbackSteps.length) return safeRawSteps;
 
   const rawById = new Map(safeRawSteps.map(step => [String(step?.id || ''), step]));
   const fallbackIds = new Set(fallbackSteps.map(step => step.id));
   const mergedFallbackSteps = fallbackSteps.map(step => {
     const raw = rawById.get(step.id) || {};
-    return {
-      ...step,
-      ...raw,
-      id: step.id,
-      outputs: Array.isArray(raw.outputs) && raw.outputs.length ? raw.outputs : step.outputs,
-    };
+    return normalizeAskDataStepRecord(
+      {
+        ...step,
+        ...raw,
+        id: step.id,
+        outputs: Array.isArray(raw.outputs) && raw.outputs.length ? raw.outputs : step.outputs,
+      },
+      payloadSceneNameById,
+    );
   });
   const rawWithoutFallback = safeRawSteps.filter(step => !fallbackIds.has(String(step?.id || '')));
   const callId = getAskDataCallId(resultPayload);
@@ -318,7 +483,9 @@ const mergeAskDataFallbackSteps = (rawSteps: any[], resultPayload: any): any[] =
       (!step?.ask_data_call_id || String(step.ask_data_call_id) === callId),
   );
   if (askDataStepIndex < 0) {
-    return [...rawWithoutFallback, ...mergedFallbackSteps].map((step, idx) => ({ ...step, step: idx + 1 }));
+    return [...rawWithoutFallback, ...mergedFallbackSteps].map((step, idx) =>
+      normalizeAskDataStepRecord({ ...step, step: idx + 1 }, payloadSceneNameById),
+    );
   }
   const askDataStep = rawWithoutFallback[askDataStepIndex];
   return [
@@ -326,7 +493,7 @@ const mergeAskDataFallbackSteps = (rawSteps: any[], resultPayload: any): any[] =
     askDataStep,
     ...mergedFallbackSteps,
     ...rawWithoutFallback.slice(askDataStepIndex + 1),
-  ].map((step, idx) => ({ ...step, step: idx + 1 }));
+  ].map((step, idx) => normalizeAskDataStepRecord({ ...step, step: idx + 1 }, payloadSceneNameById));
 };
 
 const extractAskDataResultPayloadFromSteps = (rawSteps: any[]): any | null => {
@@ -352,10 +519,10 @@ const extractAskDataResultPayloadFromSteps = (rawSteps: any[]): any | null => {
   return null;
 };
 
-const expandAskDataHistorySteps = (rawSteps: any[]): any[] => {
+const expandAskDataHistorySteps = (rawSteps: any[], sceneNameById: AskDataSceneNameLookup = {}): any[] => {
   const collapsedSteps = collapseDuplicateAskDataSteps(rawSteps);
   const resultPayload = extractAskDataResultPayloadFromSteps(collapsedSteps);
-  return resultPayload ? mergeAskDataFallbackSteps(collapsedSteps, resultPayload) : collapsedSteps;
+  return resultPayload ? mergeAskDataFallbackSteps(collapsedSteps, resultPayload, sceneNameById) : collapsedSteps;
 };
 
 const _formatFileSize = (bytes: number): string => {
@@ -688,6 +855,7 @@ const convertToManusFormat = (
     | undefined,
   _userQuery?: string,
   t?: (key: string) => string,
+  sceneNameById: AskDataSceneNameLookup = {},
 ): {
   sections: ThinkingSection[];
   activeStep: ActiveStepInfo | null;
@@ -764,14 +932,15 @@ const convertToManusFormat = (
       return !detail.includes('action: terminate') && !isCompletedThinkingPlaceholder(step);
     })
     .map(step => {
-      const cleanDetail = step.detail?.replace(/^Thought:.*\n?/gm, '').trim();
+      const displayStep = normalizeAskDataStepRecord(step, sceneNameById);
+      const cleanDetail = displayStep.detail?.replace(/^Thought:.*\n?/gm, '').trim();
       return {
         id: step.id,
-        type: getStepType(step.title, step.action),
-        title: step.title || `Step ${step.step}`,
+        type: getStepType(displayStep.title, displayStep.action),
+        title: displayStep.title || `Step ${step.step}`,
         subtitle: cleanDetail?.split('\n')[0]?.slice(0, 80),
         description: cleanDetail || undefined,
-        phase: (step as any).phase,
+        phase: (displayStep as any).phase,
         status: getStepStatus(step.status),
       };
     });
@@ -792,25 +961,28 @@ const convertToManusFormat = (
   if (execution.activeStepId) {
     const step = execution.steps.find(s => s.id === execution.activeStepId);
     if (step && !isCompletedThinkingPlaceholder(step)) {
-      const cleanDetail = step.detail?.replace(/^Thought:.*\n?/gm, '').trim();
+      const displayStep = normalizeAskDataStepRecord(step, sceneNameById);
+      const cleanDetail = displayStep.detail?.replace(/^Thought:.*\n?/gm, '').trim();
       activeStep = {
         id: step.id,
-        type: getStepType(step.title, step.action),
-        title: step.title || `Step ${step.step}`,
+        type: getStepType(displayStep.title, displayStep.action),
+        title: displayStep.title || `Step ${step.step}`,
         subtitle: cleanDetail?.split('\n')[0]?.slice(0, 80),
         status: getStepStatus(step.status),
         detail: cleanDetail,
-        action: step.action,
-        actionInput: step.actionInput,
+        action: displayStep.action,
+        actionInput: displayStep.actionInput,
       };
     }
   }
 
   // Get outputs for active step
+  const selectedStep = execution.activeStepId ? execution.steps.find(s => s.id === execution.activeStepId) : undefined;
+  const normalizeActiveOutputs = isAskDataStageStep(selectedStep);
   const outputs: ManusExecutionOutput[] = execution.activeStepId
     ? (execution.outputs[execution.activeStepId] || []).map(o => ({
         output_type: o.output_type as any,
-        content: o.content,
+        content: normalizeActiveOutputs ? normalizeAskDataOutputContent(o.content, sceneNameById) : o.content,
         timestamp: Date.now(),
       }))
     : [];
@@ -825,6 +997,30 @@ const Playground: NextPage = () => {
   const { model, setModel } = useContext(ChatContext);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
+  const [askDataSceneNameById, setAskDataSceneNameById] = useState<AskDataSceneNameLookup>({});
+  const askDataSceneNameByIdRef = useRef<AskDataSceneNameLookup>({});
+
+  useEffect(() => {
+    askDataSceneNameByIdRef.current = askDataSceneNameById;
+  }, [askDataSceneNameById]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void listScenes({ page_size: 1000 })
+      .then(response => {
+        if (cancelled) return;
+        const items = response.data?.items || [];
+        const nextLookup = items.reduce<AskDataSceneNameLookup>((lookup, scene: SceneSummary) => {
+          if (scene.scene_id && scene.name) lookup[scene.scene_id] = scene.name;
+          return lookup;
+        }, {});
+        setAskDataSceneNameById(prev => ({ ...prev, ...nextLookup }));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const prompt = router.query.q;
@@ -2039,20 +2235,27 @@ const Playground: NextPage = () => {
         if (payload.type === 'ask_data.stage') {
           const callId = getAskDataCallId(payload);
           const id = getAskDataStageId(callId, payload.stage);
+          const sceneNameLookup = askDataSceneNameByIdRef.current;
+          const stageSceneId = getAskDataStageSceneId(payload.stage, payload.title, payload.detail);
+          const stageTitle = normalizeAskDataVisibleText(payload.title, sceneNameLookup, stageSceneId) || payload.title;
+          const stageDetailText = normalizeAskDataVisibleText(payload.detail, sceneNameLookup, stageSceneId);
           const stageStatus: ExecutionStep['status'] =
             payload.status === 'failed' || payload.status === 'error'
               ? 'failed'
               : payload.status === 'done' || payload.status === 'succeeded'
                 ? 'done'
                 : 'running';
-          const stageDetail = formatStageDetailWithDuration(payload.detail, payload.duration_ms);
-          const stageOutputs = buildAskDataStageOutput({
-            stage: payload.stage,
-            title: payload.title,
-            detail: payload.detail,
-            status: payload.status || stageStatus,
-            duration_ms: payload.duration_ms,
-          });
+          const stageDetail = formatStageDetailWithDuration(stageDetailText, payload.duration_ms);
+          const stageOutputs = buildAskDataStageOutput(
+            {
+              stage: payload.stage,
+              title: stageTitle,
+              detail: stageDetailText,
+              status: payload.status || stageStatus,
+              duration_ms: payload.duration_ms,
+            },
+            sceneNameLookup,
+          );
           setExecutionMap(prev => {
             const current = prev[responseId] || {
               steps: [],
@@ -2064,7 +2267,7 @@ const Playground: NextPage = () => {
             const steps = current.steps.some(step => step.id === id)
               ? current.steps.map(step =>
                   step.id === id
-                    ? { ...step, title: payload.title, detail: stageDetail, status: stageStatus }
+                    ? { ...step, title: stageTitle, detail: stageDetail, status: stageStatus }
                     : step.status === 'running'
                       ? { ...step, status: 'done' as const }
                       : step,
@@ -2076,7 +2279,7 @@ const Playground: NextPage = () => {
                   {
                     id,
                     step: current.steps.length + 1,
-                    title: payload.title || '正在查询业务数据',
+                    title: stageTitle || '正在查询业务数据',
                     detail: stageDetail,
                     status: stageStatus,
                     action: getAskDataStageAction(),
@@ -2100,10 +2303,13 @@ const Playground: NextPage = () => {
         }
         if (payload.type === 'ask_data.result') {
           const askDataResult = payload as AskDataQueryResponse;
+          const resultSceneNameById = buildAskDataSceneNameLookup(askDataResult, askDataSceneNameByIdRef.current);
+          askDataSceneNameByIdRef.current = { ...askDataSceneNameByIdRef.current, ...resultSceneNameById };
+          setAskDataSceneNameById(prev => ({ ...prev, ...resultSceneNameById }));
           setExecutionMap(prev => {
             const current = prev[responseId];
             if (!current) return prev;
-            const stepsWithAskDataStages = mergeAskDataFallbackSteps(current.steps, askDataResult);
+            const stepsWithAskDataStages = mergeAskDataFallbackSteps(current.steps, askDataResult, resultSceneNameById);
             const outputsWithAskDataStages = stepsWithAskDataStages.reduce<Record<string, ExecutionOutput[]>>(
               (acc, step: any) => {
                 if (
@@ -2585,7 +2791,7 @@ const Playground: NextPage = () => {
         }
 
         if (payload && payload.version === 1 && payload.type === 'react-agent') {
-          const historyPayloadSteps = expandAskDataHistorySteps(payload.steps || []);
+          const historyPayloadSteps = expandAskDataHistorySteps(payload.steps || [], askDataSceneNameByIdRef.current);
           const steps: ExecutionStep[] = historyPayloadSteps.map((s: any, idx: number) => ({
             id: s.id || `history-step-${idx}`,
             step: idx + 1,
@@ -2825,7 +3031,7 @@ const Playground: NextPage = () => {
                       activeStep: _activeStep,
                       outputs: _outputs,
                       stepThoughts,
-                    } = convertToManusFormat(execution, round.humanMsg?.context, t);
+                    } = convertToManusFormat(execution, round.humanMsg?.context, t, askDataSceneNameById);
                     const isWorking =
                       (isLastRound &&
                         (round.viewMsg?.thinking || execution?.steps.some(s => s.status === 'running'))) ||
@@ -3306,7 +3512,7 @@ const Playground: NextPage = () => {
                     activeStep,
                     outputs,
                     stepThoughts: _stepThoughts,
-                  } = convertToManusFormat(execution, undefined, t);
+                  } = convertToManusFormat(execution, undefined, t, askDataSceneNameById);
                   const isRunning = execution?.steps.some(s => s.status === 'running') || false;
 
                   return (

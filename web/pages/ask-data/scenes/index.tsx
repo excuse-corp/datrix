@@ -1,7 +1,7 @@
 import AskDataPageShell from '@/components/ask-data/AskDataPageShell';
 import { changeSceneStatus, deleteScene, listScenes, type SceneSummary } from '@/utils/ask-data';
 import { PlusOutlined, SearchOutlined } from '@ant-design/icons';
-import { Button, Input, message, Popconfirm, Select, Space, Table, Tag } from 'antd';
+import { Button, Input, message, Popconfirm, Select, Space, Table, Tag, Tooltip } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
@@ -65,34 +65,64 @@ export default function SceneListPage() {
     { title: '更新时间', dataIndex: 'updated_at', render: value => (value ? new Date(value).toLocaleString() : '-') },
     {
       title: '操作',
-      render: (_, row) => (
-        <Space wrap>
-          <Link href={`/ask-data/scenes/detail?scene_id=${encodeURIComponent(row.scene_id)}`}>详情</Link>
-          <Link href={`/ask-data/scenes/edit?scene_id=${encodeURIComponent(row.scene_id)}`}>编辑</Link>
-          <Button
-            type='link'
-            onClick={() =>
-              void changeSceneStatus(row.scene_id, row.status === 'active' ? 'disable' : 'enable')
-                .then(load)
-                .catch(error => message.error(String(error)))
-            }
-          >
-            {row.status === 'active' ? '停用' : '启用'}
-          </Button>
-          <Popconfirm
-            title='确认软删除该场景？历史记录将保留。'
-            onConfirm={() =>
-              void deleteScene(row.scene_id)
-                .then(load)
-                .catch(error => message.error(String(error)))
-            }
-          >
-            <Button type='link' danger>
-              删除
-            </Button>
-          </Popconfirm>
-        </Space>
-      ),
+      render: (_, row) => {
+        const hasValidatedLatest = row.active_revision === row.latest_revision && Boolean(row.current_snapshot_id);
+        const hasUnvalidatedDraft = row.active_revision !== row.latest_revision;
+        const canEdit = row.status === 'inactive';
+        const enableDisabled = row.status !== 'active' && !hasValidatedLatest;
+        const editTooltip = canEdit ? undefined : '请先停用场景再编辑';
+        const enableTooltip =
+          row.status === 'active'
+            ? undefined
+            : hasUnvalidatedDraft
+              ? '有未校验草稿，请先校验后启用'
+              : !row.current_snapshot_id
+                ? '没有可启用的已校验快照'
+                : undefined;
+        return (
+          <Space wrap>
+            <Link href={`/ask-data/scenes/detail?scene_id=${encodeURIComponent(row.scene_id)}`}>详情</Link>
+            <Tooltip title={editTooltip}>
+              <span>
+                <Button
+                  type='link'
+                  disabled={!canEdit}
+                  href={canEdit ? `/ask-data/scenes/edit?scene_id=${encodeURIComponent(row.scene_id)}` : undefined}
+                >
+                  编辑
+                </Button>
+              </span>
+            </Tooltip>
+            <Tooltip title={enableTooltip}>
+              <span>
+                <Button
+                  type='link'
+                  disabled={enableDisabled}
+                  onClick={() =>
+                    void changeSceneStatus(row.scene_id, row.status === 'active' ? 'disable' : 'enable')
+                      .then(load)
+                      .catch(error => message.error(String(error)))
+                  }
+                >
+                  {row.status === 'active' ? '停用' : '启用'}
+                </Button>
+              </span>
+            </Tooltip>
+            <Popconfirm
+              title='确认软删除该场景？历史记录将保留。'
+              onConfirm={() =>
+                void deleteScene(row.scene_id)
+                  .then(load)
+                  .catch(error => message.error(String(error)))
+              }
+            >
+              <Button type='link' danger>
+                删除
+              </Button>
+            </Popconfirm>
+          </Space>
+        );
+      },
     },
   ];
   return (

@@ -42,7 +42,6 @@ class SemanticDraftBuilder:
                 "query:",
                 "  max_rows: 1000",
                 "  timeout_seconds: 30",
-                "  allow_detail: false",
                 "  max_spec_attempts: 2",
                 "rag:",
                 "  required_on_activate: true",
