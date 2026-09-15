@@ -53,5 +53,12 @@ class ModelResponse(BaseModel):
     check_healthy: bool = Field(True, description="Check model health status")
     prompt_template: Optional[str] = Field(None, description="Model prompt template")
     last_heartbeat: Optional[str] = Field(None, description="Model last heartbeat")
+    health_reason: Optional[str] = Field(None, description="Model health detail")
     provider: Optional[str] = Field(None, description="Model provider")
     params: Optional[Dict[str, Any]] = Field(None, description="Model startup params")
+
+
+class DefaultModelRequest(BaseModel):
+    """Default LLM model request."""
+
+    model_name: str = Field(..., min_length=1, description="Default model name")

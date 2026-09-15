@@ -1984,7 +1984,7 @@ print(json.dumps(summary, ensure_ascii=False))
                 "- `ask_data_query` Action Input MUST be `{\"question\": \"<natural-language business question>\"}`.",
                 "- Never call `ask_data_query` with `{\"query\": ...}`; `query` is not a valid parameter name.",
                 "- Do not pass SQL, table names, field names, data-source names, or Snapshot IDs to `ask_data_query`.",
-                "- After `ask_data_query` returns `query_complete: true`, answer from that result and do not call it again with the same question in the current turn.",
+                "- After `ask_data_query` returns `query_complete: true`, if no extra tool is explicitly needed, call `terminate` immediately with `Action Input: {\"result\": \"final answer\"}`. Do not answer in plain text and do not call `ask_data_query` again with the same question.",
                 "- A broader follow-up query is allowed only when the user's explicit request cannot be answered by the returned columns.",
                 "- If a Recent AskData Result block is available and the latest request only asks to report, visualize, summarize, or format already queried data, do not call `ask_data_query` again.",
             ],
@@ -1996,7 +1996,7 @@ print(json.dumps(summary, ensure_ascii=False))
 - `ask_data_query` accepts only a natural-language question. Never pass SQL, table names, fields, views, data-source names, or Snapshot IDs.
 - Before calling `ask_data_query`, rewrite the user's latest request into a self-contained natural-language business question if chat history is needed for pronouns, ellipses, or follow-up references.
 - When AskData returns data JSON, use it as the evidence for your final answer. You may call other built-in tools afterwards when the user asked for formatting or visualization.
-- When an AskData Observation contains `query_complete: true`, the query requirement is satisfied. The next action must answer/format the returned data or terminate; never call `ask_data_query` again with the same question in this turn.
+- When an AskData Observation contains `query_complete: true`, the query requirement is satisfied. If no extra tool is explicitly needed, the next response MUST be `Action: terminate` with the full answer inside `Action Input: {{"result": "final answer"}}`. Do not output the final answer as plain Markdown, and never call `ask_data_query` again with the same question in this turn.
 - Do not broaden a successful query merely to add fields, rankings, or analysis that the user did not request.
 - If a "Recent AskData Result From This Session" block is provided and the latest user request asks for a report, visualization, summary, or formatting based on already queried data, this rule overrides the general `ask_data_query` rule: reuse that block directly and do NOT call `ask_data_query` again unless the user requests refreshed data, changes filters/scope, or the provided data is insufficient.
 
@@ -2447,6 +2447,8 @@ Action Reason: Why this action is needed now, plain text, MUST be concise and fi
 Do not use ellipsis.
 Action: The selected tool name (must be one of the tools listed above)
 Action Input: The JSON format of tool parameters
+For final answers, use `Action: terminate` and put the complete user-facing answer
+only inside `Action Input.result`.
 """.strip()
 
         tool_pack = ToolPack(
@@ -2594,6 +2596,8 @@ Action Reason: Why this action is needed now, plain text, MUST be concise and fi
 Do not use ellipsis.
 Action: The selected tool name
 Action Input: The JSON format of tool parameters
+For final answers, use `Action: terminate` and put the complete user-facing answer
+only inside `Action Input.result`.
 """.strip()
 
         tool_pack = ToolPack(

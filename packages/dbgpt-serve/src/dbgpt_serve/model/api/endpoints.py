@@ -1,6 +1,11 @@
+import asyncio
+import json
 import logging
+import os
+import time
 from functools import cache
-from typing import List, Optional
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security.http import HTTPAuthorizationCredentials, HTTPBearer
@@ -20,10 +25,20 @@ from dbgpt_serve.core import Result
 
 from ..config import SERVE_SERVICE_COMPONENT_NAME, ServeConfig
 from ..service.service import Service
-from .schemas import ModelResponse
+from .schemas import DefaultModelRequest, ModelResponse
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+_DEFAULT_MODEL_CONFIG_PATH = Path("pilot/meta_data/default_model.json")
+_MODEL_HEALTH_PROBE_CACHE: Dict[str, Tuple[float, bool, Optional[str]]] = {}
+_MODEL_HEALTH_PROBE_TTL_SECONDS = float(
+    os.getenv("DATAMAN_MODEL_HEALTH_PROBE_TTL_SECONDS", "30")
+)
+_MODEL_HEALTH_PROBE_TIMEOUT_SECONDS = float(
+    os.getenv("DATAMAN_MODEL_HEALTH_PROBE_TIMEOUT_SECONDS", "8")
+)
+_MODEL_HEALTH_REASON_LIMIT = 240
 
 # Add your API endpoints here
 
@@ -113,6 +128,267 @@ async def check_api_key(
         return None
 
 
+def _read_default_model_name() -> Optional[str]:
+    if not _DEFAULT_MODEL_CONFIG_PATH.exists():
+        return None
+    try:
+        value = json.loads(
+            _DEFAULT_MODEL_CONFIG_PATH.read_text(encoding="utf-8")
+        ).get("model_name")
+    except Exception:
+        return None
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def _write_default_model_name(model_name: str) -> None:
+    _DEFAULT_MODEL_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _DEFAULT_MODEL_CONFIG_PATH.write_text(
+        json.dumps({"model_name": model_name}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def _clear_model_health_probe_cache() -> None:
+    _MODEL_HEALTH_PROBE_CACHE.clear()
+
+
+def _configured_default_llm() -> Optional[str]:
+    try:
+        from dbgpt._private.config import Config
+        from dbgpt_app.config import ApplicationConfig
+
+        app_config = Config().parse_config(ApplicationConfig, hook_section="hooks")
+        configured = app_config.models.default_llm
+    except Exception as e:
+        logger.debug("Read configured default LLM failed: %s", e)
+        return None
+    return configured if isinstance(configured, str) and configured.strip() else None
+
+
+def _sanitize_health_reason(reason: Optional[str]) -> Optional[str]:
+    if not reason:
+        return None
+    normalized = " ".join(str(reason).split())
+    if len(normalized) > _MODEL_HEALTH_REASON_LIMIT:
+        return normalized[: _MODEL_HEALTH_REASON_LIMIT - 3] + "..."
+    return normalized
+
+
+def _probe_cache_key(model_name: str, host: str, port: int) -> str:
+    return f"{model_name}@{host}:{port}"
+
+
+async def _probe_openai_compatible_llm(
+    model_name: str, params: Dict
+) -> Tuple[bool, Optional[str]]:
+    api_base = params.get("api_base")
+    api_key = params.get("api_key")
+    if not api_base or not api_key:
+        return False, "Missing OpenAI-compatible api_base or api_key"
+
+    try:
+        import httpx
+
+        timeout = httpx.Timeout(
+            _MODEL_HEALTH_PROBE_TIMEOUT_SECONDS,
+            connect=min(2.0, _MODEL_HEALTH_PROBE_TIMEOUT_SECONDS),
+        )
+        payload = {
+            "model": params.get("backend") or model_name,
+            "messages": [{"role": "user", "content": "Reply OK"}],
+            "temperature": 0,
+            "max_tokens": 8,
+            "stream": False,
+        }
+        headers = {"Authorization": f"Bearer {api_key}"}
+        url = api_base.rstrip("/") + "/chat/completions"
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.post(url, headers=headers, json=payload)
+        if response.status_code >= 400:
+            return False, response.text or f"HTTP {response.status_code}"
+        data = response.json() if response.content else {}
+        if data.get("error"):
+            return False, str(data.get("error"))
+        if data.get("choices"):
+            return True, None
+        return False, "OpenAI-compatible probe returned no choices"
+    except Exception as e:
+        return False, f"OpenAI-compatible probe failed: {e}"
+
+
+async def _probe_worker_stream_llm(
+    model_name: str, host: str, port: int
+) -> Tuple[bool, Optional[str]]:
+    payload = {
+        "model": model_name,
+        "messages": [{"role": "human", "content": "Reply OK"}],
+        "temperature": 0,
+        "max_new_tokens": 8,
+        "echo": False,
+    }
+    url = f"http://{host}:{port}/api/worker/generate_stream"
+    try:
+        import httpx
+
+        timeout = httpx.Timeout(
+            _MODEL_HEALTH_PROBE_TIMEOUT_SECONDS,
+            connect=min(2.0, _MODEL_HEALTH_PROBE_TIMEOUT_SECONDS),
+        )
+        delimiter = b"\0"
+        buffer = b""
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            async with client.stream("POST", url, json=payload) as response:
+                response.raise_for_status()
+                async for raw_chunk in response.aiter_raw():
+                    buffer += raw_chunk
+                    while delimiter in buffer:
+                        chunk, buffer = buffer.split(delimiter, 1)
+                        if not chunk:
+                            continue
+                        data = json.loads(chunk.decode())
+                        if data.get("error_code") == 0:
+                            return True, None
+                        return False, data.get("text") or data.get("message")
+        return False, "LLM probe returned empty stream"
+    except Exception as e:
+        return False, f"LLM probe failed: {e}"
+
+
+async def _probe_llm_model_health(
+    model_name: str, host: str, port: int, params: Optional[Dict] = None
+) -> Tuple[bool, Optional[str]]:
+    cache_key = _probe_cache_key(model_name, host, port)
+    now = time.monotonic()
+    cached = _MODEL_HEALTH_PROBE_CACHE.get(cache_key)
+    if cached and cached[0] > now:
+        return cached[1], cached[2]
+
+    if params and params.get("provider") == "proxy/openai":
+        healthy, reason = await _probe_openai_compatible_llm(model_name, params)
+    else:
+        healthy, reason = await _probe_worker_stream_llm(model_name, host, port)
+
+    reason = _sanitize_health_reason(reason)
+    _MODEL_HEALTH_PROBE_CACHE[cache_key] = (
+        now + _MODEL_HEALTH_PROBE_TTL_SECONDS,
+        healthy,
+        reason,
+    )
+    return healthy, reason
+
+
+async def _build_model_responses(
+    controller: BaseModelController,
+    probe_llm_health: bool = True,
+) -> List[ModelResponse]:
+    responses = []
+    probe_targets = []
+    model_storage = None
+    try:
+        model_storage = get_model_storage()
+    except Exception as e:
+        logger.debug("Model storage is unavailable when listing models: %s", e)
+    managers = await controller.get_all_instances(
+        model_name="WorkerManager@service", healthy_only=True
+    )
+    manager_map = dict(map(lambda manager: (manager.host, manager), managers))
+    models = await controller.get_all_instances()
+    for model in models:
+        worker_name, worker_type = model.model_name.split("@")
+        if worker_type not in WorkerType.values():
+            continue
+        stored_params = None
+        provider = None
+        if model_storage:
+            try:
+                stored_models = model_storage.query_models(
+                    worker_name,
+                    worker_type,
+                    host=model.host,
+                    port=model.port,
+                )
+                if not stored_models:
+                    stored_models = model_storage.query_models(worker_name, worker_type)
+                if len(stored_models) == 1:
+                    stored_params = stored_models[0].params
+                    provider = stored_params.get("provider")
+            except Exception as e:
+                logger.debug(
+                    "Fetch stored params for model %s@%s failed: %s",
+                    worker_name,
+                    worker_type,
+                    e,
+                )
+        manager_host = model.host if manager_map.get(model.host) else ""
+        manager_port = manager_map[model.host].port if manager_map.get(model.host) else -1
+        health_reason = None if model.healthy else "No recent worker heartbeat"
+        response = ModelResponse(
+            model_name=worker_name,
+            worker_type=worker_type,
+            host=model.host,
+            port=model.port,
+            manager_host=manager_host,
+            manager_port=manager_port,
+            healthy=bool(model.healthy),
+            check_healthy=model.check_healthy,
+            last_heartbeat=model.str_last_heartbeat,
+            prompt_template=model.prompt_template,
+            health_reason=health_reason,
+            provider=provider,
+            params=stored_params,
+        )
+        if probe_llm_health and worker_type == WorkerType.LLM.value and model.healthy:
+            probe_targets.append(
+                (len(responses), worker_name, model.host, model.port, stored_params)
+            )
+        responses.append(response)
+
+    if probe_targets:
+        probe_results = await asyncio.gather(
+            *(
+                _probe_llm_model_health(model_name, host, port, stored_params)
+                for _, model_name, host, port, stored_params in probe_targets
+            ),
+            return_exceptions=True,
+        )
+        for target, probe_result in zip(probe_targets, probe_results):
+            index, _, _, _, _ = target
+            if isinstance(probe_result, Exception):
+                responses[index].healthy = False
+                responses[index].health_reason = _sanitize_health_reason(
+                    f"LLM probe failed: {probe_result}"
+                )
+                continue
+            healthy, reason = probe_result
+            responses[index].healthy = responses[index].healthy and healthy
+            responses[index].health_reason = None if healthy else reason or "LLM probe failed"
+    return responses
+
+
+def _resolve_default_model(responses: List[ModelResponse]) -> dict:
+    persisted = _read_default_model_name()
+    configured = _configured_default_llm()
+    healthy_llms = [
+        item.model_name
+        for item in responses
+        if item.worker_type == WorkerType.LLM.value and item.healthy
+    ]
+    for candidate, source in ((persisted, "user"), (configured, "config")):
+        if candidate and candidate in healthy_llms:
+            return {
+                "model_name": candidate,
+                "source": source,
+                "configured_model_name": persisted or configured,
+                "available": True,
+            }
+    return {
+        "model_name": healthy_llms[0] if healthy_llms else None,
+        "source": "fallback" if healthy_llms else None,
+        "configured_model_name": persisted or configured,
+        "available": bool(healthy_llms),
+    }
+
+
 @router.get("/health")
 async def health():
     """Health check endpoint"""
@@ -146,67 +422,58 @@ async def model_list(
     controller: BaseModelController = Depends(get_model_controller),
 ):
     try:
-        responses = []
-        model_storage = None
-        try:
-            model_storage = get_model_storage()
-        except Exception as e:
-            logger.debug("Model storage is unavailable when listing models: %s", e)
-        managers = await controller.get_all_instances(
-            model_name="WorkerManager@service", healthy_only=True
-        )
-        manager_map = dict(map(lambda manager: (manager.host, manager), managers))
-        models = await controller.get_all_instances()
-        for model in models:
-            worker_name, worker_type = model.model_name.split("@")
-            if worker_type in WorkerType.values():
-                stored_params = None
-                provider = None
-                if model_storage:
-                    try:
-                        stored_models = model_storage.query_models(
-                            worker_name,
-                            worker_type,
-                            host=model.host,
-                            port=model.port,
-                        )
-                        if not stored_models:
-                            stored_models = model_storage.query_models(
-                                worker_name, worker_type
-                            )
-                        if len(stored_models) == 1:
-                            stored_params = stored_models[0].params
-                            provider = stored_params.get("provider")
-                    except Exception as e:
-                        logger.debug(
-                            "Fetch stored params for model %s@%s failed: %s",
-                            worker_name,
-                            worker_type,
-                            e,
-                        )
-                manager_host = model.host if manager_map.get(model.host) else ""
-                manager_port = (
-                    manager_map[model.host].port if manager_map.get(model.host) else -1
-                )
-                response = ModelResponse(
-                    model_name=worker_name,
-                    worker_type=worker_type,
-                    host=model.host,
-                    port=model.port,
-                    manager_host=manager_host,
-                    manager_port=manager_port,
-                    healthy=model.healthy,
-                    check_healthy=model.check_healthy,
-                    last_heartbeat=model.str_last_heartbeat,
-                    prompt_template=model.prompt_template,
-                    provider=provider,
-                    params=stored_params,
-                )
-                responses.append(response)
+        responses = await _build_model_responses(controller)
         return Result.succ(responses)
 
     except Exception as e:
         return Result.failed(err_code="E000X", msg=f"model list error {e}")
+
+
+@router.get("/default-model")
+async def get_default_model(
+    controller: BaseModelController = Depends(get_model_controller),
+):
+    try:
+        responses = await _build_model_responses(controller)
+        return Result.succ(_resolve_default_model(responses))
+    except Exception as e:
+        logger.error("get default model failed %s", e)
+        return Result.failed(err_code="E000X", msg=f"get default model failed {e}")
+
+
+@router.put("/default-model")
+async def set_default_model(
+    request: DefaultModelRequest,
+    controller: BaseModelController = Depends(get_model_controller),
+):
+    try:
+        model_name = request.model_name.strip()
+        responses = await _build_model_responses(controller)
+        candidates = [
+            item
+            for item in responses
+            if item.worker_type == WorkerType.LLM.value and item.model_name == model_name
+        ]
+        if not candidates:
+            return Result.failed(err_code="E000X", msg="model not found")
+        if not any(item.healthy for item in candidates):
+            reason = next((item.health_reason for item in candidates if item.health_reason), None)
+            message = "model is not available"
+            if reason:
+                message = f"{message}: {reason}"
+            return Result.failed(err_code="E000X", msg=message)
+        _write_default_model_name(model_name)
+        return Result.succ(
+            {
+                "model_name": model_name,
+                "source": "user",
+                "configured_model_name": model_name,
+                "available": True,
+            }
+        )
+    except Exception as e:
+        logger.error("set default model failed %s", e)
+        return Result.failed(err_code="E000X", msg=f"set default model failed {e}")
 
 
 @router.post("/models/stop")
@@ -217,6 +484,7 @@ async def model_stop(
     try:
         request.params = {}
         await worker_manager.model_shutdown(request)
+        _clear_model_health_probe_cache()
         return Result.succ(True)
     except Exception as e:
         return Result.failed(err_code="E000X", msg=f"model stop failed {e}")
@@ -234,6 +502,7 @@ async def create_model(
     """
     try:
         await worker_manager.model_startup(request)
+        _clear_model_health_probe_cache()
         return Result.succ(True)
     except Exception as e:
         logger.error(f"model start failed {e}")
@@ -276,6 +545,7 @@ async def update_model(
             request.host = existing_workers[0].host
             request.port = existing_workers[0].port
         model_storage.save_or_update(request)
+        _clear_model_health_probe_cache()
         return Result.succ(True)
     except Exception as e:
         logger.error(f"model update failed {e}")
@@ -312,6 +582,7 @@ async def start_model(
             worker_type, request.model, healthy_only=False
         )
         if existing_workers:
+            _clear_model_health_probe_cache()
             return Result.succ(True)
 
         try:
@@ -322,8 +593,10 @@ async def start_model(
                 worker_type, request.model, healthy_only=False
             )
             if existing_workers:
+                _clear_model_health_probe_cache()
                 return Result.succ(True)
             raise
+        _clear_model_health_probe_cache()
         return Result.succ(True)
     except Exception as e:
         logger.error(f"model start failed {e}")

@@ -97,6 +97,8 @@ const DATA_DICTIONARY_MARKER = '<!-- dataman:document=data-dictionary -->';
 const BUSINESS_SEMANTICS_MARKER = '<!-- dataman:document=business-semantics -->';
 const FRONT_MATTER = /^---\s*\r?\n([\s\S]*?)\r?\n(?:---|\.\.\.)\s*(?:\r?\n|$)/;
 
+export const defaultAskDataSourceName = 'dataman_data';
+
 export const stripDocumentFrontMatter = (document: string) => document.replace(FRONT_MATTER, '').trim();
 
 export const normalizeQueryLimits = (limits?: Partial<Record<keyof QueryLimits, unknown>>): QueryLimits => {
@@ -174,5 +176,6 @@ export const parseSemanticMarkdown = (document: string): Partial<SceneEditorValu
 };
 
 export const defaultSceneEditorValues: Partial<SceneEditorValues> = {
+  data_source_name: defaultAskDataSourceName,
   query_limits: defaultQueryLimits,
 };

@@ -258,6 +258,13 @@ export const delSpace = (data: Record<string, string>) => {
 export const getModelList = () => {
   return GET<null, Array<IModelData>>('/api/v2/serve/model/models');
 };
+export const getDefaultModel = () =>
+  GET<null, { model_name: string | null; source?: string; available?: boolean }>('/api/v2/serve/model/default-model');
+export const setDefaultModel = (model_name: string) =>
+  PUT<{ model_name: string }, { model_name: string; source?: string; available?: boolean }>(
+    '/api/v2/serve/model/default-model',
+    { model_name },
+  );
 
 // Create and deploy a new model
 export const createModel = (data: StartModelParams) => {

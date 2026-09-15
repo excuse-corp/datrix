@@ -495,6 +495,8 @@ class OntologyLifecycleService:
             keys = scene_semantic_keys_from_source(source)
             if not keys and (snapshot := scene_snapshot(source)) is not None:
                 keys = semantic_keys(snapshot)
+            elif (snapshot := scene_snapshot(source)) is not None:
+                keys.update(semantic_keys(snapshot))
             if semantic_key not in keys:
                 issues.append(
                     OntologyValidationIssue(
@@ -565,23 +567,63 @@ def _default_ontology_llm_generator(
                 auto_convert_message=True,
             )
             models = await llm_client.models()
-            selected_model = model_name or (models[0].model if models else None)
-            if not selected_model:
+            available_models = {item.model for item in models}
+            # Keep Ontology generation aligned with the application's default LLM.
+            # The explicit argument remains useful for tests and integrations.
+            configured_model = None
+            if model_name is None:
+                try:
+                    import json
+                    from pathlib import Path
+
+                    configured_model = json.loads(
+                        Path("pilot/meta_data/default_model.json").read_text(
+                            encoding="utf-8"
+                        )
+                    ).get("model_name")
+                except Exception:
+                    configured_model = None
+                try:
+                    from dbgpt_app.config import ApplicationConfig
+
+                    app_config = cfg.parse_config(ApplicationConfig, hook_section="hooks")
+                    configured_model = configured_model or app_config.models.default_llm
+                except Exception:
+                    configured_model = None
+            if model_name:
+                candidate_models = [model_name]
+            else:
+                candidate_models = []
+                if configured_model and configured_model in available_models:
+                    candidate_models.append(configured_model)
+                candidate_models.extend(
+                    item.model for item in models if item.model not in candidate_models
+                )
+            if not candidate_models:
                 raise RuntimeError("No models available for Ontology generator")
-            request = ModelRequest.build_request(
-                selected_model,
-                messages=[
-                    ModelMessage(
-                        role=ModelMessageRoleType.HUMAN,
-                        content=prompt,
-                    )
-                ],
-                temperature=0,
-            )
-            response = await llm_client.generate(request)
-            if not response.success or not response.has_text:
-                raise RuntimeError("Ontology generator model generation failed")
-            return response.text
+            last_error = None
+            for selected_model in candidate_models:
+                request = ModelRequest.build_request(
+                    selected_model,
+                    messages=[
+                        ModelMessage(
+                            role=ModelMessageRoleType.HUMAN,
+                            content=prompt,
+                        )
+                    ],
+                    temperature=0,
+                )
+                try:
+                    response = await llm_client.generate(request)
+                except Exception as exc:
+                    last_error = exc
+                    continue
+                if response.success and response.has_text:
+                    return response.text
+                last_error = RuntimeError(
+                    f"Ontology generator model {selected_model} generation failed"
+                )
+            raise last_error or RuntimeError("Ontology generator model generation failed")
         except Exception as exc:
             raise OntologyLLMGenerationError(
                 "ONTOLOGY_LLM_UNAVAILABLE", f"模型暂时不可用，未生成草稿：{exc}"

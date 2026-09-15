@@ -10,6 +10,7 @@ export type IModelData = {
   manager_port: number;
   healthy: boolean;
   check_healthy: boolean;
+  health_reason?: string | null;
   prompt_template: string;
   last_heartbeat: string;
   stream_api: string;

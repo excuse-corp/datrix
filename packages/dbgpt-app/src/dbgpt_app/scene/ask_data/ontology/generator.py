@@ -469,15 +469,29 @@ def scene_semantic_keys_from_source(source: Any) -> set[str]:
     field_rows = _dictionary_rows(documents.get("data_dictionary_md", ""))
     scene_entities = _entity_candidates(normalized, config, documents, field_rows)
     primary_entity_id = scene_entities[0]["id"] if scene_entities else "business_entity"
+    binding_entity_id = _binding_primary_entity_id(
+        scene_entities, field_rows, primary_entity_id
+    )
+    binding_entity_ids = _binding_entity_ids(scene_entities, binding_entity_id)
     keys: set[str] = set()
     if config is not None:
         keys.update(str(item.key) for item in config.dimensions if item.key)
         keys.update(str(item.key) for item in config.metrics if item.key)
+    amount_fields = False
+    date_fields = False
     for row in field_rows:
         field = row.get("field") or row.get("name") or ""
-        if field:
-            keys.add(_stable_id(field))
-    for metric in _metric_candidates(config, field_rows):
+        if not field:
+            continue
+        field_key = _stable_id(field)
+        keys.add(field_key)
+        amount_fields = amount_fields or _is_amount_like_field(row)
+        date_fields = date_fields or _is_date_like_field(row)
+        for entity_id in binding_entity_ids:
+            for suffix in _field_binding_suffixes(entity_id, field_key, row):
+                keys.add(f"{entity_id}.{suffix}")
+    metric_candidates = _metric_candidates(config, field_rows)
+    for metric in metric_candidates:
         entity_id = metric.get("entity_id") or _metric_entity_id(
             metric, scene_entities, primary_entity_id
         )
@@ -485,7 +499,144 @@ def scene_semantic_keys_from_source(source: Any) -> set[str]:
         keys.add(metric.get("semantic_key") or metric_id)
         keys.add(metric_id)
         keys.add(metric["key"])
+        for alias_entity_id in binding_entity_ids:
+            for suffix in _field_binding_suffixes(
+                alias_entity_id,
+                _stable_id(metric["key"]),
+                metric,
+            ):
+                keys.add(f"{alias_entity_id}.{suffix}")
+    for entity_id in binding_entity_ids:
+        keys.add(f"{entity_id}.count")
+        if amount_fields:
+            keys.add(f"{entity_id}.amount_missing_count")
+            keys.add(f"{entity_id}.missing_amount_count")
+        if date_fields:
+            keys.add(f"{entity_id}.date_missing_count")
+            keys.add(f"{entity_id}.missing_date_count")
+        if _has_contract_amount(field_rows) and _has_paid_amount(field_rows):
+            keys.add(f"{entity_id}.contract_paid_ratio")
+            keys.add(f"{entity_id}.contract_unpaid_balance")
+            keys.add(f"{entity_id}.paid_ratio")
+            keys.add(f"{entity_id}.unpaid_balance")
     return {key for key in keys if key}
+
+
+def _binding_primary_entity_id(
+    entities: list[dict[str, str]], field_rows: list[dict[str, str]], fallback: str
+) -> str:
+    available = {entity["id"] for entity in entities}
+    scores = {entity_id: 0 for entity_id in available}
+    for row in field_rows:
+        text = " ".join(
+            str(row.get(key) or "") for key in ("field", "name", "description")
+        ).lower()
+        for entity_id, _, tokens, _ in _ENTITY_RULES:
+            if entity_id not in scores:
+                continue
+            if any(token.lower() in text for token in tokens):
+                scores[entity_id] += 1
+    known_ids = {entity_id for entity_id, *_ in _ENTITY_RULES}
+    ranked = sorted(
+        (
+            (score, entity_id)
+            for entity_id, score in scores.items()
+            if entity_id in known_ids
+        ),
+        key=lambda item: (-item[0], item[1]),
+    )
+    if ranked and ranked[0][0] > 0:
+        return ranked[0][1]
+    return (
+        fallback
+        if fallback in available
+        else (entities[0]["id"] if entities else fallback)
+    )
+
+
+def _binding_entity_ids(
+    entities: list[dict[str, str]], primary_entity_id: str
+) -> list[str]:
+    known_ids = {entity_id for entity_id, *_ in _ENTITY_RULES}
+    ordered = [primary_entity_id]
+    ordered.extend(
+        sorted(
+            entity["id"]
+            for entity in entities
+            if entity["id"] in known_ids and entity["id"] != primary_entity_id
+        )
+    )
+    return list(dict.fromkeys(item for item in ordered if item))
+
+
+def _field_binding_suffixes(
+    entity_id: str, field_key: str, row: dict[str, str]
+) -> set[str]:
+    suffixes = {field_key}
+    for prefix, *_ in _ENTITY_RULES:
+        marker = f"{prefix}_"
+        if field_key.startswith(marker):
+            suffixes.add(field_key[len(marker) :])
+    marker = f"{entity_id}_"
+    if field_key.startswith(marker):
+        suffixes.add(field_key[len(marker) :])
+    if _is_amount_like_field(row):
+        for suffix in list(suffixes):
+            if suffix and not suffix.endswith("_amount"):
+                suffixes.add(f"{suffix}_amount")
+    return {suffix for suffix in suffixes if suffix}
+
+
+def _is_amount_like_field(row: dict[str, str]) -> bool:
+    text = " ".join(
+        str(row.get(key) or "") for key in ("field", "name", "description")
+    ).lower()
+    return any(
+        token in text
+        for token in (
+            "金额",
+            "预算",
+            "成本",
+            "费用",
+            "收入",
+            "回款",
+            "付款",
+            "amount",
+            "budget",
+            "cost",
+            "fee",
+            "revenue",
+            "paid",
+            "payment",
+            "price",
+        )
+    )
+
+
+def _is_date_like_field(row: dict[str, str]) -> bool:
+    text = " ".join(
+        str(row.get(key) or "") for key in ("field", "name", "type", "description")
+    ).lower()
+    return any(token in text for token in ("日期", "时间", "date", "time"))
+
+
+def _has_contract_amount(field_rows: list[dict[str, str]]) -> bool:
+    return any(
+        "contract" in _stable_id(row.get("field") or row.get("name") or "")
+        and _is_amount_like_field(row)
+        for row in field_rows
+    )
+
+
+def _has_paid_amount(field_rows: list[dict[str, str]]) -> bool:
+    return any(
+        any(
+            token in _stable_id(row.get("field") or row.get("name") or "")
+            for token in ("paid", "payment")
+        )
+        and _is_amount_like_field(row)
+        for row in field_rows
+    )
 
 
 def _dictionary_rows(markdown: str) -> list[dict[str, str]]:

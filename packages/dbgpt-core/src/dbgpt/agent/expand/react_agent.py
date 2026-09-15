@@ -44,6 +44,8 @@ IMPORTANT:
 - If the task is complete, use exactly:
 Thought: ...
 Phase: 返回最终结果
+Action Intention: 返回答案
+Action Reason: 任务已完成
 Action: terminate
 Action Input: {"result": "final answer"}
 - Do not put the final answer as plain markdown outside Action Input.

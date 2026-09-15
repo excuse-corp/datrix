@@ -1,4 +1,9 @@
-import { queryLimitDefinitions, stripDocumentFrontMatter, type SceneEditorValues } from '@/utils/ask-data-semantic';
+import {
+  defaultAskDataSourceName,
+  queryLimitDefinitions,
+  stripDocumentFrontMatter,
+  type SceneEditorValues,
+} from '@/utils/ask-data-semantic';
 import {
   ControlOutlined,
   DatabaseOutlined,
@@ -7,7 +12,7 @@ import {
   UploadOutlined,
 } from '@ant-design/icons';
 import type { UploadProps } from 'antd';
-import { Alert, Button, Form, Input, InputNumber, Switch, Upload, message } from 'antd';
+import { Alert, Button, Form, Input, InputNumber, Select, Switch, Upload, message } from 'antd';
 import type { ReactNode } from 'react';
 
 type SceneEditorFormProps = {
@@ -88,10 +93,14 @@ export default function SceneEditorForm({
         <SectionTitle icon={<DatabaseOutlined />} title='数据绑定' description='关联已配置的数据源与业务表或视图' />
         <div className='grid gap-x-5 px-5 pt-5 md:grid-cols-2 md:px-6'>
           <Form.Item name='data_source_name' label='数据源名称' rules={required('数据源名称')}>
-            <Input allowClear placeholder='例如：dataman_data' />
+            <Select
+              disabled
+              options={[{ label: defaultAskDataSourceName, value: defaultAskDataSourceName }]}
+              placeholder={defaultAskDataSourceName}
+            />
           </Form.Item>
           <Form.Item name='view_name' label='绑定对象' rules={required('绑定对象')}>
-            <Input allowClear placeholder='例如：sync.pcm_project_info 或 reporting.vw_contract_report' />
+            <Input allowClear placeholder='例如：reporting.vw_information_project_contract_report' />
           </Form.Item>
         </div>
 

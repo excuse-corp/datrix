@@ -4,6 +4,7 @@ from httpx import AsyncClient
 from unittest.mock import AsyncMock, MagicMock
 
 from dbgpt.component import SystemApp
+from dbgpt.model.base import ModelInstance
 from dbgpt.model.cluster import WorkerStartupRequest
 from dbgpt.model.parameter import WorkerType
 from dbgpt.storage.metadata import db
@@ -15,8 +16,9 @@ from dbgpt_serve.core.tests.conftest import (  # noqa: F401
     system_app,
 )
 
-from ..api.endpoints import init_endpoints, router
+from ..api.endpoints import init_endpoints, model_list, router, set_default_model
 from ..api.endpoints import start_model
+from ..api.schemas import DefaultModelRequest, ModelResponse
 from ..config import SERVE_CONFIG_KEY_PREFIX
 
 
@@ -171,6 +173,126 @@ async def test_start_model_handles_concurrent_start():
 
     assert response.success is True
     worker_manager.model_startup.assert_awaited_once_with(request)
+
+
+@pytest.mark.asyncio
+async def test_model_list_uses_generation_probe_for_llm_health(monkeypatch):
+    controller = MagicMock()
+    controller.get_all_instances = AsyncMock(
+        side_effect=[
+            [
+                ModelInstance(
+                    model_name="WorkerManager@service",
+                    host="127.0.0.1",
+                    port=7771,
+                    healthy=True,
+                )
+            ],
+            [
+                ModelInstance(
+                    model_name="bad-model@llm",
+                    host="127.0.0.1",
+                    port=7771,
+                    healthy=True,
+                )
+            ],
+        ]
+    )
+
+    async def failed_probe(model_name, host, port, params=None):
+        return False, "401 Unauthorized"
+
+    monkeypatch.setattr(
+        "dbgpt_serve.model.api.endpoints._probe_llm_model_health", failed_probe
+    )
+
+    response = await model_list(controller)
+
+    assert response.success is True
+    assert response.data[0].model_name == "bad-model"
+    assert response.data[0].healthy is False
+    assert response.data[0].health_reason == "401 Unauthorized"
+
+
+def test_resolve_default_model_falls_back_to_healthy_llm(monkeypatch, tmp_path):
+    from ..api import endpoints
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "pilot" / "meta_data").mkdir(parents=True)
+    (tmp_path / "pilot" / "meta_data" / "default_model.json").write_text(
+        '{"model_name": "bad-model"}', encoding="utf-8"
+    )
+    monkeypatch.setattr(endpoints, "_configured_default_llm", lambda: None)
+
+    default_model = endpoints._resolve_default_model(
+        [
+            ModelResponse(
+                model_name="bad-model",
+                worker_type="llm",
+                host="127.0.0.1",
+                port=7771,
+                manager_host="127.0.0.1",
+                manager_port=7771,
+                healthy=False,
+                check_healthy=True,
+            ),
+            ModelResponse(
+                model_name="good-model",
+                worker_type="llm",
+                host="127.0.0.1",
+                port=7771,
+                manager_host="127.0.0.1",
+                manager_port=7771,
+                healthy=True,
+                check_healthy=True,
+            ),
+        ]
+    )
+
+    assert default_model["model_name"] == "good-model"
+    assert default_model["source"] == "fallback"
+    assert default_model["configured_model_name"] == "bad-model"
+
+
+@pytest.mark.asyncio
+async def test_set_default_model_rejects_unhealthy_llm(monkeypatch, tmp_path):
+    controller = MagicMock()
+    controller.get_all_instances = AsyncMock(
+        side_effect=[
+            [
+                ModelInstance(
+                    model_name="WorkerManager@service",
+                    host="127.0.0.1",
+                    port=7771,
+                    healthy=True,
+                )
+            ],
+            [
+                ModelInstance(
+                    model_name="bad-model@llm",
+                    host="127.0.0.1",
+                    port=7771,
+                    healthy=True,
+                )
+            ],
+        ]
+    )
+
+    async def failed_probe(model_name, host, port, params=None):
+        return False, "401 Unauthorized"
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "dbgpt_serve.model.api.endpoints._probe_llm_model_health", failed_probe
+    )
+
+    response = await set_default_model(
+        DefaultModelRequest(model_name="bad-model"), controller
+    )
+
+    assert response.success is False
+    assert "model is not available" in response.err_msg
+    assert not (tmp_path / "pilot" / "meta_data" / "default_model.json").exists()
 
 
 # Add more test cases according to your own logic

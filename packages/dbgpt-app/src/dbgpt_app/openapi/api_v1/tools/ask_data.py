@@ -69,6 +69,35 @@ def _duration_ms(started: float) -> int:
     return max(0, int((monotonic() - started) * 1000))
 
 
+def _scene_display_name(scene_id: str, snapshot: Any | None = None) -> str:
+    """Return the user-facing scene name for progress events."""
+    if snapshot is not None:
+        projection = getattr(snapshot, "routing_projection", {}) or {}
+        if isinstance(projection, dict):
+            for key in ("name", "scene_name", "display_name"):
+                value = str(projection.get(key) or "").strip()
+                if value:
+                    return value
+    try:
+        from dbgpt_app.scene.ask_data.api import scenes
+
+        scene = scenes._repository.get_scene(scene_id, include_deleted=True)
+        value = str(getattr(scene, "name", "") or "").strip()
+        if value:
+            return value
+    except Exception:
+        pass
+    return scene_id
+
+
+def _scene_id_from_task_id(task_id: str) -> str:
+    if task_id.startswith("route_scene_"):
+        return task_id.removeprefix("route_")
+    if task_id.startswith("route_"):
+        return task_id.removeprefix("route_")
+    return task_id
+
+
 def _normalize_ask_data_question(question: str) -> str:
     return " ".join(question.split())
 
@@ -245,7 +274,9 @@ def make_ask_data_tools(
             )
             if plan.action == "execute":
                 planning_started = monotonic()
-                planning_detail = "、".join(task.scene_id for task in plan.tasks)
+                planning_detail = "、".join(
+                    _scene_display_name(task.scene_id) for task in plan.tasks
+                )
                 await call_stream_callback(
                     "ask_data.stage",
                     {
@@ -463,12 +494,15 @@ async def _build_scene_sqls(
         snapshot = scenes._snapshot_service.active(task.scene_id)
         if snapshot is None:
             raise ValueError("SCENE_NOT_ACTIVE")
+        scene_name = _scene_display_name(task.scene_id, snapshot)
         await stream_callback(
             "ask_data.stage",
             {
                 "stage": f"subagent-{task.scene_id}",
-                "title": f"场景子 Agent：{task.scene_id}",
+                "title": f"场景子 Agent：{scene_name}",
                 "detail": "读取数据字典和业务语义文档",
+                "scene_id": task.scene_id,
+                "scene_name": scene_name,
             },
         )
         try:
@@ -482,10 +516,12 @@ async def _build_scene_sqls(
                 "ask_data.stage",
                 {
                     "stage": f"sql-gen-{task.scene_id}",
-                    "title": f"SQL 生成成功：{task.scene_id}",
+                    "title": f"SQL 生成成功：{scene_name}",
                     "detail": "已通过绑定表/视图校验",
                     "status": "done",
                     "duration_ms": _duration_ms(task_started),
+                    "scene_id": task.scene_id,
+                    "scene_name": scene_name,
                 },
             )
             return task.task_id, sql
@@ -494,10 +530,12 @@ async def _build_scene_sqls(
                 "ask_data.stage",
                 {
                     "stage": f"sql-gen-{task.scene_id}",
-                    "title": f"SQL 生成失败：{task.scene_id}",
+                    "title": f"SQL 生成失败：{scene_name}",
                     "detail": str(exc),
                     "status": "failed",
                     "duration_ms": _duration_ms(task_started),
+                    "scene_id": task.scene_id,
+                    "scene_name": scene_name,
                 },
             )
             raise
@@ -512,27 +550,34 @@ async def _emit_query_outcome_stages(
 ) -> None:
     for result in payload.get("results") or []:
         scene_id = result.get("scene_id") or result.get("task_id") or "unknown"
+        scene_name = _scene_display_name(str(scene_id))
         await stream_callback(
             "ask_data.stage",
             {
                 "stage": f"sql-exec-{scene_id}",
-                "title": f"SQL 执行成功：{scene_id}",
+                "title": f"SQL 执行成功：{scene_name}",
                 "detail": f"{result.get('row_count', 0)} 行",
                 "status": "done",
                 "duration_ms": result.get("duration_ms"),
+                "scene_id": scene_id,
+                "scene_name": scene_name,
             },
         )
     for error in payload.get("errors") or []:
         task_id = error.get("task_id") or "unknown"
+        scene_id = error.get("scene_id") or _scene_id_from_task_id(str(task_id))
+        scene_name = _scene_display_name(str(scene_id))
         await stream_callback(
             "ask_data.stage",
             {
                 "stage": f"sql-exec-{task_id}",
-                "title": f"SQL 执行失败：{task_id}",
+                "title": f"SQL 执行失败：{scene_name}",
                 "detail": error.get("message") or error.get("code") or "查询失败",
                 "status": "failed",
                 "duration_ms": error.get("duration_ms")
                 or payload.get("querying_duration_ms"),
+                "scene_id": scene_id,
+                "scene_name": scene_name,
             },
         )
 

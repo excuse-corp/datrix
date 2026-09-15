@@ -9,6 +9,7 @@ import {
   previewOntology,
   saveOntologyDraft,
   saveOntologyLayout,
+  validateOntologyRevision,
   type OntologyGraph,
   type OntologyIssue,
   type OntologyRevision,
@@ -190,17 +191,18 @@ export default function OntologyPage() {
     }
     setSaving(true);
     try {
-      const preview = await previewOntology(markdown);
-      setIssues(preview.issues);
-      if (!preview.valid || preview.issues.length > 0) {
-        message.warning('请先处理编译检查提醒再发布');
+      const validation = await validateOntologyRevision(draft.revision);
+      setDraft(validation.revision);
+      setIssues(validation.issues);
+      if (!validation.valid || validation.issues.length > 0) {
+        message.warning('请先处理发布检查提醒再发布');
         return;
       }
-      setGraph(preview.graph);
-      const snapshot = await buildOntologySnapshot(draft.revision);
+      await loadGraph(validation.revision.revision, true);
+      const snapshot = await buildOntologySnapshot(validation.revision.revision);
       const activeSnapshot = await activateOntologySnapshot(snapshot.snapshot_id);
       setActive(activeSnapshot);
-      message.success(`Ontology v${draft.revision} 已发布`);
+      message.success(`Ontology v${validation.revision.revision} 已发布`);
       await refresh();
     } catch (error) {
       message.error(error instanceof Error ? error.message : '发布失败，请先处理格式提醒或场景语义文档版本变更');
@@ -212,11 +214,17 @@ export default function OntologyPage() {
   const compileCheck = async () => {
     setChecking(true);
     try {
-      const result = await previewOntology(markdown);
+      const result =
+        !changed && draft ? await validateOntologyRevision(draft.revision) : await previewOntology(markdown);
       setIssues(result.issues);
+      if ('revision' in result) {
+        setDraft(result.revision);
+        setMarkdown(result.revision.markdown);
+        await loadGraph(result.revision.revision, true);
+      }
       if (result.valid) {
-        setGraph(result.graph);
-        message.success('格式检查通过');
+        if (!('revision' in result)) setGraph(result.graph);
+        message.success(changed ? '格式检查通过，请保存后再发布' : '发布检查通过');
       } else {
         message.warning('格式检查完成，请查看提醒');
       }

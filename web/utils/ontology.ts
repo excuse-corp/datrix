@@ -121,7 +121,7 @@ async function request<T>(path = '', init?: RequestInit): Promise<T> {
 
 function errorMessage(payload: Envelope<unknown> | undefined, status: number) {
   if (!payload) return `请求失败（HTTP ${status}）`;
-  if (typeof payload.detail === 'string') return payload.detail;
+  if (typeof payload.detail === 'string') return readableMessage(payload.detail);
   if (Array.isArray(payload.detail)) {
     const first = payload.detail[0];
     if (first?.msg) return String(first.msg);
@@ -129,9 +129,20 @@ function errorMessage(payload: Envelope<unknown> | undefined, status: number) {
   if (payload.detail && typeof payload.detail === 'object' && 'message' in payload.detail) {
     return String(payload.detail.message);
   }
-  if (payload.err_msg) return payload.err_msg;
-  if (payload.message) return payload.message;
+  if (payload.err_msg) return readableMessage(payload.err_msg);
+  if (payload.message) return readableMessage(payload.message);
   return `请求失败（HTTP ${status}）`;
+}
+
+function readableMessage(value: string) {
+  try {
+    const parsed = JSON.parse(value.replace(/'/g, '"')) as { message?: unknown };
+    if (parsed && typeof parsed.message === 'string') return parsed.message;
+  } catch {
+    const match = value.match(/['"]message['"]\s*:\s*['"]([^'"]+)['"]/);
+    if (match?.[1]) return match[1];
+  }
+  return value;
 }
 
 export const getOntology = () =>

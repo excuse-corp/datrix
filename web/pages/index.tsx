@@ -157,6 +157,9 @@ const normalizeAskDataVisibleText = (
   return replaceAskDataSceneIdsWithNames(replaced, sceneNameById);
 };
 
+const hasAskDataSceneReference = (...values: unknown[]): boolean =>
+  values.some(value => typeof value === 'string' && INTERNAL_SCENE_ID_REGEX.test(value));
+
 const getAskDataStageDisplay = (stage?: unknown, sceneNameById: AskDataSceneNameLookup = {}): string => {
   const stageText = textValue(stage);
   if (!stageText) return '';
@@ -436,8 +439,9 @@ const buildAskDataFallbackSteps = (resultPayload: any, sceneNameById: AskDataSce
 };
 
 const normalizeAskDataStepRecord = (step: any, sceneNameById: AskDataSceneNameLookup = {}) => {
-  if (!isAskDataStageStep(step)) return step;
   const stageSceneId = getAskDataStageSceneId(step?.id, step?.title, step?.detail);
+  const shouldNormalize = isAskDataStageStep(step) || hasAskDataSceneReference(step?.id, step?.title, step?.detail);
+  if (!shouldNormalize) return step;
   return {
     ...step,
     title: normalizeAskDataVisibleText(step?.title, sceneNameById, stageSceneId) || step?.title,
@@ -459,7 +463,11 @@ const mergeAskDataFallbackSteps = (
   const safeRawSteps = Array.isArray(rawSteps) ? rawSteps : [];
   const payloadSceneNameById = buildAskDataSceneNameLookup(resultPayload, sceneNameById);
   const fallbackSteps = buildAskDataFallbackSteps(resultPayload, payloadSceneNameById);
-  if (!fallbackSteps.length) return safeRawSteps;
+  if (!fallbackSteps.length) {
+    return safeRawSteps.map((step, idx) =>
+      normalizeAskDataStepRecord({ ...step, step: idx + 1 }, payloadSceneNameById),
+    );
+  }
 
   const rawById = new Map(safeRawSteps.map(step => [String(step?.id || ''), step]));
   const fallbackIds = new Set(fallbackSteps.map(step => step.id));
@@ -1006,17 +1014,26 @@ const Playground: NextPage = () => {
 
   useEffect(() => {
     let cancelled = false;
-    void listScenes({ page_size: 1000 })
-      .then(response => {
-        if (cancelled) return;
-        const items = response.data?.items || [];
-        const nextLookup = items.reduce<AskDataSceneNameLookup>((lookup, scene: SceneSummary) => {
-          if (scene.scene_id && scene.name) lookup[scene.scene_id] = scene.name;
-          return lookup;
-        }, {});
-        setAskDataSceneNameById(prev => ({ ...prev, ...nextLookup }));
-      })
-      .catch(() => undefined);
+    void (async () => {
+      const pageSize = 100;
+      let page = 1;
+      const nextLookup: AskDataSceneNameLookup = {};
+
+      while (!cancelled) {
+        const response = await listScenes({ page, page_size: pageSize });
+        const data = response.data;
+        const items = data?.items || [];
+
+        items.forEach((scene: SceneSummary) => {
+          if (scene.scene_id && scene.name) nextLookup[scene.scene_id] = scene.name;
+        });
+
+        if (!data?.total || page * pageSize >= data.total || items.length === 0) break;
+        page += 1;
+      }
+
+      if (!cancelled) setAskDataSceneNameById(prev => ({ ...prev, ...nextLookup }));
+    })().catch(() => undefined);
     return () => {
       cancelled = true;
     };
@@ -2235,8 +2252,17 @@ const Playground: NextPage = () => {
         if (payload.type === 'ask_data.stage') {
           const callId = getAskDataCallId(payload);
           const id = getAskDataStageId(callId, payload.stage);
-          const sceneNameLookup = askDataSceneNameByIdRef.current;
-          const stageSceneId = getAskDataStageSceneId(payload.stage, payload.title, payload.detail);
+          const eventSceneId = textValue(payload.scene_id);
+          const eventSceneName = textValue(payload.scene_name || payload.name || payload.display_name);
+          const sceneNameLookup =
+            eventSceneId && eventSceneName
+              ? { ...askDataSceneNameByIdRef.current, [eventSceneId]: eventSceneName }
+              : askDataSceneNameByIdRef.current;
+          if (eventSceneId && eventSceneName && askDataSceneNameByIdRef.current[eventSceneId] !== eventSceneName) {
+            askDataSceneNameByIdRef.current = sceneNameLookup;
+            setAskDataSceneNameById(prev => ({ ...prev, [eventSceneId]: eventSceneName }));
+          }
+          const stageSceneId = eventSceneId || getAskDataStageSceneId(payload.stage, payload.title, payload.detail);
           const stageTitle = normalizeAskDataVisibleText(payload.title, sceneNameLookup, stageSceneId) || payload.title;
           const stageDetailText = normalizeAskDataVisibleText(payload.detail, sceneNameLookup, stageSceneId);
           const stageStatus: ExecutionStep['status'] =
@@ -2253,6 +2279,7 @@ const Playground: NextPage = () => {
               detail: stageDetailText,
               status: payload.status || stageStatus,
               duration_ms: payload.duration_ms,
+              scene: eventSceneId ? { scene_id: eventSceneId, name: eventSceneName } : undefined,
             },
             sceneNameLookup,
           );

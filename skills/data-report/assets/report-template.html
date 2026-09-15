@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{REPORT_TITLE}}</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --primary: #1a56db;
+    --primary-light: #e8f0fe;
+    --primary-dark: #0f2b5b;
+    --accent: #0ea5e9;
+    --success: #10b981;
+    --warning: #f59e0b;
+    --danger: #ef4444;
+    --bg: #f3f6fb;
+    --card-bg: #ffffff;
+    --text: #1e293b;
+    --text-muted: #64748b;
+    --border: #e2e8f0;
+    --shadow: 0 2px 8px rgba(26,86,219,0.08);
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+         background:var(--bg); color:var(--text); line-height:1.6; }
+  .header { background:linear-gradient(135deg,var(--primary-dark) 0%,var(--primary) 100%);
+            color:#fff; padding:32px 40px; }
+  .header h1 { font-size:26px; font-weight:700; letter-spacing:1px; }
+  .header .subtitle { font-size:14px; opacity:.8; margin-top:6px; }
+  .container { max-width:1200px; margin:0 auto; padding:28px 24px; }
+  .kpi-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+              gap:18px; margin-bottom:28px; }
+  .kpi-card { background:var(--card-bg); border-radius:12px; padding:22px 24px;
+              box-shadow:var(--shadow); border-left:4px solid var(--primary); }
+  .kpi-card .label { font-size:13px; color:var(--text-muted); }
+  .kpi-card .value { font-size:30px; font-weight:700; color:var(--primary);
+                     margin:6px 0 2px; }
+  .kpi-card .trend { font-size:12px; }
+  .trend.up { color:var(--success); } .trend.down { color:var(--danger); }
+  .section-title { font-size:18px; font-weight:700; color:var(--primary-dark);
+                   margin:24px 0 14px; padding-left:12px;
+                   border-left:4px solid var(--primary); }
+  .card { background:var(--card-bg); border-radius:12px; padding:24px;
+          box-shadow:var(--shadow); margin-bottom:22px; }
+  .chart-row { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr));
+               gap:22px; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th { background:var(--primary-light); color:var(--primary-dark); text-align:left;
+       padding:12px 14px; font-weight:600; }
+  td { padding:11px 14px; border-bottom:1px solid var(--border); }
+  tr:hover td { background:#f8fafc; }
+  .badge { display:inline-block; padding:2px 10px; border-radius:20px;
+           font-size:12px; font-weight:600; }
+  .badge.blue { background:var(--primary-light); color:var(--primary); }
+  .badge.green { background:#d1fae5; color:#047857; }
+  .badge.orange { background:#fef3c7; color:#b45309; }
+  .badge.red { background:#fee2e2; color:#b91c1c; }
+  .footer { text-align:center; padding:24px; color:var(--text-muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>{{REPORT_TITLE}}</h1>
+  <div class="subtitle">{{REPORT_SUBTITLE}}</div>
+</div>
+<div class="container">
+  <!-- KPI_CARDS -->
+  <div class="kpi-grid">{{KPI_CARDS}}</div>
+  <!-- CHARTS -->
+  {{CHART_SECTIONS}}
+  <!-- TABLES -->
+  {{TABLE_SECTIONS}}
+</div>
+<div class="footer">{{FOOTER_TEXT}}</div>
+<script>
+{{CHART_SCRIPTS}}
+</script>
+</body>
+</html>

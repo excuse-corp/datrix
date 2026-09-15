@@ -68,9 +68,9 @@ start_backend() {
   log "Starting Datrix with conda environment dataman"
   (
     cd "$ROOT_DIR"
-    exec conda run --no-capture-output -n dataman \
+    exec nohup setsid conda run --no-capture-output -n dataman \
       dbgpt start webserver --config "$DBGPT_CONFIG" --yes
-  ) >"$BACKEND_LOG_FILE" 2>&1 &
+  ) >"$BACKEND_LOG_FILE" 2>&1 </dev/null &
   local backend_pid=$!
   echo "$backend_pid" >"$BACKEND_PID_FILE"
 

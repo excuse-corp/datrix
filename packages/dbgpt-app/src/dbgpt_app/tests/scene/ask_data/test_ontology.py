@@ -11,6 +11,7 @@ from dbgpt_app.scene.ask_data.ontology import (
 from dbgpt_app.scene.ask_data.ontology.fragments import source_snapshot_refs
 from dbgpt_app.scene.ask_data.ontology.generator import (
     generate_ontology_markdown_from_scene_sources,
+    scene_semantic_keys_from_source,
 )
 from dbgpt_app.scene.ask_data.ontology.llm_generator import (
     OntologyLLMGenerationError,
@@ -199,6 +200,104 @@ def test_source_manifest_uses_semantic_md_hash_name():
             "semantic_md_hash": "sha256:semantic",
         }
     ]
+
+
+def test_scene_semantic_keys_include_business_binding_aliases():
+    scene = _scene_snapshot("snap_project_v2").model_copy(
+        update={"scene_id": "project_analysis", "revision_id": "2"}
+    )
+    semantic_md = _project_semantic_markdown_without_query_model()
+
+    keys = scene_semantic_keys_from_source(
+        {"snapshot": scene, "semantic_md": semantic_md}
+    )
+
+    assert {
+        "project.count",
+        "project.contract_amount",
+        "project.contract_paid_amount",
+        "project.budget_amount",
+        "project.contract_paid_ratio",
+        "project.contract_unpaid_balance",
+        "project.amount_missing_count",
+        "project.date_missing_count",
+    }.issubset(keys)
+
+
+def test_publish_validation_accepts_business_scene_binding_aliases():
+    service = OntologyLifecycleService(InMemoryOntologyRepository())
+    draft = service.draft(user_id="admin")
+    scene = _scene_snapshot("snap_project_v2").model_copy(
+        update={"scene_id": "project_analysis", "revision_id": "2"}
+    )
+    source = {
+        "snapshot": scene,
+        "semantic_md": _project_semantic_markdown_without_query_model(),
+    }
+    saved = service.save_draft(
+        markdown=(
+            DEFAULT_ONTOLOGY_MARKDOWN
+            + """
+## 业务实体
+
+| ID | 名称 | 别名 | 定义 |
+| --- | --- | --- | --- |
+| ent_project | 项目 |  | 项目 |
+
+## 指标
+
+| ID | 名称 | 所属实体 | 单位 | 计算公式 | 来源场景 |
+| --- | --- | --- | --- | --- | --- |
+| met_project_count | 项目数量 | ent_project | 个 | 按 project_id 去重计数 | project_analysis |
+| met_contract_amount | 合同金额 | ent_project | 元 | project_contract_amount 求和 | project_analysis |
+| met_contract_paid_ratio | 合同已付比例 | ent_project | % | contract_paid_amount / project_contract_amount | project_analysis |
+
+## 场景绑定
+
+| 场景 | Ontology 对象 | 场景语义键 |
+| --- | --- | --- |
+| project_analysis | met_project_count | project.count |
+| project_analysis | met_contract_amount | project.contract_amount |
+| project_analysis | met_contract_paid_ratio | project.contract_paid_ratio |
+"""
+        ),
+        user_id="admin",
+        expected_revision=draft.revision,
+    )
+    saved = service.repository.save_source_scene_snapshots(
+        saved.revision, source_snapshot_refs([source])
+    )
+
+    snapshot = service.build_snapshot(saved.revision, [source])
+
+    assert snapshot.revision == saved.revision
+
+
+def _project_semantic_markdown_without_query_model() -> str:
+    return """---
+schema_version: "1"
+scene_id: project_analysis
+name: 信息化项目数据查询
+description: 查询项目、合同金额、付款、项目阶段、负责人、联系人、部门和供应商等信息。
+data_source: dataman_data
+view: sync.pcm_project_info
+---
+<!-- dataman:document=data-dictionary -->
+# 数据字典
+
+| 序号 | 字段名 | 中文名 | PostgreSQL 类型 | 来源口径 |
+| --- | --- | --- | --- | --- |
+| 1 | `project_id` | 项目ID | `integer` | 项目业务主键 |
+| 2 | `project_contract_amount` | 项目合同金额 | `numeric(18,2)` | 项目库合同摘要金额 |
+| 3 | `contract_paid_amount` | 合同已付金额 | `numeric(18,2)` | 项目口径已付款金额 |
+| 4 | `project_budget` | 项目预算 | `numeric(18,2)` | 项目预算金额 |
+| 5 | `project_start_date` | 项目启动日期 | `date` | 项目启动时间 |
+
+<!-- dataman:document=business-semantics -->
+# 业务语义说明
+
+一行表示一个信息化项目，`project_id` 是项目业务主键。
+"""
 
 
 def test_scene_ontology_draft_reads_semantic_document_and_binds_query_key():

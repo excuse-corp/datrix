@@ -7,6 +7,8 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
+from dbgpt_app.openapi.api_view_model import Result
+
 from ..ontology.fragments import scene_snapshot, source_snapshot_refs
 from ..ontology.markdown import with_managed_frontmatter
 from ..ontology.service import (
@@ -55,6 +57,10 @@ class OntologyPublishRequest(BaseModel):
     revision: int = Field(ge=1)
 
 
+class DefaultModelRequest(BaseModel):
+    model_name: str = Field(min_length=1)
+
+
 def configure_ontology_service(service: OntologyLifecycleService) -> None:
     global _service
     _service = service
@@ -62,6 +68,40 @@ def configure_ontology_service(service: OntologyLifecycleService) -> None:
 
 def get_ontology_service() -> OntologyLifecycleService:
     return _service
+
+
+def _default_model_path():
+    from pathlib import Path
+
+    return Path("pilot/meta_data/default_model.json")
+
+
+@router.get("/default-model")
+def get_default_model():
+    import json
+
+    path = _default_model_path()
+    if not path.exists():
+        return Result.succ({"model_name": None})
+    try:
+        value = json.loads(path.read_text(encoding="utf-8")).get("model_name")
+    except Exception:
+        value = None
+    return Result.succ({"model_name": value})
+
+
+@router.put("/default-model")
+def set_default_model(
+    payload: DefaultModelRequest,
+    principal: AskDataPrincipal = Depends(get_principal),
+):
+    import json
+
+    _require_admin(principal)
+    path = _default_model_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"model_name": payload.model_name}), encoding="utf-8")
+    return Result.succ({"model_name": payload.model_name})
 
 
 def _revision_payload(revision) -> dict[str, Any]:

@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>2024年度业务数据报告</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --primary: #1a56db;
+    --primary-light: #e8f0fe;
+    --primary-dark: #0f2b5b;
+    --accent: #0ea5e9;
+    --success: #10b981;
+    --warning: #f59e0b;
+    --danger: #ef4444;
+    --bg: #f3f6fb;
+    --card-bg: #ffffff;
+    --text: #1e293b;
+    --text-muted: #64748b;
+    --border: #e2e8f0;
+    --shadow: 0 2px 8px rgba(26,86,219,0.08);
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+         background:var(--bg); color:var(--text); line-height:1.6; }
+  .header { background:linear-gradient(135deg,var(--primary-dark) 0%,var(--primary) 100%);
+            color:#fff; padding:32px 40px; }
+  .header h1 { font-size:26px; font-weight:700; letter-spacing:1px; }
+  .header .subtitle { font-size:14px; opacity:.8; margin-top:6px; }
+  .container { max-width:1200px; margin:0 auto; padding:28px 24px; }
+  .kpi-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+              gap:18px; margin-bottom:28px; }
+  .kpi-card { background:var(--card-bg); border-radius:12px; padding:22px 24px;
+              box-shadow:var(--shadow); border-left:4px solid var(--primary); }
+  .kpi-card .label { font-size:13px; color:var(--text-muted); }
+  .kpi-card .value { font-size:30px; font-weight:700; color:var(--primary);
+                     margin:6px 0 2px; }
+  .kpi-card .trend { font-size:12px; }
+  .trend.up { color:var(--success); } .trend.down { color:var(--danger); }
+  .section-title { font-size:18px; font-weight:700; color:var(--primary-dark);
+                   margin:24px 0 14px; padding-left:12px;
+                   border-left:4px solid var(--primary); }
+  .card { background:var(--card-bg); border-radius:12px; padding:24px;
+          box-shadow:var(--shadow); margin-bottom:22px; }
+  .chart-row { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr));
+               gap:22px; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th { background:var(--primary-light); color:var(--primary-dark); text-align:left;
+       padding:12px 14px; font-weight:600; }
+  td { padding:11px 14px; border-bottom:1px solid var(--border); }
+  tr:hover td { background:#f8fafc; }
+  .badge { display:inline-block; padding:2px 10px; border-radius:20px;
+           font-size:12px; font-weight:600; }
+  .badge.blue { background:var(--primary-light); color:var(--primary); }
+  .badge.green { background:#d1fae5; color:#047857; }
+  .badge.orange { background:#fef3c7; color:#b45309; }
+  .badge.red { background:#fee2e2; color:#b91c1c; }
+  .footer { text-align:center; padding:24px; color:var(--text-muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>2024年度业务数据报告</h1>
+  <div class="subtitle">统计周期：2024-01 至 2024-12</div>
+</div>
+<div class="container">
+  <!-- KPI_CARDS -->
+  <div class="kpi-grid"><div class="kpi-card"><div class="label">总营收</div><div class="value">¥1.28亿</div><div class="trend up">↑ +12.5%</div></div>
+<div class="kpi-card"><div class="label">新增客户</div><div class="value">386</div><div class="trend up">↑ +8.2%</div></div>
+<div class="kpi-card"><div class="label">项目数量</div><div class="value">52</div><div class="trend down">↓ -3.1%</div></div>
+<div class="kpi-card"><div class="label">回款率</div><div class="value">91.3%</div><div class="trend up">↑ +2.4%</div></div></div>
+  <!-- CHARTS -->
+  <div class="card"><div class="section-title">月度营收趋势</div><div style="position:relative;height:320px"><canvas id="chart0"></canvas></div></div>
+<div class="card"><div class="section-title">业务线占比</div><div style="position:relative;height:320px"><canvas id="chart1"></canvas></div></div>
+  <!-- TABLES -->
+  <div class="card"><div class="section-title">重点项目一览</div><table><thead><tr><th>项目名称</th><th>金额(万)</th><th>负责人</th><th>状态</th></tr></thead><tbody><tr><td>ERP升级项目</td><td>520</td><td>张伟</td><td><span class="badge blue">进行中</span></td></tr><tr><td>数据中台建设</td><td>380</td><td>李娜</td><td><span class="badge green">已完成</span></td></tr><tr><td>安全合规改造</td><td>210</td><td>王强</td><td><span class="badge red">逾期</span></td></tr></tbody></table></div>
+</div>
+<div class="footer">数据来源：业务管理系统 · 由 data-report 技能生成</div>
+<script>
+new Chart(document.getElementById('chart0'), {"type": "line", "data": {"labels": ["1月", "2月", "3月", "4月", "5月", "6月"], "datasets": [{"label": "营收(万元)", "data": [180, 210, 195, 240, 260, 300], "backgroundColor": "#1a56db", "borderColor": "#1a56db", "tension": 0.3}]}, "options": {"responsive": true, "maintainAspectRatio": false}});
+new Chart(document.getElementById('chart1'), {"type": "doughnut", "data": {"labels": ["信息化", "运维", "咨询", "其他"], "datasets": [{"label": "占比", "data": [45, 30, 15, 10], "backgroundColor": ["#1a56db", "#0ea5e9", "#10b981", "#f59e0b"]}]}, "options": {"responsive": true, "maintainAspectRatio": false}});
+</script>
+</body>
+</html>

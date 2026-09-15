@@ -1,10 +1,10 @@
-import { apiInterceptors, getModelList, startModel, stopModel } from '@/client/api';
+import { apiInterceptors, getDefaultModel, getModelList, setDefaultModel, startModel, stopModel } from '@/client/api';
 import ModelForm from '@/components/model/model-form';
 import BlurredCard, { InnerDropdown } from '@/new-components/common/blurredCard';
 import ConstructLayout from '@/new-components/layout/Construct';
 import { IModelData } from '@/types/model';
 import { getModelIcon } from '@/utils/constants';
-import { EditOutlined, PlusOutlined } from '@ant-design/icons';
+import { EditOutlined, PlusOutlined, StarOutlined } from '@ant-design/icons';
 import { Button, Modal, Tag, message } from 'antd';
 import moment from 'moment';
 import { useEffect, useState } from 'react';
@@ -16,10 +16,26 @@ function Models() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingModel, setEditingModel] = useState<IModelData | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
+  const [defaultModel, setDefaultModelName] = useState<string | null>(null);
 
   async function getModels() {
     const [, res] = await apiInterceptors(getModelList());
     setModels(res ?? []);
+    const [, current] = await apiInterceptors(getDefaultModel());
+    setDefaultModelName(current?.model_name ?? null);
+  }
+  async function makeDefault(name: string) {
+    if (loading) return;
+    setLoading(true);
+    try {
+      const [, result] = await apiInterceptors(setDefaultModel(name));
+      if (result?.model_name) {
+        setDefaultModelName(result.model_name);
+        message.success('默认模型已设置');
+      }
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function startTheModel(info: IModelData) {
@@ -160,6 +176,21 @@ function Models() {
                   menu={{
                     items: [
                       {
+                        key: 'default_model',
+                        disabled: !item.healthy || item.worker_type !== 'llm' || defaultModel === item.model_name,
+                        label: (
+                          <span
+                            onClick={() => {
+                              if (item.healthy && item.worker_type === 'llm' && defaultModel !== item.model_name) {
+                                makeDefault(item.model_name);
+                              }
+                            }}
+                          >
+                            设为默认模型
+                          </span>
+                        ),
+                      },
+                      {
                         key: 'edit_model',
                         label: (
                           <span
@@ -202,22 +233,41 @@ function Models() {
               }
               rightTopHover={false}
               RightBottom={
-                <Button
-                  size='small'
-                  icon={<EditOutlined />}
-                  onClick={e => {
-                    e.stopPropagation();
-                    setEditingModel(item);
-                    setIsModalOpen(true);
-                  }}
-                >
-                  {t('edit_model')}
-                </Button>
+                <div className='flex gap-2'>
+                  {item.worker_type === 'llm' && defaultModel !== item.model_name && (
+                    <Button
+                      size='small'
+                      icon={<StarOutlined />}
+                      disabled={!item.healthy || loading}
+                      title={!item.healthy ? (item.health_reason ?? '模型不可用') : undefined}
+                      onClick={e => {
+                        e.stopPropagation();
+                        makeDefault(item.model_name);
+                      }}
+                    >
+                      设为默认
+                    </Button>
+                  )}
+                  <Button
+                    size='small'
+                    icon={<EditOutlined />}
+                    onClick={e => {
+                      e.stopPropagation();
+                      setEditingModel(item);
+                      setIsModalOpen(true);
+                    }}
+                  >
+                    {t('edit_model')}
+                  </Button>
+                </div>
               }
               Tags={
                 <div>
-                  <Tag color={item.healthy ? 'green' : 'red'}>{item.healthy ? 'Healthy' : 'Unhealthy'}</Tag>
+                  <Tag color={item.healthy ? 'green' : 'red'} title={item.health_reason ?? undefined}>
+                    {item.healthy ? 'Healthy' : 'Unhealthy'}
+                  </Tag>
                   <Tag>{item.worker_type}</Tag>
+                  {defaultModel === item.model_name && <Tag color='blue'>默认</Tag>}
                 </div>
               }
             />
