@@ -29,6 +29,16 @@ from dbgpt_app.openapi.api_view_model import (
     ConversationVo,
     Result,
 )
+from dbgpt_app.openapi.api_v1.react_session_state import (
+    infer_active_skill_from_messages,
+    is_skill_maintenance_request,
+    load_react_session_state,
+    record_active_skill,
+    record_uploaded_attachment,
+    render_react_session_context,
+    save_react_session_state,
+    update_react_session_after_turn,
+)
 from dbgpt_serve.utils.auth import UserRequest, get_user_from_headers
 
 router = APIRouter()
@@ -1208,6 +1218,11 @@ async def _react_agent_stream(
             "run_id"
         )
     run_id = str(run_id or uuid.uuid4().hex)
+    conv_id = dialogue.conv_uid or str(uuid.uuid4())
+    skill_maintenance = is_skill_maintenance_request(user_input)
+    session_state = load_react_session_state(conv_id)
+    if file_path:
+        record_uploaded_attachment(session_state, file_path)
     cancel_event = asyncio.Event()
 
     # Connector selection (Task C): only inject user-selected connectors.
@@ -1423,7 +1438,10 @@ async def _react_agent_stream(
         "matched": None,
         "skill_prompt": None,
         "file_path": file_path,
+        "conv_id": conv_id,
         "run_id": run_id,
+        "session_state": session_state,
+        "skill_maintenance": skill_maintenance,
         "cancel_event": cancel_event,
         "turn_id": uuid.uuid4().hex,
     }
@@ -2152,8 +2170,6 @@ print(json.dumps(summary, ensure_ascii=False))
     else:
         llm_config = LLMConfig(llm_client=llm_client)
 
-    conv_id = dialogue.conv_uid or str(uuid.uuid4())
-    react_state["conv_id"] = conv_id
     REACT_AGENT_RUNS[run_id] = {
         "conv_uid": conv_id,
         "cancel_event": cancel_event,
@@ -2224,7 +2240,33 @@ print(json.dumps(summary, ensure_ascii=False))
         conv_storage=conv_serve.conv_storage,
         message_storage=conv_serve.message_storage,
     )
+
+    if pre_matched_skill:
+        record_active_skill(
+            session_state,
+            pre_matched_skill.metadata.name,
+            getattr(pre_matched_skill.metadata, "file_path", None),
+            source="selected_skill",
+        )
+    elif not session_state.get("active_skill"):
+        inferred_skill = infer_active_skill_from_messages(
+            storage_conv.messages,
+            skills_dir=skills_dir,
+        )
+        if inferred_skill:
+            record_active_skill(
+                session_state,
+                inferred_skill.get("name"),
+                inferred_skill.get("path"),
+                source=inferred_skill.get("source") or "history_inference",
+            )
+
     recent_ask_data_context = _render_recent_ask_data_context(storage_conv.messages)
+    session_context = render_react_session_context(
+        session_state,
+        storage_conv.messages,
+        current_user_input=user_input,
+    )
     storage_conv.save_to_storage()
     storage_conv.start_new_round()
     storage_conv.add_user_message(user_input)
@@ -2277,7 +2319,7 @@ print(json.dumps(summary, ensure_ascii=False))
     available_images_hint = ""
 
     # Check if skill is pre-selected to use simplified prompt
-    is_skill_mode = pre_matched_skill is not None
+    is_skill_mode = pre_matched_skill is not None and not skill_maintenance
     _skill_name = pre_matched_skill.metadata.name if pre_matched_skill else "skill"
 
     # Inject connector tools — only the ones the user explicitly selected.
@@ -2434,6 +2476,7 @@ Example flow for 3 tasks:
 - Finish task3: [task1=completed, task2=completed, task3=completed] → call todowrite
 
 {file_context}
+{session_context}
 {ask_data_prompt_context}
 {recent_ask_data_context}
 ## ReAct Output Format
@@ -2582,6 +2625,7 @@ Parameters: {{"todos": [{{...}}]}}
 14. **terminate**: Finish the task. Parameters: {{"result": "final answer"}}
 
 {file_context}
+{session_context}
 {ask_data_prompt_context}
 {recent_ask_data_context}
 
@@ -3276,6 +3320,18 @@ only inside `Action Input.result`.
             logger.debug("Cancelled react agent task ended with error", exc_info=True)
 
         final_content = "任务已取消。"
+        try:
+            update_react_session_after_turn(
+                session_state,
+                react_state,
+                history_steps,
+                final_content,
+                skills_dir=skills_dir,
+                status="cancelled",
+            )
+            save_react_session_state(session_state)
+        except Exception:
+            logger.debug("Failed to save cancelled ReAct session state", exc_info=True)
         history_payload = json.dumps(
             {
                 "version": 1,
@@ -3284,6 +3340,7 @@ only inside `Action Input.result`.
                 "steps": history_steps,
                 "task_plan": list(_todo_list),
                 "generated_images": react_state.get("generated_images", []),
+                "session_state": session_state,
             },
             ensure_ascii=False,
         )
@@ -3300,6 +3357,18 @@ only inside `Action Input.result`.
         reply = await agent_task
     except Exception as e:
         err_msg = f"React agent failed: {e}"
+        try:
+            update_react_session_after_turn(
+                session_state,
+                react_state,
+                history_steps,
+                err_msg,
+                skills_dir=skills_dir,
+                status="failed",
+            )
+            save_react_session_state(session_state)
+        except Exception:
+            logger.debug("Failed to save failed ReAct session state", exc_info=True)
         error_payload = json.dumps(
             {
                 "version": 1,
@@ -3308,6 +3377,7 @@ only inside `Action Input.result`.
                 "steps": history_steps,
                 "task_plan": list(_todo_list),
                 "generated_images": react_state.get("generated_images", []),
+                "session_state": session_state,
             },
             ensure_ascii=False,
         )
@@ -3368,6 +3438,19 @@ only inside `Action Input.result`.
     else:
         final_content = reply.content or ""
 
+    try:
+        update_react_session_after_turn(
+            session_state,
+            react_state,
+            history_steps,
+            final_content,
+            skills_dir=skills_dir,
+            status="completed",
+        )
+        save_react_session_state(session_state)
+    except Exception:
+        logger.debug("Failed to save completed ReAct session state", exc_info=True)
+
     if react_state.get("ask_data_pending_query_id"):
         REACT_ASK_DATA_PENDING[conv_id] = {
             "query_id": str(react_state["ask_data_pending_query_id"]),
@@ -3385,6 +3468,7 @@ only inside `Action Input.result`.
             "steps": history_steps,
             "task_plan": list(_todo_list),
             "generated_images": react_state.get("generated_images", []),
+            "session_state": session_state,
         },
         ensure_ascii=False,
     )
