@@ -165,6 +165,8 @@ logswebserver.log.*
 .plugin_env
 /pilot/meta_data/alembic/versions/*
 /pilot/meta_data/*.db
+/pilot/meta_data/skill_state.json
+/pilot/meta_data/react_agent_state/
 /pilot/benchmark_meta_data/*.db
 /pilot/benchmark_meta_data/result/*
 # Ignore for now

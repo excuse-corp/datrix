@@ -39,6 +39,12 @@ from dbgpt_app.openapi.api_v1.react_session_state import (
     save_react_session_state,
     update_react_session_after_turn,
 )
+from dbgpt_app.openapi.api_v1.skill_state import (
+    normalize_skill_path,
+    remove_skill_state,
+    set_skill_enabled,
+    skill_enabled,
+)
 from dbgpt_serve.utils.auth import UserRequest, get_user_from_headers
 
 router = APIRouter()
@@ -55,9 +61,88 @@ REACT_ASK_DATA_PENDING: Dict[str, Dict[str, str]] = {}
 REACT_AGENT_RUNS: Dict[str, Dict[str, Any]] = {}
 
 DEFAULT_SKILLS_DIR = SKILLS_DIR
+PROTECTED_SKILL_NAMES = {"csv-data-analysis", "skill-creator"}
 AUTO_DATA_MARKER_PATTERN = re.compile(
     r"###([A-Z0-9_]+)_START###\s*(.*?)\s*###\1_END###", re.DOTALL
 )
+
+
+def _skill_root_name(file_path: str) -> str:
+    parts = PurePosixPath(str(file_path or "")).parts
+    if not parts:
+        return ""
+    if parts[0] == "user" and len(parts) > 1:
+        return parts[1]
+    if parts[0] == "claude" and len(parts) > 1:
+        return parts[1]
+    return parts[0]
+
+
+def _is_protected_skill_path(file_path: str, skill_name: Optional[str] = None) -> bool:
+    root_name = _skill_root_name(file_path)
+    name = skill_name or root_name
+    parts = PurePosixPath(str(file_path or "")).parts
+    return bool(
+        name in PROTECTED_SKILL_NAMES
+        or root_name in PROTECTED_SKILL_NAMES
+        or (parts and parts[0] == "claude")
+    )
+
+
+def _skill_category(file_path: str, skill_name: Optional[str] = None) -> str:
+    parts = PurePosixPath(str(file_path or "")).parts
+    if _is_protected_skill_path(file_path, skill_name):
+        return "official"
+    if parts and parts[0] == "claude":
+        return "official"
+    return "personal"
+
+
+def _resolve_skill_delete_target(file_path: str) -> Tuple[Path, str]:
+    skills_dir = Path(DEFAULT_SKILLS_DIR).expanduser().resolve()
+    rel_path = normalize_skill_path(file_path, skills_dir=str(skills_dir))
+    target = (skills_dir / rel_path).resolve()
+    try:
+        target.relative_to(skills_dir)
+    except Exception as exc:
+        raise ValueError("Invalid skill file path") from exc
+
+    if not target.exists():
+        raise FileNotFoundError("Skill file not found")
+
+    delete_target = target
+    if target.is_file() and target.name == "SKILL.md":
+        delete_target = target.parent
+    return delete_target, rel_path
+
+
+def _skill_tool_text_result(content: str) -> str:
+    return json.dumps(
+        {"chunks": [{"output_type": "text", "content": content}]},
+        ensure_ascii=False,
+    )
+
+
+def _skill_file_for_state(skill_path: str) -> str:
+    path = Path(skill_path).expanduser().resolve()
+    skill_md = path / "SKILL.md"
+    return str(skill_md if skill_md.is_file() else path)
+
+
+def _skill_unavailable_message(skill_name: str, skill_manager: Any) -> Optional[str]:
+    try:
+        skill_path = skill_manager._get_skill_path(skill_name)
+    except Exception:
+        return None
+
+    if not skill_path or not Path(skill_path).expanduser().exists():
+        return f"Skill '{skill_name}' no longer exists"
+    try:
+        if not skill_enabled(_skill_file_for_state(skill_path), skills_dir=DEFAULT_SKILLS_DIR):
+            return f"Skill '{skill_name}' is disabled"
+    except Exception:
+        return None
+    return None
 
 
 async def _resolve_model_context_tokens(
@@ -427,6 +512,9 @@ async def _execute_skill_script_impl(
 ) -> str:
     """Execute a script from a skill (implementation)."""
     skill_manager = get_skill_manager(CFG.SYSTEM_APP)
+    unavailable = _skill_unavailable_message(skill_name, skill_manager)
+    if unavailable:
+        return _skill_tool_text_result(unavailable)
     result = await skill_manager.execute_script(skill_name, script_name, args)
     return result
 
@@ -456,6 +544,12 @@ async def get_skill_resource(
 
     try:
         sm = get_skill_manager(CFG.SYSTEM_APP)
+        unavailable = _skill_unavailable_message(skill_name, sm)
+        if unavailable:
+            return json.dumps(
+                {"error": True, "message": unavailable},
+                ensure_ascii=False,
+            )
         result = await sm.get_skill_resource(skill_name, resource_path, args or {})
         return result
     except Exception as e:
@@ -479,6 +573,9 @@ async def execute_skill_script_file(
 
     try:
         sm = get_skill_manager(CFG.SYSTEM_APP)
+        unavailable = _skill_unavailable_message(skill_name, sm)
+        if unavailable:
+            return _skill_tool_text_result(unavailable)
         result = await sm.execute_skill_script_file(
             skill_name, script_file_name, args or {}
         )
@@ -541,12 +638,14 @@ async def list_skills(
                 except Exception:
                     pass
 
-            # Determine type based on directory structure
-            skill_type_category = "official"
-            if "user/" in file_path or "/user/" in file_path:
-                skill_type_category = "personal"
-            elif "claude/" in file_path or "/claude/" in file_path:
-                skill_type_category = "official"
+            skill_type_category = _skill_category(file_path, metadata.name)
+            is_protected = _is_protected_skill_path(file_path, metadata.name)
+            enabled = True
+            if file_path:
+                try:
+                    enabled = skill_enabled(file_path, skills_dir=str(skills_dir_resolved))
+                except Exception:
+                    enabled = True
 
             # Get skill_type value
             skill_type_val = metadata.skill_type
@@ -563,6 +662,8 @@ async def list_skills(
                 "tags": getattr(metadata, "tags", []) or [],
                 "type": skill_type_category,
                 "file_path": file_path,
+                "enabled": enabled,
+                "deletable": not is_protected,
             }
             skills_data.append(skill_info)
 
@@ -709,6 +810,82 @@ async def skill_detail(
             "metadata": metadata,
         }
     )
+
+
+@router.post("/v1/skills/toggle", response_model=Result)
+async def toggle_skill(
+    payload: Dict[str, Any] = Body(...),
+    user_token: UserRequest = Depends(get_user_from_headers),
+):
+    """Enable or disable a skill for selection and ReAct auto-matching."""
+    file_path = str(payload.get("file_path") or "").strip()
+    skill_name = str(payload.get("skill_name") or payload.get("name") or "").strip()
+    if not file_path:
+        return Result.failed(code="E4001", msg="file_path is required")
+    enabled = payload.get("enabled")
+    if not isinstance(enabled, bool):
+        return Result.failed(code="E4002", msg="enabled must be a boolean")
+
+    try:
+        state_entry = set_skill_enabled(
+            file_path,
+            enabled,
+            skill_name=skill_name or None,
+            skills_dir=DEFAULT_SKILLS_DIR,
+        )
+    except ValueError as exc:
+        return Result.failed(code="E4003", msg=str(exc))
+    except Exception as exc:
+        logger.exception("Failed to update skill enabled state")
+        return Result.failed(code="E5003", msg=f"Toggle failed: {str(exc)}")
+
+    return Result.succ(state_entry)
+
+
+@router.delete("/v1/skills/delete", response_model=Result)
+async def delete_skill(
+    skill_name: str = Query("", description="Skill name"),
+    file_path: str = Query("", description="Skill file path"),
+    user_token: UserRequest = Depends(get_user_from_headers),
+):
+    """Delete a non-protected skill directory or skill file."""
+    if not file_path:
+        return Result.failed(code="E4001", msg="file_path is required")
+
+    try:
+        rel_path = normalize_skill_path(file_path, skills_dir=DEFAULT_SKILLS_DIR)
+    except ValueError as exc:
+        return Result.failed(code="E4002", msg=str(exc))
+
+    if _is_protected_skill_path(rel_path, skill_name or None):
+        return Result.failed(code="E4030", msg="Official built-in skills cannot be deleted")
+
+    try:
+        target, normalized = _resolve_skill_delete_target(rel_path)
+        if target.is_dir():
+            shutil.rmtree(target)
+        else:
+            target.unlink()
+        remove_skill_state(normalized, skills_dir=DEFAULT_SKILLS_DIR)
+        return Result.succ(
+            {
+                "skill_name": skill_name or _skill_root_name(normalized),
+                "file_path": normalized,
+                "message": f"Skill deleted successfully: {normalized}",
+            }
+        )
+    except FileNotFoundError:
+        remove_skill_state(rel_path, skills_dir=DEFAULT_SKILLS_DIR)
+        return Result.succ(
+            {
+                "skill_name": skill_name or _skill_root_name(rel_path),
+                "file_path": rel_path,
+                "message": f"Skill already removed: {rel_path}",
+            }
+        )
+    except Exception as exc:
+        logger.exception("Failed to delete skill")
+        return Result.failed(code="E5004", msg=f"Delete failed: {str(exc)}")
 
 
 def _install_skill_from_dir(src_dir: Path, skill_name: str, user_dir: Path) -> str:
@@ -1419,7 +1596,20 @@ async def _react_agent_stream(
 
     # Step 1: Pre-load skills
     load_skills_from_dir(skills_dir, recursive=True)
-    all_skills = registry.list_skills()
+    def _skill_meta_path(meta: Any) -> str:
+        return getattr(meta, "file_path", None) or f"{getattr(meta, 'name', '')}/SKILL.md"
+
+    def _skill_meta_enabled(meta: Any) -> bool:
+        try:
+            file_path_value = _skill_meta_path(meta)
+            resolved = (Path(skills_dir).expanduser().resolve() / file_path_value).resolve()
+            if not resolved.is_file():
+                return False
+            return skill_enabled(file_path_value, skills_dir=skills_dir)
+        except Exception:
+            return True
+
+    all_skills = [s for s in registry.list_skills() if _skill_meta_enabled(s)]
 
     # Step 2: Get business tools from ResourceManager
     rm = get_resource_manager(CFG.SYSTEM_APP)
@@ -1460,6 +1650,11 @@ async def _react_agent_stream(
             react_state["matched"] = pre_matched_skill
             react_state["skill_prompt"] = pre_matched_skill.get_prompt()
             logger.info(f"Pre-selected skill from ext_info: {skill_name}")
+        if pre_matched_skill and not _skill_meta_enabled(pre_matched_skill.metadata):
+            logger.info("Pre-selected skill is disabled: %s", skill_name)
+            pre_matched_skill = None
+            react_state["matched"] = None
+            react_state["skill_prompt"] = None
 
     # Build skills_context based on whether skill is pre-selected
     if pre_matched_skill:
@@ -1514,6 +1709,8 @@ async def _react_agent_stream(
             and _is_excel_skill(matched.metadata)
             and not (_mentions_excel(query) or react_state.get("file_path"))
         ):
+            matched = None
+        if matched and not _skill_meta_enabled(matched.metadata):
             matched = None
         react_state["matched"] = matched
         if matched:

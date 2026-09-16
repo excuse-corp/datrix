@@ -241,9 +241,15 @@ class SkillLoader:
             Skill instance.
         """
         try:
+            if not isinstance(data, dict):
+                logger.debug("Skipping JSON/YAML file with non-object root")
+                return None
             metadata_data = data.get("metadata", {})
+            if not isinstance(metadata_data, dict) or not metadata_data.get("name"):
+                logger.debug("Skipping JSON/YAML file without skill metadata.name")
+                return None
             metadata = SkillMetadata(
-                name=metadata_data.get("name", "Unknown"),
+                name=metadata_data.get("name"),
                 description=metadata_data.get("description", ""),
                 version=metadata_data.get("version", "1.0.0"),
                 author=metadata_data.get("author"),

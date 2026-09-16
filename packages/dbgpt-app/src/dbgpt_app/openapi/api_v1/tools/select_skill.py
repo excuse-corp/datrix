@@ -1,9 +1,12 @@
 """select_skill tool — matches a skill from registry based on user query."""
 
 import json
+from pathlib import Path
 from typing import Any, Dict
 
 from dbgpt.agent.resource.tool.base import tool
+from dbgpt.configs.model_config import SKILLS_DIR
+from dbgpt_app.openapi.api_v1.skill_state import skill_enabled
 
 
 def make_select_skill(react_state: Dict[str, Any], registry: Any):
@@ -39,6 +42,18 @@ def make_select_skill(react_state: Dict[str, Any], registry: Any):
             and not (_mentions_excel(query) or react_state.get("file_path"))
         ):
             matched = None
+        if matched:
+            file_path = getattr(matched.metadata, "file_path", None)
+            try:
+                path = Path(file_path).expanduser() if file_path else None
+                if path and not path.is_absolute():
+                    path = Path(SKILLS_DIR).expanduser().resolve() / path
+                if path and not path.is_file():
+                    matched = None
+                elif file_path and not skill_enabled(file_path):
+                    matched = None
+            except Exception:
+                pass
         react_state["matched"] = matched
         if matched:
             detail = (

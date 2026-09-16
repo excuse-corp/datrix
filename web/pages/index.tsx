@@ -1290,24 +1290,26 @@ const Playground: NextPage = () => {
       const response = await axios.get(`${process.env.API_BASE_URL ?? ''}/api/v1/skills/list`);
       // ctx-axios interceptor returns response.data directly
       if (response?.success && Array.isArray(response.data)) {
-        return response.data.map((item: any) => ({
-          id: String(item.id || item.name),
-          name: normalizeText(item.name),
-          description: normalizeText(item.description),
-          type: item.type === 'official' ? 'official' : 'personal',
-          icon:
-            item.skill_type === 'data_analysis'
-              ? '📊'
-              : item.skill_type === 'coding'
-                ? '💻'
-                : item.skill_type === 'web_search'
-                  ? '🔍'
-                  : item.skill_type === 'knowledge_qa'
-                    ? '📚'
-                    : item.skill_type === 'chat'
-                      ? '💬'
-                      : '⚡',
-        })) as Skill[];
+        return response.data
+          .filter((item: any) => item.enabled !== false)
+          .map((item: any) => ({
+            id: String(item.id || item.name),
+            name: normalizeText(item.name),
+            description: normalizeText(item.description),
+            type: item.type === 'official' ? 'official' : 'personal',
+            icon:
+              item.skill_type === 'data_analysis'
+                ? '📊'
+                : item.skill_type === 'coding'
+                  ? '💻'
+                  : item.skill_type === 'web_search'
+                    ? '🔍'
+                    : item.skill_type === 'knowledge_qa'
+                      ? '📚'
+                      : item.skill_type === 'chat'
+                        ? '💬'
+                        : '⚡',
+          })) as Skill[];
       }
       return [];
     } catch (e) {

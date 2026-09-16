@@ -1,9 +1,36 @@
 """load_skill tool — loads skill content (SKILL.md) by name."""
 
 import json
+from pathlib import Path
 from typing import Any, Dict
 
 from dbgpt.agent.resource.tool.base import tool
+from dbgpt.configs.model_config import SKILLS_DIR
+from dbgpt_app.openapi.api_v1.skill_state import skill_enabled
+
+
+def _tool_text_result(content: str) -> str:
+    return json.dumps(
+        {"chunks": [{"output_type": "text", "content": content}]},
+        ensure_ascii=False,
+    )
+
+
+def _skill_file_for_state(skill_path: str) -> str:
+    path = Path(skill_path).expanduser().resolve()
+    skill_md = path / "SKILL.md"
+    return str(skill_md if skill_md.is_file() else path)
+
+
+def _skill_unavailable_message(skill_name: str, skill_path: str | None) -> str | None:
+    if not skill_path or not Path(skill_path).expanduser().exists():
+        return f"Skill '{skill_name}' no longer exists"
+    try:
+        if not skill_enabled(_skill_file_for_state(skill_path)):
+            return f"Skill '{skill_name}' is disabled"
+    except Exception:
+        return None
+    return None
 
 
 def make_load_skill(react_state: Dict[str, Any]):
@@ -28,17 +55,19 @@ def make_load_skill(react_state: Dict[str, Any]):
                     break
 
         if not matched:
-            return json.dumps(
-                {
-                    "chunks": [
-                        {
-                            "output_type": "text",
-                            "content": f"Skill '{skill_name}' not found",
-                        }
-                    ]
-                },
-                ensure_ascii=False,
-            )
+            return _tool_text_result(f"Skill '{skill_name}' not found")
+
+        file_path_value = getattr(matched.metadata, "file_path", None) or file_path
+        try:
+            path = Path(file_path_value).expanduser()
+            if not path.is_absolute():
+                path = Path(SKILLS_DIR).expanduser().resolve() / path
+            if not path.is_file():
+                return _tool_text_result(f"Skill '{skill_name}' no longer exists")
+            if not skill_enabled(file_path_value):
+                return _tool_text_result(f"Skill '{skill_name}' is disabled")
+        except Exception:
+            pass
 
         react_state["matched"] = matched
         react_state["skill_prompt"] = matched.get_prompt()
@@ -90,6 +119,13 @@ def make_execute_skill_script_file(react_state: Dict[str, Any]):
 
         try:
             sm = get_skill_manager(CFG.SYSTEM_APP)
+            unavailable = _skill_unavailable_message(
+                skill_name,
+                sm._get_skill_path(skill_name),
+            )
+            if unavailable:
+                return _tool_text_result(unavailable)
+
             cid = react_state.get("conv_id") or "default"
             out_dir = os.path.join(PILOT_PATH, "tmp", cid)
             os.makedirs(out_dir, exist_ok=True)

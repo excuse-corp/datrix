@@ -43,6 +43,8 @@ interface SkillItem {
   tags: string[];
   type: string;
   file_path: string;
+  enabled?: boolean;
+  deletable?: boolean;
 }
 
 interface TreeNode {
@@ -91,6 +93,10 @@ function toAntTreeData(node: TreeNode): DataNode {
   return result;
 }
 
+function getSkillKey(skill: SkillItem): string {
+  return skill.file_path || skill.id || skill.name;
+}
+
 function Skills() {
   const { t } = useTranslation();
   const [searchValue, setSearchValue] = useState('');
@@ -120,14 +126,23 @@ function Skills() {
       const response = (await axios.get(`${process.env.API_BASE_URL ?? ''}/api/v1/skills/list`)) as any;
       if (currentFetch !== listFetchCountRef.current) return;
       if (response?.success && Array.isArray(response.data)) {
-        setSkillsList(response.data as SkillItem[]);
+        const list = response.data as SkillItem[];
+        setSkillsList(list);
+        setEnabledMap(
+          list.reduce<Record<string, boolean>>((acc, item) => {
+            acc[getSkillKey(item)] = item.enabled !== false;
+            return acc;
+          }, {}),
+        );
       } else {
         setSkillsList([]);
+        setEnabledMap({});
       }
     } catch (err) {
       if (currentFetch !== listFetchCountRef.current) return;
       console.error('[Skills] Failed to fetch list:', err);
       setSkillsList([]);
+      setEnabledMap({});
     } finally {
       if (currentFetch === listFetchCountRef.current) {
         setListLoading(false);
@@ -185,9 +200,72 @@ function Skills() {
     setSkillDetail(null);
   }, []);
 
-  const handleToggle = useCallback((skillId: string, checked: boolean) => {
-    setEnabledMap(prev => ({ ...prev, [skillId]: checked }));
-  }, []);
+  const handleToggle = useCallback(
+    async (skill: SkillItem, checked: boolean) => {
+      const key = getSkillKey(skill);
+      setEnabledMap(prev => ({ ...prev, [key]: checked }));
+      setSkillsList(prev => prev.map(item => (getSkillKey(item) === key ? { ...item, enabled: checked } : item)));
+      try {
+        const response = (await axios.post(`${process.env.API_BASE_URL ?? ''}/api/v1/skills/toggle`, {
+          skill_name: skill.name,
+          file_path: skill.file_path,
+          enabled: checked,
+        })) as any;
+        if (!response?.success) {
+          throw new Error(response?.err_msg || t('skills_toggle_failed'));
+        }
+        message.success(checked ? t('skills_enabled_success') : t('skills_disabled_success'));
+      } catch (err) {
+        console.error('[Skills] Failed to toggle skill:', err);
+        setEnabledMap(prev => ({ ...prev, [key]: !checked }));
+        setSkillsList(prev => prev.map(item => (getSkillKey(item) === key ? { ...item, enabled: !checked } : item)));
+        message.error(t('skills_toggle_failed'));
+      }
+    },
+    [t],
+  );
+
+  const handleDeleteSkill = useCallback(
+    (skill: SkillItem) => {
+      if (skill.deletable === false) {
+        message.warning(t('skills_delete_official_disabled'));
+        return;
+      }
+
+      Modal.confirm({
+        title: t('skills_delete_confirm_title'),
+        content: t('skills_delete_confirm_desc', { name: skill.name }),
+        okText: t('Delete'),
+        okButtonProps: { danger: true },
+        cancelText: t('cancel'),
+        async onOk() {
+          try {
+            const response = (await axios.delete(`${process.env.API_BASE_URL ?? ''}/api/v1/skills/delete`, {
+              params: { skill_name: skill.name, file_path: skill.file_path },
+            })) as any;
+            if (!response?.success) {
+              throw new Error(response?.err_msg || t('skills_delete_failed'));
+            }
+            const key = getSkillKey(skill);
+            setSkillsList(prev => prev.filter(item => getSkillKey(item) !== key));
+            setEnabledMap(prev => {
+              const next = { ...prev };
+              delete next[key];
+              return next;
+            });
+            if (selectedSkill && getSkillKey(selectedSkill) === key) {
+              handleCloseDetail();
+            }
+            message.success(t('skills_delete_success'));
+          } catch (err) {
+            console.error('[Skills] Failed to delete skill:', err);
+            message.error(t('skills_delete_failed'));
+          }
+        },
+      });
+    },
+    [handleCloseDetail, selectedSkill, t],
+  );
 
   const handleTreeSelect = useCallback(
     (selectedKeys: React.Key[]) => {
@@ -383,16 +461,16 @@ function Skills() {
             <div className='grid grid-cols-1 md:grid-cols-2 gap-4 pb-12'>
               {filteredSkills.map(skill => (
                 <div
-                  key={skill.id || skill.name}
-                  className='backdrop-filter backdrop-blur-lg bg-white bg-opacity-70 border-2 border-white rounded-lg shadow p-5 cursor-pointer transition-all duration-200 hover:shadow-lg hover:border-blue-200 relative group dark:border-[#6f7f95] dark:bg-[#6f7f95] dark:bg-opacity-60'
+                  key={getSkillKey(skill)}
+                  className={`backdrop-filter backdrop-blur-lg bg-white bg-opacity-70 border-2 border-white rounded-lg shadow p-5 cursor-pointer transition-all duration-200 hover:shadow-lg hover:border-blue-200 relative group dark:border-[#6f7f95] dark:bg-[#6f7f95] dark:bg-opacity-60 ${enabledMap[getSkillKey(skill)] === false ? 'opacity-60' : ''}`}
                   onClick={() => handleCardClick(skill)}
                 >
                   {/* Toggle switch */}
                   <div className='absolute top-4 right-4 z-10' onClick={e => e.stopPropagation()}>
                     <Switch
                       size='small'
-                      checked={enabledMap[skill.id || skill.name] ?? true}
-                      onChange={checked => handleToggle(skill.id || skill.name, checked)}
+                      checked={enabledMap[getSkillKey(skill)] ?? skill.enabled !== false}
+                      onChange={checked => handleToggle(skill, checked)}
                     />
                   </div>
 
@@ -424,11 +502,26 @@ function Skills() {
                       <span>·</span>
                       <span>{t('skills_updated_at', { date: '2026-02-06' })}</span>
                     </div>
-                    <div
-                      className='opacity-0 group-hover:opacity-100 transition-opacity'
-                      onClick={e => e.stopPropagation()}
-                    >
-                      <EllipsisOutlined className='p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer' />
+                    <div className='opacity-100 transition-opacity' onClick={e => e.stopPropagation()}>
+                      <Dropdown
+                        trigger={['click']}
+                        menu={{
+                          items: [
+                            {
+                              key: 'delete',
+                              label: t('Delete'),
+                              danger: true,
+                              disabled: skill.deletable === false,
+                            },
+                          ],
+                          onClick: ({ key, domEvent }) => {
+                            domEvent.stopPropagation();
+                            if (key === 'delete') handleDeleteSkill(skill);
+                          },
+                        }}
+                      >
+                        <EllipsisOutlined className='p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer' />
+                      </Dropdown>
                     </div>
                   </div>
                 </div>
@@ -463,7 +556,27 @@ function Skills() {
             <Button type='default' size='small'>
               {t('skills_try_btn')}
             </Button>
-            <EllipsisOutlined className='p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer' />
+            {selectedSkill && (
+              <Dropdown
+                trigger={['click']}
+                menu={{
+                  items: [
+                    {
+                      key: 'delete',
+                      label: t('Delete'),
+                      danger: true,
+                      disabled: selectedSkill.deletable === false,
+                    },
+                  ],
+                  onClick: ({ key, domEvent }) => {
+                    domEvent.stopPropagation();
+                    if (key === 'delete') handleDeleteSkill(selectedSkill);
+                  },
+                }}
+              >
+                <EllipsisOutlined className='p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer' />
+              </Dropdown>
+            )}
             <CloseOutlined
               className='p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer'
               onClick={handleCloseDetail}
