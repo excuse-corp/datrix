@@ -56,6 +56,8 @@ class ModelResponse(BaseModel):
     health_reason: Optional[str] = Field(None, description="Model health detail")
     provider: Optional[str] = Field(None, description="Model provider")
     params: Optional[Dict[str, Any]] = Field(None, description="Model startup params")
+    enabled: bool = Field(True, description="Whether the model starts automatically")
+    running: bool = Field(True, description="Whether the model worker is running")
 
 
 class DefaultModelRequest(BaseModel):

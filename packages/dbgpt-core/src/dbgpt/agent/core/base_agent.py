@@ -48,6 +48,10 @@ class ConversableAgent(Role, Agent):
     bind_prompt: Optional[PromptTemplate] = None
     run_mode: Optional[AgentRunMode] = Field(default=None, description="Run mode")
     max_retry_count: int = 3
+    llm_inference_retry_count: int = 3
+    llm_error_retry_limit: int = 2
+    parse_error_retry_limit: int = 3
+    same_action_repeat_limit: int = 3
     max_timeout: int = 600
     llm_client: Optional[AIWrapper] = None
     # 确认当前Agent是否需要进行流式输出
@@ -499,6 +503,11 @@ class ConversableAgent(Role, Agent):
             start_time = time.time()
             is_success = True
             observation = received_message.content or ""
+            consecutive_llm_errors = 0
+            consecutive_parse_errors = 0
+            last_action_signature: Optional[str] = None
+            last_action_observation: Optional[str] = None
+            same_action_repeat_count = 0
             while current_retry_counter < self.max_retry_count:
                 if current_retry_counter > 0:
                     a_reply_message: Optional[
@@ -645,6 +654,42 @@ class ConversableAgent(Role, Agent):
                         last_speaker_name=last_speaker_name,
                         **act_extent_param,
                     )
+                    if act_out and act_out.action and not act_out.terminate:
+                        try:
+                            action_signature = json.dumps(
+                                {
+                                    "action": act_out.action,
+                                    "action_input": act_out.action_input,
+                                },
+                                ensure_ascii=False,
+                                sort_keys=True,
+                            )
+                        except Exception:
+                            action_signature = (
+                                f"{act_out.action}:{act_out.action_input}"
+                            )
+                        action_observation = str(
+                            act_out.observations or act_out.content or ""
+                        )
+                        if (
+                            action_signature == last_action_signature
+                            and action_observation == last_action_observation
+                        ):
+                            same_action_repeat_count += 1
+                        else:
+                            same_action_repeat_count = 1
+                        last_action_signature = action_signature
+                        last_action_observation = action_observation
+                        if same_action_repeat_count >= self.same_action_repeat_limit:
+                            repeat_reason = (
+                                "Repeated the same action without producing new output."
+                            )
+                            act_out.is_exe_success = False
+                            act_out.have_retry = False
+                            act_out.content = repeat_reason
+                            act_out.error_type = "repeated_action"
+                            act_out.error_message = repeat_reason
+                            act_out.observations = repeat_reason
                     if act_out:
                         reply_message.action_report = act_out
                     span.metadata["action_report"] = (
@@ -678,8 +723,54 @@ class ConversableAgent(Role, Agent):
                 ai_message: str = llm_reply or ""
                 # 5.Optimize wrong answers myself
                 if not check_pass:
+                    error_type = getattr(act_out, "error_type", None)
+                    if error_type == "llm_error":
+                        consecutive_llm_errors += 1
+                        consecutive_parse_errors = 0
+                    elif error_type == "parse_error":
+                        consecutive_parse_errors += 1
+                        consecutive_llm_errors = 0
+                    else:
+                        consecutive_llm_errors = 0
+                        consecutive_parse_errors = 0
+
+                    retry_limit_reason = None
+                    if (
+                        error_type == "llm_error"
+                        and consecutive_llm_errors >= self.llm_error_retry_limit
+                    ):
+                        retry_limit_reason = (
+                            getattr(act_out, "error_message", None)
+                            or reason
+                            or "LLM generation failed repeatedly."
+                        )
+                    elif (
+                        error_type == "parse_error"
+                        and consecutive_parse_errors >= self.parse_error_retry_limit
+                    ):
+                        retry_limit_reason = (
+                            getattr(act_out, "error_message", None)
+                            or reason
+                            or "ReAct response parsing failed repeatedly."
+                        )
+
+                    if retry_limit_reason:
+                        reason = retry_limit_reason
+                        act_out.have_retry = False
+                        act_out.error_message = retry_limit_reason
+
                     if not act_out.have_retry:
                         logger.warning("No retry available!")
+                        fail_reason = reason
+                        observation = fail_reason
+                        await self.write_memories(
+                            question=question,
+                            ai_message=ai_message,
+                            action_output=act_out,
+                            check_pass=check_pass,
+                            check_fail_reason=fail_reason,
+                            current_retry_counter=current_retry_counter,
+                        )
                         break
                     fail_reason = reason
                     observation = fail_reason
@@ -692,6 +783,8 @@ class ConversableAgent(Role, Agent):
                         current_retry_counter=current_retry_counter,
                     )
                 else:
+                    consecutive_llm_errors = 0
+                    consecutive_parse_errors = 0
                     # Successful reply
                     observation = act_out.observations
                     await self.write_memories(
@@ -752,10 +845,12 @@ class ConversableAgent(Role, Agent):
         last_err = None
         retry_count = 0
         llm_messages = [message.to_llm_message() for message in messages]
-        # LLM inference automatically retries 3 times to reduce interruption
-        # probability caused by speed limit and network stability
-        while retry_count < 3:
-            llm_model = await self._a_select_llm_model(last_model)
+        max_llm_retries = max(1, int(self.llm_inference_retry_count or 1))
+        # LLM inference retries are configurable to balance resilience and
+        # avoiding long-running infrastructure failures.
+        while retry_count < max_llm_retries:
+            excluded_models = [last_model] if last_model else None
+            llm_model = await self._a_select_llm_model(excluded_models)
             try:
                 if prompt:
                     llm_messages = _new_system_message(prompt) + llm_messages
@@ -781,7 +876,8 @@ class ConversableAgent(Role, Agent):
                 retry_count += 1
                 last_model = llm_model
                 last_err = str(e)
-                await asyncio.sleep(10)
+                if retry_count < max_llm_retries:
+                    await asyncio.sleep(10)
 
         if last_err:
             raise ValueError(last_err)
@@ -1130,25 +1226,57 @@ class ConversableAgent(Role, Agent):
     async def _a_select_llm_model(
         self, excluded_models: Optional[List[str]] = None
     ) -> str:
-        logger.info(f"_a_select_llm_model:{excluded_models}")
+        if isinstance(excluded_models, str):
+            excluded_model_names = [excluded_models]
+        else:
+            excluded_model_names = list(excluded_models or [])
+        logger.info(f"_a_select_llm_model excluded={excluded_model_names}")
         try:
             all_models = await self.not_null_llm_client.models()
             all_model_names = [item.model for item in all_models]
+            priority: List[str] = []
             # TODO Currently only two strategies, priority and default, are implemented.
             if self.not_null_llm_config.llm_strategy == LLMStrategyType.Priority:
-                priority: List[str] = []
                 strategy_context = self.not_null_llm_config.strategy_context
                 if strategy_context is not None:
                     priority = json.loads(strategy_context)  # type: ignore
                 can_uses = self._excluded_models(
-                    all_model_names, priority, excluded_models
+                    all_model_names, priority, excluded_model_names
                 )
             else:
-                can_uses = self._excluded_models(all_model_names, None, excluded_models)
+                can_uses = self._excluded_models(
+                    all_model_names, None, excluded_model_names
+                )
             if can_uses and len(can_uses) > 0:
                 return can_uses[0]
-            else:
-                return "deepseek-chat"
+
+            if priority:
+                fallback_can_uses = self._excluded_models(
+                    all_model_names,
+                    None,
+                    excluded_model_names,
+                )
+                if fallback_can_uses:
+                    return fallback_can_uses[0]
+
+            # If a transient failure excluded the only configured model, retry a
+            # registered model instead of falling through to an unregistered name.
+            if excluded_model_names:
+                retry_can_uses = self._excluded_models(
+                    all_model_names,
+                    priority if priority else None,
+                    [],
+                )
+                if retry_can_uses:
+                    return retry_can_uses[0]
+
+            available = ", ".join(all_model_names) if all_model_names else "none"
+            requested = ", ".join(priority) if priority else "default"
+            excluded = ", ".join(excluded_model_names) or "none"
+            raise ValueError(
+                "No available LLM model service "
+                f"(available={available}, requested={requested}, excluded={excluded})"
+            )
         except Exception as e:
             logger.error(f"{self.role} get next llm failed!{str(e)}")
             raise ValueError(f"Failed to allocate model service,{str(e)}!")

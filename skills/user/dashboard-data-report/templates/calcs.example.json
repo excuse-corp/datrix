@@ -1,0 +1,70 @@
+{
+  "source": "scripts/verify_calcs.py 输出",
+  "note": "所有百分比按未四舍五入中间值计算后再取整；因四舍五入，分项相加与合计可能存在 ±0.1 的尾差。金额单位为人民币元。",
+  "rows": [
+    {
+      "id": "C1",
+      "name": "三店销售额合计",
+      "formula": "38766.88 + 39296.41 + 43013.36",
+      "reported": "121,076.65",
+      "decimals": 2,
+      "unit": "currency"
+    },
+    {
+      "id": "C2",
+      "name": "抖音直播店销售额占比",
+      "formula": "pct(43013.36, 121076.65)",
+      "reported": "35.5%",
+      "decimals": 1,
+      "unit": "percent"
+    },
+    {
+      "id": "C3",
+      "name": "净销售额较上期增速",
+      "formula": "delta(119076.65, 102564.00)",
+      "reported": "16.1%",
+      "decimals": 1,
+      "unit": "percent"
+    },
+    {
+      "id": "C4",
+      "name": "三店合计与净销售额差额",
+      "formula": "121076.65 - 119076.65",
+      "reported": "2,000.00",
+      "decimals": 2,
+      "unit": "currency"
+    },
+    {
+      "id": "C5",
+      "name": "部门任务达成率均值",
+      "formula": "mean([96, 91, 88, 84, 72])",
+      "reported": "86.2%",
+      "decimals": 1,
+      "unit": "percent"
+    },
+    {
+      "id": "C6",
+      "name": "近7日退款额占销售额比",
+      "formula": "pct(sum([420, 510, 380, 640, 470, 720, 560]), sum([5240, 6180, 5820, 7040, 6560, 8120, 7480]))",
+      "reported": "8.0%",
+      "decimals": 1,
+      "unit": "percent"
+    },
+    {
+      "id": "C7",
+      "name": "库存周转天数均值",
+      "formula": "mean([38, 52, 29, 44, 21])",
+      "reported": "36.8",
+      "decimals": 1,
+      "unit": "plain"
+    },
+    {
+      "id": "C8",
+      "name": "生产批次总数",
+      "formula": "sum([4, 6, 8, 10]) + sum([12, 14, 11, 9]) + sum([6, 5, 8, 7])",
+      "reported": "100 批",
+      "decimals": 0,
+      "unit": "plain"
+    }
+  ]
+}

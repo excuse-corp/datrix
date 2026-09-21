@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 from dbgpt.component import SystemApp
 from dbgpt.model.base import ModelInstance
 from dbgpt.model.cluster import WorkerStartupRequest
+from dbgpt.model.cluster.storage import ModelStorageItem
 from dbgpt.model.parameter import WorkerType
 from dbgpt.storage.metadata import db
 from dbgpt_serve.core import BaseServeConfig
@@ -16,7 +17,7 @@ from dbgpt_serve.core.tests.conftest import (  # noqa: F401
     system_app,
 )
 
-from ..api.endpoints import init_endpoints, model_list, router, set_default_model
+from ..api.endpoints import init_endpoints, model_list, model_stop, router, set_default_model
 from ..api.endpoints import start_model
 from ..api.schemas import DefaultModelRequest, ModelResponse
 from ..config import SERVE_CONFIG_KEY_PREFIX
@@ -176,6 +177,30 @@ async def test_start_model_handles_concurrent_start():
 
 
 @pytest.mark.asyncio
+async def test_stop_model_disables_auto_start_without_deleting_record():
+    request = _model_request()
+    request.delete_after = False
+    worker_manager = MagicMock()
+    worker_manager.model_shutdown = AsyncMock()
+    model_storage = MagicMock()
+    model_storage.set_enabled.return_value = 1
+
+    response = await model_stop(request, worker_manager, model_storage)
+
+    assert response.success is True
+    worker_manager.model_shutdown.assert_awaited_once_with(request)
+    model_storage.set_enabled.assert_called_once_with(
+        "test-model",
+        "llm",
+        enabled=False,
+        sys_code=None,
+        user_name=None,
+        host="127.0.0.1",
+        port=8001,
+    )
+
+
+@pytest.mark.asyncio
 async def test_model_list_uses_generation_probe_for_llm_health(monkeypatch):
     controller = MagicMock()
     controller.get_all_instances = AsyncMock(
@@ -212,6 +237,41 @@ async def test_model_list_uses_generation_probe_for_llm_health(monkeypatch):
     assert response.data[0].model_name == "bad-model"
     assert response.data[0].healthy is False
     assert response.data[0].health_reason == "401 Unauthorized"
+
+
+@pytest.mark.asyncio
+async def test_model_list_includes_stopped_persisted_model(monkeypatch):
+    controller = MagicMock()
+    controller.get_all_instances = AsyncMock(side_effect=[[], []])
+    stored_model = ModelStorageItem(
+        host="127.0.0.1",
+        port=7771,
+        model="deepseek-flash",
+        provider="proxy/deepseek",
+        worker_type="llm",
+        enabled=False,
+        params={
+            "name": "deepseek-flash",
+            "provider": "proxy/deepseek",
+            "api_base": "https://api.deepseek.com",
+        },
+    )
+    model_storage = MagicMock()
+    model_storage.all_model_items.return_value = [stored_model]
+    monkeypatch.setattr(
+        "dbgpt_serve.model.api.endpoints.get_model_storage",
+        lambda: model_storage,
+    )
+
+    response = await model_list(controller)
+
+    assert response.success is True
+    assert len(response.data) == 1
+    assert response.data[0].model_name == "deepseek-flash"
+    assert response.data[0].enabled is False
+    assert response.data[0].running is False
+    assert response.data[0].healthy is False
+    assert response.data[0].health_reason == "Model is stopped"
 
 
 def test_resolve_default_model_falls_back_to_healthy_llm(monkeypatch, tmp_path):

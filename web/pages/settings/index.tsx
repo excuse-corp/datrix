@@ -1,3 +1,5 @@
+import { useInterfaceStyle } from '@/hooks/use-interface-style';
+import { isDashboardStyle } from '@/utils/interface-style';
 import {
   ControlOutlined,
   EditOutlined,
@@ -48,15 +50,28 @@ function SettingsGrid({ items }: { items: SettingItem[] }) {
 }
 
 export default function SettingsPage() {
+  const interfaceStyle = useInterfaceStyle();
+  const isDashboard = isDashboardStyle(interfaceStyle);
+
   return (
-    <main className='h-full overflow-auto bg-[#f7f9fc] px-4 py-6 dark:bg-[#111827] md:px-6'>
+    <main className='dashboard-main-canvas dashboard-settings-page h-full overflow-auto bg-[#f7f9fc] px-4 py-6 dark:bg-[#111827] md:px-6'>
       <div className='mx-auto max-w-5xl'>
-        <div className='mb-6 flex items-center gap-3'>
-          <SettingOutlined className='text-xl text-blue-600 dark:text-blue-400' />
-          <Typography.Title level={2} className='!mb-0'>
-            设置
-          </Typography.Title>
-        </div>
+        {isDashboard ? (
+          <div className='dashboard-page-header'>
+            <div>
+              <div className='dashboard-page-title'>设置</div>
+              <div className='dashboard-page-subtitle'>管理模型、提示词和问数运行策略</div>
+            </div>
+            <SettingOutlined className='text-xl text-blue-600 dark:text-blue-400' />
+          </div>
+        ) : (
+          <div className='mb-6 flex items-center gap-3'>
+            <SettingOutlined className='text-xl text-blue-600 dark:text-blue-400' />
+            <Typography.Title level={2} className='!mb-0'>
+              设置
+            </Typography.Title>
+          </div>
+        )}
         <SettingsGrid items={items} />
 
         <section className='mt-8'>

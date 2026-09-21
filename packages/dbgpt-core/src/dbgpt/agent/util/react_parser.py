@@ -77,7 +77,28 @@ class ReActOutputParser:
 
     def _prefix_line_pattern(self, escaped_prefix: str) -> str:
         """Build a regex for a ReAct prefix at the start of a logical line."""
-        return rf"^[ \t]*{escaped_prefix}\s*"
+        prefix = escaped_prefix
+        if prefix.endswith(":"):
+            prefix = rf"{prefix[:-1]}[:：]"
+        return rf"^[ \t]*(?:[-*]\s*)?(?:\*\*)?{prefix}(?:\*\*)?\s*"
+
+    @staticmethod
+    def _strip_wrapping_code_fence(text: str) -> str:
+        """Remove a markdown code fence that wraps an entire value."""
+        stripped = text.strip()
+        match = re.fullmatch(
+            r"(```+|~~~+)[a-zA-Z0-9_-]*\s*\n(.*?)\n\1",
+            stripped,
+            re.DOTALL,
+        )
+        if match:
+            return match.group(2).strip()
+        return text
+
+    @staticmethod
+    def _clean_action_name(action: str) -> str:
+        """Normalize common markdown/quote wrappers around tool names."""
+        return action.strip().strip("`'\"").strip()
 
     def _markdown_fence_spans(self, text: str) -> List[tuple[int, int]]:
         """Return markdown fenced-code spans so ReAct labels inside are ignored."""
@@ -132,17 +153,13 @@ class ReActOutputParser:
         fence = "`" * 6
         pattern = (
             rf"{re.escape(fence)}{re.escape(VisThinking.vis_tag())}"
-            rf"\s*\n.*?\n{re.escape(fence)}\s*"
+            rf"\s*\n.*?\n{re.escape(fence)}[ \t]*"
         )
         return re.sub(pattern, "", text, flags=re.DOTALL)
 
     def _strip_markdown_code_fence(self, text: str) -> str:
         """Remove a markdown fence that wraps the whole ReAct response."""
-        stripped = text.strip()
-        match = re.fullmatch(r"```[a-zA-Z0-9_-]*\s*\n(.*?)\n```", stripped, re.DOTALL)
-        if match:
-            return match.group(1).strip()
-        return text
+        return self._strip_wrapping_code_fence(text)
 
     def _normalize_react_text(self, text: str) -> str:
         """Normalize common wrappers before ReAct parsing."""
@@ -197,6 +214,18 @@ class ReActOutputParser:
         thought_matches = self._find_prefix_matches(text, self.thought_prefix_escaped)
 
         if not thought_matches:
+            prefix_matches = []
+            for escaped_prefix in (
+                self.phase_prefix_escaped,
+                self.action_intention_prefix_escaped,
+                self.action_reason_prefix_escaped,
+                self.action_prefix_escaped,
+            ):
+                prefix_matches.extend(self._find_prefix_matches(text, escaped_prefix))
+            if prefix_matches:
+                first_prefix = min(prefix_matches, key=lambda match: match.start())
+                step_data = self._parse_step(text[first_prefix.start() :].strip())
+                return [step_data] if step_data else []
             return []
 
         # Process each thought section
@@ -327,7 +356,9 @@ class ReActOutputParser:
             re.DOTALL | re.MULTILINE,
         )
         if action_match:
-            action = step_text[action_match.start(1) : action_match.end(1)].strip()
+            action = self._clean_action_name(
+                step_text[action_match.start(1) : action_match.end(1)]
+            )
 
             # Check if this is a terminate action
             is_terminal = action.lower() == self.terminate_action.lower()
@@ -342,6 +373,7 @@ class ReActOutputParser:
             action_input_text = step_text[
                 action_input_match.start(1) : action_input_match.end(1)
             ].strip()
+            action_input_text = self._strip_wrapping_code_fence(action_input_text)
 
             # Try to parse action input as JSON if it looks like JSON
             if (
@@ -403,7 +435,11 @@ class ReActOutputParser:
             The final output string or None if no terminate action is found.
         """
         for step in reversed(steps):  # Look from the end
-            if step.is_terminal and step.action == self.terminate_action:
+            if (
+                step.is_terminal
+                and step.action
+                and step.action.lower() == self.terminate_action.lower()
+            ):
                 if (
                     isinstance(step.action_input, dict)
                     and "result" in step.action_input

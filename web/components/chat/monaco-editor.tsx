@@ -1,4 +1,5 @@
 import { ChatContext } from '@/app/chat-context';
+import { useInterfaceStyle } from '@/hooks/use-interface-style';
 import { formatSql } from '@/utils';
 import Editor, { OnChange, loader } from '@monaco-editor/react';
 import { useLatest } from 'ahooks';
@@ -7,7 +8,7 @@ import * as monaco from 'monaco-editor/esm/vs/editor/editor.api.js';
 import { useContext, useMemo } from 'react';
 import { register } from './ob-editor/ob-plugin';
 import { getModelService } from './ob-editor/service';
-import { github, githubDark } from './ob-editor/theme';
+import { github, githubDark, terminal } from './ob-editor/theme';
 
 loader.config({ monaco });
 
@@ -28,6 +29,7 @@ interface MonacoEditorProps {
 
 monaco.editor.defineTheme('github', github as any);
 monaco.editor.defineTheme('githubDark', githubDark as any);
+monaco.editor.defineTheme('dataman-terminal', terminal as any);
 
 export default function MonacoEditor({
   className,
@@ -47,11 +49,12 @@ export default function MonacoEditor({
       return formatSql(`-- ${thoughts} \n${value}`);
     }
     return formatSql(value);
-  }, [value, thoughts]);
+  }, [value, thoughts, language]);
 
   const sessionRef = useLatest(session);
 
   const context = useContext(ChatContext);
+  const interfaceStyle = useInterfaceStyle();
 
   async function pluginRegister(editor: monaco.editor.IStandaloneCodeEditor) {
     const plugin = await register();
@@ -74,7 +77,7 @@ export default function MonacoEditor({
       value={editorValue}
       defaultLanguage={language}
       onChange={onChange}
-      theme={context?.mode !== 'dark' ? 'github' : 'githubDark'}
+      theme={interfaceStyle === 'terminal' ? 'dataman-terminal' : context?.mode !== 'dark' ? 'github' : 'githubDark'}
       options={{
         minimap: {
           enabled: false,

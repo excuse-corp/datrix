@@ -1,0 +1,555 @@
+.terminal-only { display: none; }
+
+html[data-interface-style='terminal'] {
+  --terminal-bg: #f3ede2;
+  --terminal-surface: #faf6ee;
+  --terminal-surface-strong: #e9e1d3;
+  --terminal-surface-muted: #e2d8c8;
+  --terminal-text: #292824;
+  --terminal-text-muted: #716b60;
+  --terminal-text-faint: #958b7e;
+  --terminal-line: #c9c0b1;
+  --terminal-line-soft: #ded5c7;
+  --terminal-accent: #292824;
+  --terminal-accent-soft: #d7cbb9;
+  --terminal-success: #49634c;
+  --terminal-warning: #9a6a2f;
+  --terminal-danger: #9b4f46;
+  --terminal-mono: "JetBrains Mono", "SFMono-Regular", Consolas, "Noto Sans SC", "Microsoft YaHei", monospace;
+  --terminal-sans: "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+}
+
+html[data-interface-style='terminal'] body,
+html[data-interface-style='terminal'] body.dark,
+html[data-interface-style='terminal'] body.light {
+  background: var(--terminal-bg) !important;
+  color: var(--terminal-text) !important;
+  font-family: var(--terminal-sans) !important;
+}
+
+html[data-interface-style='terminal'] .app-provider-root,
+html[data-interface-style='terminal'] .app-root,
+html[data-interface-style='terminal'] .dataman-chat-home,
+html[data-interface-style='terminal'] .dataman-chat-home > div,
+html[data-interface-style='terminal'] .industrial-canvas,
+html[data-interface-style='terminal'] .industrial-welcome {
+  background: var(--terminal-bg) !important;
+  color: var(--terminal-text) !important;
+}
+
+html[data-interface-style='terminal'] .dataman-sidebar,
+html[data-interface-style='terminal'] .dataman-sidebar.bg-bar,
+html[data-interface-style='terminal'] .bg-bar {
+  background: var(--terminal-surface-strong) !important;
+  color: var(--terminal-text) !important;
+  border-right: 1px solid var(--terminal-line) !important;
+  font-family: var(--terminal-sans) !important;
+}
+
+html[data-interface-style='terminal'] .dataman-sidebar {
+  width: 240px !important;
+  min-width: 240px !important;
+  padding: 12px 12px 0 !important;
+}
+
+html[data-interface-style='terminal'] .sidebar-brand-name,
+html[data-interface-style='terminal'] .dataman-sidebar .sidebar-section-label,
+html[data-interface-style='terminal'] .dataman-sidebar .text-gray-700,
+html[data-interface-style='terminal'] .dataman-sidebar .text-gray-900,
+html[data-interface-style='terminal'] .dataman-sidebar .text-gray-300,
+html[data-interface-style='terminal'] .dataman-sidebar .text-gray-400 {
+  color: var(--terminal-text) !important;
+}
+
+html[data-interface-style='terminal'] .dataman-sidebar .text-gray-400,
+html[data-interface-style='terminal'] .dataman-sidebar .text-gray-300,
+html[data-interface-style='terminal'] .dataman-sidebar .sidebar-section-label {
+  color: var(--terminal-text-muted) !important;
+}
+
+html[data-interface-style='terminal'] .dataman-sidebar .industrial-new-task,
+html[data-interface-style='terminal'] .dataman-sidebar > a > div {
+  min-height: 38px;
+  border: 1px solid var(--terminal-accent) !important;
+  border-radius: 0 !important;
+  background: var(--terminal-accent) !important;
+  color: var(--terminal-surface) !important;
+  box-shadow: 2px 2px 0 var(--terminal-line) !important;
+  font-family: var(--terminal-mono) !important;
+  letter-spacing: 0.01em;
+}
+
+html[data-interface-style='terminal'] .dataman-sidebar .industrial-nav-item,
+html[data-interface-style='terminal'] .dataman-sidebar .industrial-nav-item-active,
+html[data-interface-style='terminal'] .dataman-sidebar .flex-1.overflow-y-auto a {
+  border-radius: 0 !important;
+  color: var(--terminal-text) !important;
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+html[data-interface-style='terminal'] .dataman-sidebar .industrial-nav-item {
+  border-left: 3px solid transparent;
+}
+
+html[data-interface-style='terminal'] .dataman-sidebar .industrial-nav-item:hover,
+html[data-interface-style='terminal'] .dataman-sidebar .flex-1.overflow-y-auto a:hover {
+  background: var(--terminal-surface) !important;
+  color: var(--terminal-text) !important;
+}
+
+html[data-interface-style='terminal'] .dataman-sidebar .industrial-nav-item-active {
+  border-left-color: var(--terminal-accent) !important;
+  background: var(--terminal-surface) !important;
+  color: var(--terminal-text) !important;
+  font-family: var(--terminal-mono) !important;
+}
+
+html[data-interface-style='terminal'] .dataman-sidebar .industrial-nav-item-active span {
+  color: var(--terminal-text) !important;
+}
+
+html[data-interface-style='terminal'] .dataman-sidebar .flex-1.overflow-y-auto a {
+  border-left: 2px solid transparent;
+}
+
+html[data-interface-style='terminal'] .dataman-sidebar .flex-1.overflow-y-auto a:hover,
+html[data-interface-style='terminal'] .dataman-sidebar .flex-1.overflow-y-auto a.bg-\[\#F1F5F9\] {
+  border-left-color: var(--terminal-accent) !important;
+  background: var(--terminal-surface) !important;
+}
+
+html[data-interface-style='terminal'] .dataman-sidebar .border-t,
+html[data-interface-style='terminal'] .dataman-sidebar .border-gray-200,
+html[data-interface-style='terminal'] .dataman-sidebar .border-gray-700 {
+  border-color: var(--terminal-line) !important;
+}
+
+html[data-interface-style='terminal'] .industrial-welcome-content {
+  max-width: 960px !important;
+}
+
+html[data-interface-style='terminal'] .industrial-hero-title,
+html[data-interface-style='terminal'] .industrial-hero-name,
+html[data-interface-style='terminal'] .dataman-chat-home h1 {
+  color: var(--terminal-text) !important;
+  font-family: var(--terminal-mono) !important;
+  letter-spacing: 0 !important;
+}
+
+html[data-interface-style='terminal'] .industrial-hero-subtitle,
+html[data-interface-style='terminal'] .industrial-hero-slogan {
+  color: var(--terminal-text-muted) !important;
+  font-family: var(--terminal-mono) !important;
+}
+
+html[data-interface-style='terminal'] .industrial-command-frame {
+  border: 1px solid var(--terminal-text) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: 2px 2px 0 var(--terminal-line) !important;
+}
+
+html[data-interface-style='terminal'] .industrial-command-shell {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background-color: var(--terminal-surface) !important;
+  background-image: linear-gradient(to bottom, var(--terminal-line-soft) 1px, transparent 1px) !important;
+  background-size: 100% 28px !important;
+  box-shadow: none !important;
+}
+
+html[data-interface-style='terminal'] .industrial-command-input,
+html[data-interface-style='terminal'] .industrial-command-input::placeholder,
+html[data-interface-style='terminal'] .dataman-chat-home textarea,
+html[data-interface-style='terminal'] .dataman-chat-home input {
+  color: var(--terminal-text) !important;
+  font-family: var(--terminal-mono) !important;
+}
+
+html[data-interface-style='terminal'] .industrial-command-input::placeholder,
+html[data-interface-style='terminal'] .dataman-chat-home textarea::placeholder,
+html[data-interface-style='terminal'] .dataman-chat-home input::placeholder {
+  color: var(--terminal-text-faint) !important;
+  opacity: 1;
+}
+
+html[data-interface-style='terminal'] .industrial-command-toolbar {
+  border-top: 1px solid var(--terminal-line) !important;
+}
+
+html[data-interface-style='terminal'] .industrial-command-toolbar .ant-btn,
+html[data-interface-style='terminal'] .industrial-command-toolbar .ant-select-selector,
+html[data-interface-style='terminal'] .interface-style-switch {
+  border: 1px solid var(--terminal-text) !important;
+  border-radius: 0 !important;
+  background: var(--terminal-surface) !important;
+  color: var(--terminal-text) !important;
+  box-shadow: 2px 2px 0 var(--terminal-line) !important;
+  font-family: var(--terminal-mono) !important;
+}
+
+html[data-interface-style='terminal'] .industrial-command-toolbar .ant-btn-primary {
+  background: var(--terminal-accent) !important;
+  border-color: var(--terminal-accent) !important;
+  color: var(--terminal-surface) !important;
+}
+
+html[data-interface-style='terminal'] .industrial-command-toolbar .ant-btn:hover,
+html[data-interface-style='terminal'] .interface-style-switch:hover {
+  background: var(--terminal-accent-soft) !important;
+  color: var(--terminal-text) !important;
+}
+
+html[data-interface-style='terminal'] .ant-modal-content,
+html[data-interface-style='terminal'] .ant-popover-inner,
+html[data-interface-style='terminal'] .ant-dropdown-menu,
+html[data-interface-style='terminal'] .ant-select-dropdown {
+  border: 1px solid var(--terminal-line) !important;
+  border-radius: 0 !important;
+  background: var(--terminal-surface) !important;
+  color: var(--terminal-text) !important;
+  box-shadow: 3px 3px 0 var(--terminal-line) !important;
+}
+
+html[data-interface-style='terminal'] .ant-card,
+html[data-interface-style='terminal'] .ant-input,
+html[data-interface-style='terminal'] .ant-input-affix-wrapper,
+html[data-interface-style='terminal'] .ant-select-selector,
+html[data-interface-style='terminal'] .ant-picker,
+html[data-interface-style='terminal'] .ant-btn,
+html[data-interface-style='terminal'] .ant-tag {
+  border-radius: 0 !important;
+}
+
+html[data-interface-style='terminal'] .ant-table,
+html[data-interface-style='terminal'] .ant-table-container,
+html[data-interface-style='terminal'] .ant-table-thead > tr > th,
+html[data-interface-style='terminal'] .ant-table-tbody > tr > td {
+  background: var(--terminal-surface) !important;
+  border-color: var(--terminal-line-soft) !important;
+  color: var(--terminal-text) !important;
+}
+
+html[data-interface-style='terminal'] .ant-table-thead > tr > th {
+  background: var(--terminal-surface-strong) !important;
+  font-family: var(--terminal-mono) !important;
+  font-weight: 600;
+}
+
+html[data-interface-style='terminal'] .ant-table-tbody > tr:hover > td {
+  background: var(--terminal-accent-soft) !important;
+}
+
+html[data-interface-style='terminal'] code,
+html[data-interface-style='terminal'] pre,
+html[data-interface-style='terminal'] .font-mono {
+  font-family: var(--terminal-mono) !important;
+}
+
+html[data-interface-style='terminal'] .rounded,
+html[data-interface-style='terminal'] [class*='rounded-'] {
+  border-radius: 0 !important;
+}
+
+html[data-interface-style='terminal'] .shadow,
+html[data-interface-style='terminal'] [class*='shadow-'] {
+  box-shadow: none !important;
+}
+
+html[data-interface-style='terminal'] .ant-message-notice-content,
+html[data-interface-style='terminal'] .ant-notification-notice {
+  border: 1px solid var(--terminal-line) !important;
+  border-radius: 0 !important;
+  background: var(--terminal-surface) !important;
+  color: var(--terminal-text) !important;
+  box-shadow: 3px 3px 0 var(--terminal-line) !important;
+}
+
+@media (max-width: 768px) {
+  html[data-interface-style='terminal'] .industrial-welcome {
+    padding: 24px 16px 48px !important;
+  }
+
+  html[data-interface-style='terminal'] .industrial-hero-header {
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  html[data-interface-style='terminal'] .industrial-command-toolbar {
+    flex-wrap: wrap;
+    gap: 12px;
+    padding-top: 8px;
+  }
+
+  html[data-interface-style='terminal'] .industrial-command-toolbar > div:first-child {
+    width: 100%;
+    min-width: 0;
+    gap: 10px;
+  }
+
+  html[data-interface-style='terminal'] .industrial-command-toolbar > div:last-child {
+    margin-left: auto;
+  }
+
+  html[data-interface-style='terminal'] .model-selector-premium {
+    flex: 1;
+    min-width: 0;
+  }
+
+  html[data-interface-style='terminal'] .model-selector-premium .ant-select {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+/* Execution records and tool output read like a shell transcript. */
+html[data-interface-style='terminal'] .oc-session-turn,
+html[data-interface-style='terminal'] [data-component='opencode-session-turn'] {
+  color: var(--terminal-text) !important;
+  font-family: var(--terminal-sans) !important;
+}
+html[data-interface-style='terminal'] [data-slot='user-message'] {
+  border-left: 3px solid var(--terminal-accent) !important;
+  background: transparent !important;
+  border-radius: 0 !important;
+  padding-left: 14px !important;
+  font-family: var(--terminal-mono) !important;
+}
+html[data-interface-style='terminal'] [data-slot='user-message']::before {
+  content: '> ';
+  color: var(--terminal-success);
+  font-weight: 700;
+}
+html[data-interface-style='terminal'] [data-slot='assistant-response'],
+html[data-interface-style='terminal'] [data-slot='loading-placeholder'] {
+  background: var(--terminal-surface) !important;
+  border: 1px solid var(--terminal-line) !important;
+  border-radius: 0 !important;
+  box-shadow: 2px 2px 0 var(--terminal-line-soft) !important;
+}
+html[data-interface-style='terminal'] .oc-tool-trigger,
+html[data-interface-style='terminal'] [data-slot='thinking-content'],
+html[data-interface-style='terminal'] [data-slot='steps-content'] {
+  background: var(--terminal-surface-strong) !important;
+  border: 1px solid var(--terminal-line) !important;
+  border-radius: 0 !important;
+  color: var(--terminal-text) !important;
+  font-family: var(--terminal-mono) !important;
+}
+html[data-interface-style='terminal'] [data-slot='assistant-section'] .border-gray-100,
+html[data-interface-style='terminal'] [data-slot='assistant-section'] .border-gray-700 {
+  border-color: var(--terminal-line) !important;
+}
+
+/* Charts, flow canvases and ontology views share the paper surface. */
+html[data-interface-style='terminal'] .ask-data-table,
+html[data-interface-style='terminal'] .chart-container,
+html[data-interface-style='terminal'] [class*='chart-container'],
+html[data-interface-style='terminal'] .react-flow,
+html[data-interface-style='terminal'] .react-flow__renderer,
+html[data-interface-style='terminal'] .react-flow__pane,
+html[data-interface-style='terminal'] .ontology-graph-canvas {
+  background: var(--terminal-bg) !important;
+  color: var(--terminal-text) !important;
+}
+html[data-interface-style='terminal'] .react-flow__node,
+html[data-interface-style='terminal'] .react-flow__node-default,
+html[data-interface-style='terminal'] .react-flow__controls,
+html[data-interface-style='terminal'] .react-flow__minimap,
+html[data-interface-style='terminal'] .react-flow__attribution,
+html[data-interface-style='terminal'] .ontology-graph-canvas [class*='bg-white'] {
+  background: var(--terminal-surface) !important;
+  border-color: var(--terminal-line) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  color: var(--terminal-text) !important;
+}
+html[data-interface-style='terminal'] .react-flow__controls-button {
+  background: var(--terminal-surface-strong) !important;
+  border-color: var(--terminal-line) !important;
+  color: var(--terminal-text) !important;
+}
+html[data-interface-style='terminal'] .react-flow__edge-path {
+  stroke: var(--terminal-text-muted) !important;
+}
+html[data-interface-style='terminal'] .react-flow__background pattern circle {
+  fill: var(--terminal-line) !important;
+}
+html[data-interface-style='terminal'] .ask-data-table th,
+html[data-interface-style='terminal'] .ask-data-table td {
+  background: var(--terminal-surface) !important;
+  border-color: var(--terminal-line-soft) !important;
+  color: var(--terminal-text) !important;
+}
+html[data-interface-style='terminal'] .ask-data-table th {
+  background: var(--terminal-surface-strong) !important;
+  font-family: var(--terminal-mono) !important;
+}
+html[data-interface-style='terminal'] .ant-empty-description,
+html[data-interface-style='terminal'] .text-gray-500,
+html[data-interface-style='terminal'] .text-gray-400,
+html[data-interface-style='terminal'] .text-slate-500 {
+  color: var(--terminal-text-muted) !important;
+}
+
+/* Neutral utility surfaces are shared by resource pages, mobile and share views. */
+html[data-interface-style='terminal'] :is(.bg-white, [class*='bg-white/'], .bg-gray-50, .bg-gray-100, .bg-slate-50, .bg-slate-100, .bg-theme-light) {
+  background-color: var(--terminal-surface) !important;
+  color: var(--terminal-text);
+}
+html[data-interface-style='terminal'] :is([class*='dark:bg-gray-'], [class*='dark:bg-zinc-'], [class*='dark:bg-theme-'], [class*='dark:bg-[#']) {
+  background-color: var(--terminal-surface) !important;
+}
+html[data-interface-style='terminal'] :is(.text-gray-800, .text-gray-900, .text-slate-800, .text-slate-900, [class*='dark:text-gray-'], [class*='dark:text-white']) {
+  color: var(--terminal-text) !important;
+}
+html[data-interface-style='terminal'] :is([class*='border-gray-'], [class*='border-slate-'], [class*='border-zinc-']) {
+  border-color: var(--terminal-line) !important;
+}
+html[data-interface-style='terminal'] .prose {
+  --tw-prose-body: var(--terminal-text);
+  --tw-prose-headings: var(--terminal-text);
+  --tw-prose-links: var(--terminal-text);
+  --tw-prose-bold: var(--terminal-text);
+  --tw-prose-code: var(--terminal-text);
+  --tw-prose-pre-code: var(--terminal-text);
+  --tw-prose-pre-bg: var(--terminal-surface-strong);
+  color: var(--terminal-text) !important;
+}
+html[data-interface-style='terminal'] .prose :is(h1,h2,h3,h4,strong,code,a) {
+  color: var(--terminal-text) !important;
+}
+html[data-interface-style='terminal'] .prose pre {
+  background: var(--terminal-surface-strong) !important;
+  color: var(--terminal-text) !important;
+  border: 1px solid var(--terminal-line);
+}
+html[data-interface-style='terminal'] :is(.g2-tooltip, .g2-tooltip [style], .g2-tooltip-title, .g2-tooltip-list-item) {
+  color: var(--terminal-text) !important;
+  border-color: var(--terminal-line) !important;
+}
+html[data-interface-style='terminal'] .g2-tooltip {
+  background: var(--terminal-surface) !important;
+  border: 1px solid var(--terminal-line) !important;
+  border-radius: 0 !important;
+  box-shadow: 2px 2px 0 var(--terminal-line) !important;
+}
+html[data-interface-style='terminal'] .react-flow__edge-textbg {
+  fill: var(--terminal-surface) !important;
+}
+html[data-interface-style='terminal'] .react-flow__edge-text {
+  fill: var(--terminal-text) !important;
+}
+html[data-interface-style='terminal'] :focus-visible {
+  outline: 2px solid var(--terminal-text);
+  outline-offset: 2px;
+}
+
+/* Terminal chrome and transcript hierarchy, rather than a paper card. */
+html[data-interface-style='terminal'] .terminal-only { display: block; }
+html[data-interface-style='terminal'] .industrial-welcome-content {
+  max-width: 960px !important;
+  border: 1px solid var(--terminal-text);
+  background: var(--terminal-surface);
+  box-shadow: 6px 6px 0 var(--terminal-line);
+  align-items: stretch !important;
+  font-family: var(--terminal-mono);
+  animation: none !important;
+}
+html[data-interface-style='terminal'] .terminal-window-title,
+html[data-interface-style='terminal'] .terminal-window-status {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 20px;
+  font: 12px/1.5 var(--terminal-mono);
+}
+html[data-interface-style='terminal'] .terminal-window-title {
+  background: var(--terminal-text);
+  color: var(--terminal-surface);
+  letter-spacing: 0.08em;
+}
+html[data-interface-style='terminal'] .terminal-window-status {
+  border-top: 1px solid var(--terminal-text);
+  background: var(--terminal-surface-strong);
+}
+html[data-interface-style='terminal'] .terminal-intro { padding: 28px 28px 20px; }
+html[data-interface-style='terminal'] .terminal-command-line {
+  font: 14px/1.8 var(--terminal-mono);
+  color: var(--terminal-text-muted);
+}
+html[data-interface-style='terminal'] .terminal-command-line > span:first-child {
+  color: var(--terminal-text);
+  font-weight: 700;
+}
+html[data-interface-style='terminal'] .terminal-wordmark {
+  font: 27px/1.15 monospace !important;
+  color: var(--terminal-text);
+  margin: 22px 0;
+  overflow: hidden;
+}
+html[data-interface-style='terminal'] .terminal-intro p { font-size: 13px; }
+html[data-interface-style='terminal'] .terminal-help {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 18px;
+  color: var(--terminal-text-muted);
+  font-size: 11px;
+}
+html[data-interface-style='terminal'] .terminal-help span {
+  border: 1px solid var(--terminal-line);
+  padding: 1px 5px;
+  color: var(--terminal-text);
+}
+html[data-interface-style='terminal'] .industrial-hero-header { display: none !important; }
+html[data-interface-style='terminal'] .industrial-command-region { padding: 0 28px 24px; }
+html[data-interface-style='terminal'] .industrial-command-frame {
+  border: 0 !important;
+  border-top: 1px dashed var(--terminal-line) !important;
+  box-shadow: none !important;
+}
+html[data-interface-style='terminal'] .industrial-command-shell {
+  padding: 20px 0 0 !important;
+  background-image: none !important;
+  backdrop-filter: none !important;
+}
+html[data-interface-style='terminal'] .industrial-command-input {
+  font-size: 15px !important;
+  line-height: 1.8 !important;
+  padding-left: 0 !important;
+  caret-color: var(--terminal-text);
+}
+html[data-interface-style='terminal'] .industrial-command-toolbar {
+  border-top: 0 !important;
+  padding-top: 8px;
+}
+html[data-interface-style='terminal'] .industrial-command-toolbar .ant-btn,
+html[data-interface-style='terminal'] .industrial-command-toolbar .ant-select-selector {
+  box-shadow: none !important;
+}
+html[data-interface-style='terminal'] .industrial-hero-slogan { display: none !important; }
+html[data-interface-style='terminal'] .dataman-sidebar,
+html[data-interface-style='terminal'] .dataman-sidebar * {
+  font-family: var(--terminal-mono) !important;
+}
+html[data-interface-style='terminal'] .sidebar-brand img { display: none; }
+html[data-interface-style='terminal'] .sidebar-brand::before { content: '>_'; font-size: 22px; font-weight: 700; }
+html[data-interface-style='terminal'] .sidebar-brand-name { text-transform: lowercase; }
+html[data-interface-style='terminal'] .dataman-sidebar .industrial-nav-item { height: 38px; padding-left: 8px; }
+html[data-interface-style='terminal'] .industrial-nav-item > div:first-child { display: none !important; }
+html[data-interface-style='terminal'] .industrial-nav-item::before { content: './'; margin-right: 10px; color: var(--terminal-text-muted); }
+html[data-interface-style='terminal'] .industrial-nav-item-active::before { content: '>'; color: var(--terminal-text); }
+html[data-interface-style='terminal'] .sidebar-section-label::before { content: '~/ '; }
+html[data-interface-style='terminal'] .industrial-new-task { box-shadow: none !important; }
+@media (max-width: 768px) {
+  html[data-interface-style='terminal'] .industrial-welcome { justify-content: flex-start !important; padding-top: 40px !important; }
+  html[data-interface-style='terminal'] .terminal-intro { padding: 22px 16px 18px; }
+  html[data-interface-style='terminal'] .industrial-command-region { padding: 0 16px 18px; }
+  html[data-interface-style='terminal'] .terminal-window-title,
+  html[data-interface-style='terminal'] .terminal-window-status { padding: 9px 12px; font-size: 10px; gap: 8px; }
+  html[data-interface-style='terminal'] .terminal-wordmark { font-size: 22px !important; }
+  html[data-interface-style='terminal'] .industrial-command-toolbar > div:nth-child(2) { margin-left: auto; }
+}

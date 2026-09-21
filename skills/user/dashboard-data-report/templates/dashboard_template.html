@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{TITLE}}</title>
+<style>
+  :root{
+    --bg:#F4F0E7; --card:#FFFFFF; --chip:#F2EFE6; --chip-2:#EFEFE7;
+    --line:#E7E2D6; --line-soft:#F0EDE4;
+    --ink:#1D322B; --ink-2:#41524C; --muted:#8A8B85; --muted-2:#A9AAA3;
+    --orange:#D67040; --orange-deep:#C0603A; --gold:#EEAB64; --amber:#D9A62C;
+    --sage:#6F8D7F; --sage-deep:#4E6E60; --green:#2F7A57; --green-bg:#E7F2EB;
+    --teal:#3E7C8C; --blue:#3A6488; --plum:#7A5A73; --clay:#B4483C;
+    --amber-bg:#FBF0DC; --red-bg:#FBE9E6; --blue-bg:#E8EFF5; --sage-bg:#E9F0EC; --plum-bg:#F1EAFF;
+    --radius:14px; --shadow:0 1px 2px rgba(29,50,43,.04),0 8px 24px -12px rgba(29,50,43,.10);
+  }
+  *{box-sizing:border-box} html,body{margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased;
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:1240px;margin:0 auto;padding:18px 20px 44px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
+  .num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}
+  .tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:600;white-space:nowrap}
+  .tag.green{color:var(--green);background:var(--green-bg)} .tag.amber{color:#A9741B;background:var(--amber-bg)}
+  .tag.red{color:var(--clay);background:var(--red-bg)} .tag.blue{color:var(--blue);background:var(--blue-bg)}
+  .tag.sage{color:var(--sage-deep);background:var(--sage-bg)} .tag.plum{color:var(--plum);background:var(--plum-bg)}
+  .tag.gray{color:var(--muted);background:var(--chip)}
+  .dot{width:5px;height:5px;border-radius:50%;background:currentColor;display:inline-block}
+  .dot.live{background:#3FA46F;animation:pulse 2s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(63,164,111,.5)}70%{box-shadow:0 0 0 6px rgba(63,164,111,0)}100%{box-shadow:0 0 0 0 rgba(63,164,111,0)}}
+  .link{color:var(--orange);font-weight:600;font-size:12px;text-decoration:none;white-space:nowrap}
+  .link:hover{text-decoration:underline}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:11px;color:var(--muted)}
+  .legend i{width:9px;height:9px;border-radius:2px;display:inline-block;margin-right:5px;vertical-align:-1px}
+  .sec-title{font-size:12px;font-weight:700;letter-spacing:.1em;color:var(--muted);text-transform:uppercase;margin:26px 2px 10px}
+
+  .topbar{display:flex;gap:12px;align-items:stretch}
+  .topbar .head-main{flex:1;padding:13px 18px;min-width:0;display:flex;align-items:center;justify-content:space-between;gap:16px}
+  .crumb{font-size:11.5px;color:var(--muted);display:flex;align-items:center;gap:7px}
+  .crumb b{color:var(--ink);font-weight:600} .crumb i{font-style:normal;color:var(--muted-2)}
+  .head-title{margin:5px 0 0;font-size:19px;font-weight:700;letter-spacing:-.01em}
+  .head-note{font-size:11.5px;color:var(--muted);display:flex;align-items:center;gap:6px;white-space:nowrap}
+  .head-act{display:flex;flex-direction:column;justify-content:center;gap:1px;background:var(--ink);color:#fff;border:1px solid var(--ink);
+    border-radius:var(--radius);padding:10px 18px;cursor:pointer;text-align:left;box-shadow:var(--shadow);font-family:inherit;transition:transform .12s ease,background .12s ease}
+  .head-act:hover{background:#254039;transform:translateY(-1px)}
+  .head-act .k{font-size:10px;letter-spacing:.14em;color:#9FB4AC;text-transform:uppercase}
+  .head-act .v{font-size:14px;font-weight:700;white-space:nowrap}
+
+  .grid-main{display:grid;grid-template-columns:0.43fr 1fr;gap:12px;margin-top:12px;align-items:stretch}
+  .kpi{padding:16px;display:flex;flex-direction:column}
+  .kpi-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .kpi-label{font-size:12px;color:var(--ink-2);font-weight:600}
+  .kpi-badge{font-size:10.5px;color:var(--muted);background:var(--chip);border-radius:6px;padding:2px 7px;font-weight:600}
+  .kpi-note{font-size:11px;color:var(--muted-2);margin-top:4px}
+  .kpi-value{font-size:30px;font-weight:700;letter-spacing:-.02em;margin-top:16px;line-height:1.1}
+  .kpi-delta{margin-top:6px;font-size:12px;font-weight:600;display:flex;align-items:center;gap:5px}
+  .kpi-delta.up{color:var(--green)} .kpi-delta.down{color:var(--clay)}
+  .kpi-delta span{color:var(--muted);font-weight:400}
+  .kpi-stats{margin-top:26px;display:flex;flex-direction:column;gap:8px}
+  .stat{display:flex;align-items:center;justify-content:space-between;background:var(--chip-2);border-radius:10px;padding:8px 11px}
+  .stat .l{font-size:11.5px;color:var(--muted)} .stat .r{font-size:13px;font-weight:700}
+
+  .chart-card{background:var(--orange);border-color:var(--orange-deep);color:#fff;display:flex;flex-direction:column;overflow:hidden;padding:12px}
+  .chart-head{background:#F7FAF3;border-radius:10px;padding:7px 8px 7px 14px;display:flex;align-items:center;justify-content:space-between;gap:10px;color:var(--ink)}
+  .chart-head .t{font-size:13.5px;font-weight:700}
+  .pill-live{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 10px;border-radius:999px;background:var(--green-bg);color:var(--green);font-size:11px;font-weight:600;white-space:nowrap}
+  .chart-mode{margin:11px 4px 0;font-size:11.5px;color:rgba(255,255,255,.8)}
+  .chart-kpi{margin:7px 4px 0;display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+  .chart-kpi .l{font-size:11.5px;color:rgba(255,255,255,.8)} .chart-kpi .v{font-size:24px;font-weight:700}
+  .chart-kpi .d{font-size:12px;font-weight:600;color:#FFE8D9}
+  .chart-meta{margin:7px 4px 0;font-size:11px;color:rgba(255,255,255,.72);text-align:center}
+  .chart-body{margin:6px 4px 0;flex:1;min-height:158px}
+  .chart-legend{display:flex;gap:14px;flex-wrap:wrap;margin:8px 4px 0;font-size:11px;color:rgba(255,255,255,.85)}
+  .chart-legend i{width:9px;height:9px;border-radius:2px;display:inline-block;margin-right:5px;vertical-align:-1px}
+  .chart-foot{padding:10px 4px 12px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:11px;color:rgba(255,255,255,.74)}
+  .btn-ghost{background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.26);color:#fff;font-size:11.5px;font-weight:600;padding:6px 12px;border-radius:9px;cursor:pointer;font-family:inherit}
+  .btn-ghost:hover{background:rgba(255,255,255,.22)}
+
+  .watch{margin-top:12px;padding:14px 16px}
+  .watch-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  .watch-title{font-size:13.5px;font-weight:700}
+  .watch-title em{font-style:normal;letter-spacing:.1em;color:var(--orange);margin-left:6px;font-size:12px}
+  .watch-list{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}
+  .shop{border:1px solid var(--line);border-radius:11px;padding:11px 13px;background:#fff;display:flex;flex-direction:column;gap:7px;transition:box-shadow .12s,transform .12s}
+  .shop:hover{box-shadow:var(--shadow);transform:translateY(-1px)}
+  .shop-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .shop-name{font-size:12.5px;font-weight:600}
+  .shop-val{font-size:11.5px;color:var(--muted)} .shop-val b{color:var(--ink);font-size:13px;font-weight:700;margin-left:4px}
+
+  .grid-a{display:grid;grid-template-columns:1.25fr 1fr 1fr;gap:12px;align-items:stretch}
+  .grid-b{display:grid;grid-template-columns:1.55fr 1fr;gap:12px;margin-top:12px;align-items:stretch}
+  .grid-c{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;align-items:stretch}
+  .panel{padding:14px 16px;display:flex;flex-direction:column}
+  .p-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+  .p-title{font-size:13px;font-weight:700} .p-sub{font-size:11px;color:var(--muted-2);margin-top:2px}
+  .cbox{flex:1;min-height:186px;margin-top:12px} .cbox.tall{min-height:210px}
+  .p-foot{margin-top:10px;padding-top:10px;border-top:1px solid var(--line-soft);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+  .kpis-inline{display:flex;gap:18px;flex-wrap:wrap}
+  .kpis-inline .it .l{font-size:10.5px;color:var(--muted-2)} .kpis-inline .it .v{font-size:15px;font-weight:700}
+  .donut-wrap{display:flex;align-items:center;gap:14px;margin-top:12px;flex:1}
+  .dlist{flex:1;display:flex;flex-direction:column;gap:7px}
+  .dlist .r{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11.5px}
+  .dlist .r .n{color:var(--ink-2)} .dlist .r .n i{width:8px;height:8px;border-radius:2px;display:inline-block;margin-right:6px}
+  .dlist .r .v{font-weight:700}
+  .insight{font-size:11.5px;color:var(--ink-2);background:var(--chip);border-left:3px solid var(--orange);border-radius:0 8px 8px 0;padding:8px 11px;margin-top:10px;line-height:1.6}
+
+  .b-card{padding:14px 16px;display:flex;flex-direction:column}
+  .b-card.cream{background:var(--chip-2);border-color:#E4DFD3}
+  .b-badge{font-size:14px;font-weight:700;color:var(--orange);background:#FBEDE4;border-radius:9px;padding:3px 10px;line-height:1.3}
+  .b-desc{font-size:11.5px;color:var(--muted);margin-top:8px;line-height:1.55}
+  .b-body{margin-top:14px;display:flex;flex-direction:column;gap:12px;flex:1}
+  .b-foot{margin-top:14px;padding-top:11px;border-top:1px solid var(--line-soft);display:flex;justify-content:flex-end}
+  .kv-line{font-size:11.5px;color:var(--muted);display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  .kv-line b{color:var(--ink);font-weight:700} .kv-line .sep{color:var(--muted-2)}
+  .prog .p-top{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+  .prog .p-name{font-size:12px;font-weight:600} .prog .p-pct{font-size:12px;font-weight:700;color:var(--ink-2)}
+  .bar{height:7px;border-radius:999px;background:#E4DFD3;margin-top:6px;overflow:hidden}
+  .bar > i{display:block;height:100%;border-radius:999px;background:var(--orange)}
+
+  /* 数据核对表 */
+  .audit{margin-top:12px;padding:16px}
+  .audit-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  .audit-sum{display:flex;gap:8px;flex-wrap:wrap}
+  table.audit-t{width:100%;border-collapse:collapse;margin-top:12px;font-size:11.5px}
+  table.audit-t th{text-align:left;font-weight:600;color:var(--muted);border-bottom:1px solid var(--line);padding:7px 8px;white-space:nowrap;background:var(--chip)}
+  table.audit-t td{border-bottom:1px solid var(--line-soft);padding:7px 8px;vertical-align:top}
+  table.audit-t td.r{text-align:right;white-space:nowrap}
+  table.audit-t code{background:var(--chip);padding:1px 5px;border-radius:4px;font-size:11px;color:var(--ink-2)}
+  .st-pass{color:var(--green);font-weight:700} .st-fail{color:var(--clay);font-weight:700} .st-warn{color:#A9741B;font-weight:700}
+  .foot-note{margin-top:18px;font-size:11px;color:var(--muted-2);line-height:1.7}
+
+  @media (max-width:1080px){.grid-main{grid-template-columns:1fr}.grid-a,.grid-b,.grid-c{grid-template-columns:1fr 1fr}}
+  @media (max-width:760px){.topbar{flex-direction:column}.topbar .head-main{flex-direction:column;align-items:flex-start;gap:8px}
+    .head-note{white-space:normal}.watch-list,.grid-a,.grid-b,.grid-c{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- 顶栏 -->
+  <header class="topbar">
+    <div class="card head-main">
+      <div>
+        <nav class="crumb" id="crumb"></nav>
+        <h1 class="head-title" id="rptTitle"></h1>
+      </div>
+      <span class="head-note" id="rptNote"></span>
+    </div>
+    <button class="head-act" type="button">
+      <span class="k" id="actKicker"></span><span class="v" id="actLabel"></span>
+    </button>
+  </header>
+
+  <!-- 主区：KPI + 主图 -->
+  <section class="grid-main">
+    <div class="card kpi">
+      <div>
+        <div class="kpi-top"><span class="kpi-label" id="kpiLabel"></span><span class="kpi-badge" id="kpiBadge"></span></div>
+        <div class="kpi-note" id="kpiNote"></div>
+        <div class="kpi-value num" id="kpiValue"></div>
+        <div class="kpi-delta up" id="kpiDelta"></div>
+      </div>
+      <div class="kpi-stats" id="kpiStats"></div>
+    </div>
+    <div class="card chart-card">
+      <div class="chart-head"><span class="t" id="heroTitle"></span><span class="pill-live" id="heroPill"></span></div>
+      <div class="chart-mode" id="heroMode"></div>
+      <div class="chart-kpi"><span class="l" id="heroKpiLabel"></span><span class="v num" id="heroKpiValue"></span><span class="d" id="heroKpiDelta"></span></div>
+      <div class="chart-meta num" id="heroMeta"></div>
+      <div class="chart-body" id="heroChart"></div>
+      <div class="chart-legend" id="heroLegend"></div>
+      <div class="chart-foot"><span id="heroFoot"></span><button class="btn-ghost" type="button" id="heroBtn"></button></div>
+    </div>
+  </section>
+
+  <!-- 分组卡片列表 -->
+  <section class="card watch">
+    <div class="watch-head"><div class="watch-title" id="watchTitle"></div><span class="tag gray" id="watchTag"></span></div>
+    <div class="watch-list" id="watchList"></div>
+  </section>
+
+  <!-- 图表区 A：三栏 -->
+  <div class="sec-title" id="secA"></div>
+  <section class="grid-a" id="gridA"></section>
+
+  <!-- 图表区 B：两栏（宽 + 窄） -->
+  <section class="grid-b" id="gridB"></section>
+
+  <!-- 图表区 C：两栏等宽 -->
+  <section class="grid-c" id="gridC"></section>
+
+  <!-- 数据核对表（必填） -->
+  <div class="sec-title">附录 · 数据核对</div>
+  <section class="card audit">
+    <div class="audit-head">
+      <div>
+        <div class="p-title">计算结果复核记录</div>
+        <div class="p-sub" id="auditMeta"></div>
+      </div>
+      <div class="audit-sum" id="auditSum"></div>
+    </div>
+    <table class="audit-t">
+      <thead><tr>
+        <th>编号</th><th>指标</th><th>公式 / 口径</th><th class="r">复算值</th><th class="r">报告值</th><th class="r">偏差</th><th>结论</th>
+      </tr></thead>
+      <tbody id="auditBody"></tbody>
+    </table>
+    <div class="foot-note" id="auditNote"></div>
+  </section>
+
+  <div class="foot-note" id="globalNote"></div>
+</div>
+
+<script>
+/* =========================================================
+   1) 数据区：生成报告时只需替换本对象
+   ========================================================= */
+const DATA = {
+  meta:{
+    crumb:["看板","管理","总览"],
+    title:"营收、交付风险与部门状态分析",
+    note:"数据自动刷新中，不触发外部执行",
+    actionKicker:"主操作", actionLabel:"查看公司状态",
+    generatedAt:"2026-09-19 11:00", period:"2026/8/9 00:00 — 2026/9/7 13:40 · 上海时间"
+  },
+  kpi:{
+    label:"近30日净销售额", badge:"经营", note:"数据每 10 秒更新 · 外部接口关闭",
+    value:"¥119,076.65", deltaPct:16.1, deltaText:"较上一可比期间",
+    stats:[{l:"库存成本",r:"¥371,172"},{l:"可售件数",r:"4,177"},{l:"经营项目",r:"8"}]
+  },
+  hero:{
+    title:"经营", pill:"持续运行中", mode:"经营：按销售 / 退款发生时间",
+    kpiLabel:"期间净销售额", kpiValue:"¥119,076.65", kpiDelta:"▲ 较上一可比期间 +16.1%",
+    meta:"2026/8/9 00:00:00 — 2026/9/7 13:40:00 · 上海时间",
+    foot:"销售与退款事件汇总 · 非实收数", btn:"核对统计明细（443 条事件）",
+    labels:["8/9","8/16","8/23","8/30","9/6"],
+    series:[
+      {name:"本期净销售额", color:"#FFF6F0", area:true,
+       data:[12980,13420,12760,13880,13240,14120,13560,14480,13920,14760,14180,13640,14920,14360,15040]},
+      {name:"上一可比周期", color:"#EEAB64", dash:"5 4",
+       data:[11240,11680,11020,12140,11560,12480,11940,12760,12280,13040,12560,12080,13260,12740,13420]}
+    ],
+    yTicks:[15143,10092,5046,0], yFmt:"currency", xTicks:[["8/9",0],["8/24",.5],["9/7",1]]
+  },
+  watch:{
+    title:"店铺经营", titleEm:"WATCHLIST", tag:"3 个店铺 · 近30日",
+    items:[
+      {name:"模拟抖音旗舰店", delta:16.5, valueLabel:"近30日净销售额", value:"¥38,766.88", color:"#D67040",
+       spark:[3,4,3,5,4,6,5,7,6,8,7,9]},
+      {name:"模拟淘宝旗舰店", delta:15.7, valueLabel:"近30日净销售额", value:"¥39,296.41", color:"#3A6488",
+       spark:[4,3,5,4,6,5,7,6,7,8,7,9]},
+      {name:"模拟抖音直播店", delta:16.0, valueLabel:"近30日净销售额", value:"¥43,013.36", color:"#D9A62C",
+       spark:[2,3,4,3,5,6,5,7,8,7,9,10]}
+    ]
+  },
+  secATitle:"趋势与结构分析",
+  gridA:[
+    {type:"groupedBar", title:"近 7 日销售额与退款", sub:"单位：元 · 按订单完成时间归集",
+     tag:{text:"周环比 +8.4%",tone:"sage"},
+     cats:["8/31","9/1","9/2","9/3","9/4","9/5","9/6"],
+     series:[{name:"销售额",color:"#D67040",data:[5240,6180,5820,7040,6560,8120,7480]},
+             {name:"退款额",color:"#6F8D7F",data:[420,510,380,640,470,720,560]}],
+     yMax:9000, yFmt:"k", insight:"退款额占销售额稳定在 7%~9%，未见异常放大。"},
+    {type:"donut", title:"店铺销售额占比", sub:"近 30 日 · 共 3 家店铺",
+     items:[{name:"抖音旗舰店",value:38766.88,color:"#D67040"},
+            {name:"淘宝旗舰店",value:39296.41,color:"#3A6488"},
+            {name:"抖音直播店",value:43013.36,color:"#D9A62C"}],
+     center:{num:"3",txt:"在营店铺"}, foot:"三店合计 ¥121,076.65 · 与净销售额差额 ¥2,000.00 为退款冲减"},
+    {type:"hbar", title:"部门任务达成率", sub:"本迭代 · 目标线 85%",
+     rows:[{name:"运营部",value:96,color:"#3E7C8C"},{name:"供应链部",value:91,color:"#3E7C8C"},
+           {name:"设计部",value:88,color:"#6F8D7F"},{name:"客服部",value:84,color:"#D9A62C"},
+           {name:"仓储部",value:72,color:"#B4483C"}],
+     target:85, insight:"仓储部 72% 低于目标 13 个百分点，为当前主要瓶颈。"}
+  ],
+  gridB:[
+    {type:"multiLine", title:"店铺销售趋势对比", sub:"近 14 日 · 三条店铺曲线同轴对比",
+     labels:["8/25","8/26","8/27","8/28","8/29","8/30","8/31","9/1","9/2","9/3","9/4","9/5","9/6","9/7"],
+     series:[
+       {name:"抖音旗舰店",color:"#D67040",data:[1180,1260,1140,1320,1280,1410,1350,1480,1420,1530,1470,1610,1560,1640]},
+       {name:"淘宝旗舰店",color:"#3A6488",data:[1240,1180,1310,1260,1380,1320,1450,1390,1510,1460,1580,1520,1640,1590]},
+       {name:"抖音直播店",color:"#D9A62C",dash:"6 3",data:[980,1120,1060,1240,1180,1330,1270,1420,1360,1510,1450,1620,1550,1710]}
+     ],
+     yMax:1800, yFmt:"k1", dots:true,
+     footKpis:[{l:"峰值日",v:"9/5"},{l:"最高单店",v:"¥43,013"},{l:"三店合计",v:"¥121,077"}]},
+    {type:"stackedBar", title:"生产批次状态分布", sub:"按周 · 单位：批",
+     tag:{text:"延期 16 批",tone:"red"},
+     cats:["W32","W33","W34","W35"],
+     segments:[{name:"已发货",color:"#6F8D7F",data:[4,6,8,10]},
+               {name:"生产中",color:"#D9A62C",data:[12,14,11,9]},
+               {name:"物料延期",color:"#B4483C",data:[6,5,8,7]}],
+     yMax:30, showValues:true}
+  ],
+  gridC:[
+    {type:"bar", title:"库存周转天数（按品类）", sub:"近 30 日 · 单位：天",
+     cats:["连衣裙","外套","裤装","针织","配饰"],
+     series:[{name:"周转天数",color:"#3E7C8C",data:[38,52,29,44,21]}],
+     yMax:60, insight:"外套 52 天显著高于均值 36.8 天，建议优先清理。"}
+  ],
+  audit:{
+    source:"scripts/verify_calcs.py 输出",
+    note:"所有百分比按未四舍五入中间值计算后再取整；因四舍五入，分项相加与合计可能存在 ±0.1 的尾差。",
+    rows:[
+      {id:"C1",name:"三店销售额合计",formula:"38766.88+39296.41+43013.36",computed:"121,076.65",reported:"121,076.65",diff:"0.00",status:"pass"},
+      {id:"C2",name:"抖音直播店占比",formula:"43013.36 ÷ 121076.65 × 100%",computed:"35.53%",reported:"35.5%",diff:"0.03pp",status:"pass"},
+      {id:"C3",name:"净销售额同比增速",formula:"(119076.65−102564.00) ÷ 102564.00",computed:"16.10%",reported:"16.1%",diff:"0.00pp",status:"pass"},
+      {id:"C4",name:"三店合计与净销售额差额",formula:"121076.65−119076.65",computed:"2,000.00",reported:"2,000.00",diff:"0.00",status:"pass"},
+      {id:"C5",name:"部门达成率均值",formula:"(96+91+88+84+72) ÷ 5",computed:"86.20%",reported:"86.2%",diff:"0.00pp",status:"pass"}
+    ]
+  },
+  globalNote:"本报告由 dashboard-data-report 技能生成。图表为纯内联 SVG，无外部依赖；所有派生指标均经 scripts/verify_calcs.py 独立复算。"
+};
+
+/* =========================================================
+   2) 图表库：按容器真实像素生成 viewBox，避免任何拉伸变形
+   ========================================================= */
+const NS="http://www.w3.org/2000/svg";
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmtK=v=>v>=1000?(v/1000).toFixed(0)+"k":String(v);
+const fmtK1=v=>v>=1000?(v/1000).toFixed(1)+"k":String(v);
+const fmtCur=v=>"¥"+v.toLocaleString();
+const YF={k:fmtK,k1:fmtK1,currency:fmtCur,plain:v=>String(v)};
+
+function mount(id,cfg,build){
+  const el=document.getElementById(id); if(!el) return;
+  const paint=()=>{
+    const W=Math.max(220,Math.round(el.clientWidth||el.getBoundingClientRect().width||420));
+    const H=Math.max(140,Math.round(el.clientHeight||el.getBoundingClientRect().height||190));
+    el.innerHTML='<svg viewBox="0 0 '+W+' '+H+'" width="100%" height="100%" role="img" aria-label="'+esc(cfg.aria||cfg.title||"图表")+'">'+build(W,H,cfg)+'</svg>';
+  };
+  paint(); window.addEventListener("resize",()=>requestAnimationFrame(paint));
+}
+function axes(W,H,PL,PR,PT,PB,ticks,yMax,fmt,extra){
+  const iw=W-PL-PR,ih=H-PT-PB,Y=v=>PT+ih*(1-v/yMax);let s="";
+  ticks.forEach(t=>{const y=Y(t).toFixed(1);
+    s+='<line x1="'+PL+'" y1="'+y+'" x2="'+(W-PR)+'" y2="'+y+'" stroke="'+(extra&&extra.grid||"#EFEDE4")+'" stroke-width="1"'+(t?' stroke-dasharray="3 4"':'')+'/>';
+    s+='<text x="'+(PL-8)+'" y="'+(parseFloat(y)+3.5)+'" text-anchor="end" font-size="10" fill="'+(extra&&extra.tick||"#A9AAA3")+'">'+fmt(t)+'</text>';});
+  return {s:s,Y:Y,iw:iw,ih:ih};
+}
+function niceTicks(max,n){n=n||4;const raw=max/n,mag=Math.pow(10,Math.floor(Math.log10(raw))),n_=raw/mag;
+  const step=(n_>=5?10:n_>=2?5:n_>=1?2:1)*mag;const out=[];for(let v=0;v<=max+1e-9;v+=step)out.push(v);return out;}
+
+/* 统一刻度计算：向上取整到 nice 上限，避免最高刻度低于数据最大值而顶部留白 */
+function scaleFor(c,dataMax){
+  if(c.yTicks)
+    return {max:c.yMax!=null?c.yMax:Math.max.apply(null,c.yTicks),ticks:c.yTicks.slice()};
+  const rawMax=(c.yMax!=null?c.yMax:dataMax*1.08)||1,n=4;
+  const mag=Math.pow(10,Math.floor(Math.log10(rawMax/n)));
+  const q=(rawMax/n)/mag;
+  const step=(q>=7?10:q>=3?5:q>=2?2.5:q>=1?2:1)*mag;
+  const max=Math.ceil(rawMax/step-1e-9)*step;
+  const ticks=[];
+  for(let v=0;v<=max+1e-9;v+=step)ticks.push(Math.round(v*1e6)/1e6);
+  return {max:max,ticks:ticks};
+}
+
+/* --- 折线 / 面积（支持多系列） --- */
+function chartLine(W,H,c){
+  const PL=c.dark?56:46,PR=12,PT=12,PB=26,ih0=H-PT-PB;
+  const all=c.series.flatMap(s=>s.data);
+  const sc=scaleFor({yMax:c.yMax,yTicks:c.yTicks},Math.max.apply(null,all));
+  const yMax=sc.max,yMin=c.yMin!=null?c.yMin:Math.min(0,Math.min.apply(null,all));
+  const Y=v=>PT+ih0*(1-(v-yMin)/(yMax-yMin)),iw=W-PL-PR;
+  const X=(i,n)=>PL+iw*i/Math.max(1,n-1);
+  const fmt=YF[c.yFmt||"plain"];
+  const ticks=sc.ticks;
+  let s="";
+  if(c.dark){
+    s+='<defs><linearGradient id="lg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#FFFFFF" stop-opacity=".34"/><stop offset="100%" stop-color="#FFFFFF" stop-opacity=".04"/></linearGradient></defs>';
+    ticks.forEach(t=>{const y=Y(t).toFixed(1);
+      s+='<line x1="'+PL+'" y1="'+y+'" x2="'+(W-PR)+'" y2="'+y+'" stroke="rgba(255,255,255,.13)" stroke-width="1"'+(t?' stroke-dasharray="3 4"':'')+'/>';
+      s+='<text x="'+(PL-9)+'" y="'+(parseFloat(y)+3.5)+'" text-anchor="end" font-size="10.5" fill="rgba(255,255,255,.72)">'+fmt(t)+'</text>';});
+  }else{
+    ticks.forEach(t=>{const y=Y(t).toFixed(1);
+      s+='<line x1="'+PL+'" y1="'+y+'" x2="'+(W-PR)+'" y2="'+y+'" stroke="#EFEDE4" stroke-width="1"'+(t?' stroke-dasharray="3 4"':'')+'/>';
+      s+='<text x="'+(PL-8)+'" y="'+(parseFloat(y)+3.5)+'" text-anchor="end" font-size="10" fill="#A9AAA3">'+fmt(t)+'</text>';});
+  }
+  c.series.forEach(se=>{
+    const d=se.data.map((v,i)=>(i?"L":"M")+X(i,se.data.length).toFixed(1)+" "+Y(v).toFixed(1)).join(" ");
+    if(se.area)s+='<path d="'+d+" L"+X(se.data.length-1,se.data.length).toFixed(1)+" "+(PT+ih0)+" L"+PL+" "+(PT+ih0)+' Z" fill="url(#lg)"/>';
+    s+='<path d="'+d+'" fill="none" stroke="'+se.color+'" stroke-width="'+(se.width||2)+'" stroke-linejoin="round" stroke-linecap="round"'+(se.dash?' stroke-dasharray="'+se.dash+'"':'')+'/>';
+    if(c.dots)se.data.forEach((v,i)=>{if(i%3===0||i===se.data.length-1)
+      s+='<circle cx="'+X(i,se.data.length).toFixed(1)+'" cy="'+Y(v).toFixed(1)+'" r="2.4" fill="'+(c.dark?"none":"#fff")+'" stroke="'+se.color+'" stroke-width="1.6"/>';});
+  });
+  (c.xTicks||[]).forEach(p=>{const x=PL+iw*p[1];
+    s+='<text x="'+x.toFixed(1)+'" y="'+(H-8)+'" text-anchor="'+(p[1]===0?"start":p[1]===1?"end":"middle")+'" font-size="'+(c.dark?10.5:10)+'" fill="'+(c.dark?"rgba(255,255,255,.72)":"#A9AAA3")+'">'+esc(p[0])+'</text>';});
+  return s;
+}
+/* --- 分组柱状图 --- */
+function chartGroupedBar(W,H,c){
+  const PL=44,PR=8,PT=10,PB=26;
+  const sc=scaleFor(c,Math.max.apply(null,c.series.flatMap(s=>s.data)));
+  const a=axes(W,H,PL,PR,PT,PB,sc.ticks,sc.max,YF[c.yFmt||"plain"]);
+  const step=a.iw/c.cats.length,n=c.series.length,bw=Math.min(15,step*0.72/n);
+  let s=a.s;
+  c.cats.forEach((cat,i)=>{
+    const cx=PL+step*i+step/2,tot=n*bw+(n-1)*2;
+    c.series.forEach((se,si)=>{
+      const y=a.Y(se.data[i]),x=cx-tot/2+si*(bw+2);
+      s+='<rect x="'+x.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+bw.toFixed(1)+'" height="'+Math.max(0,(PT+a.ih-y)).toFixed(1)+'" rx="3" fill="'+se.color+'"><title>'+esc(cat)+" · "+esc(se.name)+"："+se.data[i]+'</title></rect>';
+    });
+    s+='<text x="'+cx.toFixed(1)+'" y="'+(H-8)+'" text-anchor="middle" font-size="10" fill="#A9AAA3">'+esc(cat)+'</text>';
+  });
+  return s;
+}
+/* --- 单系列柱状图（含均值线可选） --- */
+function chartBar(W,H,c){
+  const PL=40,PR=10,PT=10,PB=26,se=c.series[0];
+  const sc=scaleFor(c,Math.max.apply(null,se.data));
+  const a=axes(W,H,PL,PR,PT,PB,sc.ticks,sc.max,YF[c.yFmt||"plain"]);
+  const step=a.iw/c.cats.length,bw=Math.min(38,step*0.55);
+  let s=a.s;
+  c.cats.forEach((cat,i)=>{
+    const cx=PL+step*i+step/2,y=a.Y(se.data[i]);
+    s+='<rect x="'+(cx-bw/2).toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+bw.toFixed(1)+'" height="'+Math.max(0,PT+a.ih-y).toFixed(1)+'" rx="4" fill="'+se.color+'"><title>'+esc(cat)+"："+se.data[i]+'</title></rect>';
+    s+='<text x="'+cx.toFixed(1)+'" y="'+(y-5).toFixed(1)+'" text-anchor="middle" font-size="10" font-weight="700" fill="#41524C">'+se.data[i]+'</text>';
+    s+='<text x="'+cx.toFixed(1)+'" y="'+(H-8)+'" text-anchor="middle" font-size="10" fill="#A9AAA3">'+esc(cat)+'</text>';
+  });
+  if(c.meanLine){const y=a.Y(c.meanLine);
+    s+='<line x1="'+PL+'" y1="'+y.toFixed(1)+'" x2="'+(W-PR)+'" y2="'+y.toFixed(1)+'" stroke="#B4483C" stroke-width="1.2" stroke-dasharray="4 3"/>'+
+       '<text x="'+(W-PR)+'" y="'+(y-5).toFixed(1)+'" text-anchor="end" font-size="9.5" fill="#B4483C">均值 '+c.meanLine+'</text>';}
+  return s;
+}
+/* --- 堆叠柱状图 --- */
+function chartStackedBar(W,H,c){
+  const PL=34,PR=8,PT=10,PB=26;
+  const totals=c.cats.map((_,i)=>c.segments.reduce((t,g)=>t+g.data[i],0));
+  const sc=scaleFor(c,Math.max.apply(null,totals));
+  const a=axes(W,H,PL,PR,PT,PB,sc.ticks,sc.max,YF[c.yFmt||"plain"]);
+  const step=a.iw/c.cats.length,bw=Math.min(36,step*0.5);
+  let s=a.s;
+  c.cats.forEach((cat,i)=>{
+    const cx=PL+step*i+step/2;let acc=0;
+    c.segments.forEach(g=>{
+      const v=g.data[i];if(!v)return;
+      const y0=a.Y(acc),y1=a.Y(acc+v);
+      s+='<rect x="'+(cx-bw/2).toFixed(1)+'" y="'+y1.toFixed(1)+'" width="'+bw.toFixed(1)+'" height="'+(y0-y1).toFixed(1)+'" fill="'+g.color+'"><title>'+esc(cat)+" · "+esc(g.name)+"："+v+'</title></rect>';
+      if(c.showValues&&(y0-y1)>12)
+        s+='<text x="'+cx.toFixed(1)+'" y="'+((y0+y1)/2+3.5).toFixed(1)+'" text-anchor="middle" font-size="9.5" font-weight="700" fill="#fff">'+v+'</text>';
+      acc+=v;
+    });
+    s+='<text x="'+cx.toFixed(1)+'" y="'+(H-8)+'" text-anchor="middle" font-size="10" fill="#A9AAA3">'+esc(cat)+'</text>';
+  });
+  return s;
+}
+/* --- 横向条形图（含目标线） --- */
+function chartHBar(W,H,c){
+  const PL=66,PR=36,PT=6,PB=8,iw=W-PL-PR,rowH=(H-PT-PB)/c.rows.length,bh=Math.min(14,rowH*0.55);
+  const gx=PL+iw*(c.target!=null?c.target:100)/100;
+  let s=c.target!=null?'<line x1="'+gx.toFixed(1)+'" y1="'+(PT-2)+'" x2="'+gx.toFixed(1)+'" y2="'+(H-PB+2)+'" stroke="#C9C4B6" stroke-width="1" stroke-dasharray="3 3"/>':'';
+  c.rows.forEach((r,i)=>{
+    const y=PT+rowH*i+(rowH-bh)/2;
+    s+='<text x="'+(PL-8)+'" y="'+(y+bh-2.5).toFixed(1)+'" text-anchor="end" font-size="10.5" fill="#41524C">'+esc(r.name)+'</text>';
+    s+='<rect x="'+PL+'" y="'+y.toFixed(1)+'" width="'+iw+'" height="'+bh+'" rx="'+(bh/2)+'" fill="#EFEDE4"/>';
+    s+='<rect x="'+PL+'" y="'+y.toFixed(1)+'" width="'+(iw*Math.min(100,r.value)/100).toFixed(1)+'" height="'+bh+'" rx="'+(bh/2)+'" fill="'+r.color+'"><title>'+esc(r.name)+"："+r.value+(c.unit||"%")+'</title></rect>';
+    s+='<text x="'+(W-PR+6)+'" y="'+(y+bh-2.5).toFixed(1)+'" font-size="10.5" font-weight="700" fill="#1D322B">'+r.value+(c.unit||"%")+'</text>';
+  });
+  if(c.target!=null)s+='<text x="'+gx.toFixed(1)+'" y="'+(H-1)+'" text-anchor="middle" font-size="9.5" fill="#A9AAA3">'+c.target+'%</text>';
+  return s;
+}
+/* --- 环形图 --- */
+function chartDonut(W,H,c){
+  const size=Math.min(W,H),cx=W/2,cy=H/2,r=(size/2)-14,C=2*Math.PI*r;
+  const total=c.items.reduce((t,i)=>t+i.value,0);let off=0,s="";
+  c.items.forEach(it=>{
+    const frac=it.value/total,len=Math.max(0,C*frac-2);
+    s+='<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="'+it.color+'" stroke-width="'+Math.max(12,size*0.13)+'" '+
+       'stroke-dasharray="'+len.toFixed(2)+" "+(C-len).toFixed(2)+'" stroke-dashoffset="'+(-off).toFixed(2)+'" transform="rotate(-90 '+cx+' '+cy+')"><title>'+esc(it.name)+"："+it.value+'</title></circle>';
+    off+=C*frac;
+  });
+  if(c.center){
+    s+='<text x="'+cx+'" y="'+(cy-3)+'" text-anchor="middle" font-size="'+(size*0.13).toFixed(1)+'" font-weight="700" fill="#1D322B">'+esc(c.center.num)+'</text>';
+    s+='<text x="'+cx+'" y="'+(cy+size*0.09).toFixed(1)+'" text-anchor="middle" font-size="'+(size*0.075).toFixed(1)+'" fill="#8A8B85">'+esc(c.center.txt)+'</text>';
+  }
+  return s;
+}
+const BUILDERS={line:chartLine,multiLine:chartLine,groupedBar:chartGroupedBar,bar:chartBar,stackedBar:chartStackedBar,hbar:chartHBar,donut:chartDonut};
+
+/* =========================================================
+   3) 渲染
+   ========================================================= */
+function legendHTML(items,dark){
+  return items.map(s=>'<span><i style="background:'+s.color+'"></i>'+esc(s.name)+(s.dash?"（虚线）":"")+'</span>').join("");
+}
+function panelHTML(cfg,i){
+  const tag=cfg.tag?'<span class="tag '+cfg.tag.tone+'">'+esc(cfg.tag.text)+'</span>':'';
+  const leg=(cfg.series||cfg.segments||[]).length
+    ?'<div class="legend">'+legendHTML(cfg.series||cfg.segments).replace(/（虚线）/g,"")+'</div>':"";
+  const footKpi=cfg.footKpis?'<div class="kpis-inline">'+cfg.footKpis.map(k=>'<div class="it"><div class="l">'+esc(k.l)+'</div><div class="v num">'+esc(k.v)+'</div></div>').join("")+'</div>':"";
+  const donut=cfg.type==="donut"
+    ?'<div class="donut-wrap"><div class="cbox" id="ch'+i+'" style="flex:0 0 140px;min-height:140px;margin:0"></div><div class="dlist" id="dl'+i+'"></div></div>'
+    :'<div class="cbox'+((cfg.type==="multiLine"||cfg.type==="stackedBar")?" tall":"")+'" id="ch'+i+'"></div>';
+  const foot=cfg.foot||leg||footKpi
+    ?'<div class="p-foot">'+(footKpi||leg||'<span></span>')+(cfg.foot?'<span class="p-sub">'+esc(cfg.foot)+'</span>':'')+'</div>':"";
+  const insight=cfg.insight?'<div class="insight">'+esc(cfg.insight)+'</div>':"";
+  return '<div class="card panel"><div class="p-head"><div><div class="p-title">'+esc(cfg.title)+'</div>'+
+    (cfg.sub?'<div class="p-sub">'+esc(cfg.sub)+'</div>':"")+'</div>'+tag+'</div>'+donut+insight+foot+'</div>';
+}
+function render(){
+  const m=DATA.meta;
+  document.getElementById("crumb").innerHTML=m.crumb.map((c,i)=>(i?"<i>/</i>":"")+"<b>"+esc(c)+"</b>").join("");
+  document.getElementById("rptTitle").textContent=m.title;
+  document.getElementById("rptNote").innerHTML='<i class="dot live"></i>'+esc(m.note);
+  document.getElementById("actKicker").textContent=m.actionKicker;
+  document.getElementById("actLabel").textContent=m.actionLabel;
+
+  const k=DATA.kpi;
+  document.getElementById("kpiLabel").textContent=k.label;
+  document.getElementById("kpiBadge").textContent=k.badge;
+  document.getElementById("kpiNote").textContent=k.note;
+  document.getElementById("kpiValue").textContent=k.value;
+  const d=document.getElementById("kpiDelta");
+  d.className="kpi-delta "+(k.deltaPct>=0?"up":"down");
+  d.innerHTML=(k.deltaPct>=0?"▲ +":"▼ ")+Math.abs(k.deltaPct).toFixed(1)+"% <span>"+esc(k.deltaText)+"</span>";
+  document.getElementById("kpiStats").innerHTML=k.stats.map(s=>'<div class="stat"><span class="l">'+esc(s.l)+'</span><span class="r num">'+esc(s.r)+'</span></div>').join("");
+
+  const h=DATA.hero;
+  document.getElementById("heroTitle").textContent=h.title;
+  document.getElementById("heroPill").innerHTML='<i class="dot live"></i>'+esc(h.pill);
+  document.getElementById("heroMode").textContent=h.mode;
+  document.getElementById("heroKpiLabel").textContent=h.kpiLabel;
+  document.getElementById("heroKpiValue").textContent=h.kpiValue;
+  document.getElementById("heroKpiDelta").textContent=h.kpiDelta;
+  document.getElementById("heroMeta").textContent=h.meta;
+  document.getElementById("heroFoot").textContent=h.foot;
+  document.getElementById("heroBtn").textContent=h.btn;
+  document.getElementById("heroLegend").innerHTML=legendHTML(h.series);
+  mount("heroChart",Object.assign({dark:true,aria:h.title},h),chartLine);
+
+  const w=DATA.watch;
+  document.getElementById("watchTitle").innerHTML=esc(w.title)+"<em>"+esc(w.titleEm)+"</em>";
+  document.getElementById("watchTag").textContent=w.tag;
+  document.getElementById("watchList").innerHTML=w.items.map(o=>{
+    const up=o.delta>=0;
+    return '<div class="shop"><div class="shop-top"><span class="shop-name">'+esc(o.name)+'</span>'+
+      '<span class="tag '+(up?"green":"red")+'">'+(up?"▲ +":"▼ ")+Math.abs(o.delta).toFixed(1)+'%</span></div>'+
+      '<div class="shop-val">'+esc(o.valueLabel)+'<b class="num">'+esc(o.value)+'</b></div>'+
+      '<div style="height:28px" data-spark="'+o.spark.join(",")+'" data-color="'+o.color+'"></div></div>';
+  }).join("");
+  [].forEach.call(document.querySelectorAll("[data-spark]"),(el,i)=>{
+    const d=el.getAttribute("data-spark").split(",").map(Number),col=el.getAttribute("data-color");
+    const paint=()=>{const W=Math.max(120,el.clientWidth),H=28,mn=Math.min.apply(null,d),mx=Math.max.apply(null,d);
+      const pts=d.map((v,j)=>((W-4)*j/(d.length-1)+2).toFixed(1)+","+(H-3-(H-8)*((v-mn)/((mx-mn)||1))).toFixed(1));
+      const last=pts[pts.length-1].split(",");
+      el.innerHTML='<svg viewBox="0 0 '+W+' '+H+'" width="100%" height="100%"><polyline points="'+pts.join(" ")+
+        '" fill="none" stroke="'+col+'" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>'+
+        '<circle cx="'+last[0]+'" cy="'+last[1]+'" r="2.4" fill="'+col+'"/></svg>';};
+    paint();window.addEventListener("resize",()=>requestAnimationFrame(paint));
+  });
+
+  document.getElementById("secA").textContent=DATA.secATitle;
+  let idx=0;
+  const fill=(gridId,list)=>{
+    const g=document.getElementById(gridId);
+    g.innerHTML=list.map((c,i)=>panelHTML(c,idx+i)).join("");
+    list.forEach((c,i)=>{
+      const id="ch"+(idx+i);
+      if(c.type==="donut"){
+        const tot=c.items.reduce((t,x)=>t+x.value,0);
+        document.getElementById("dl"+(idx+i)).innerHTML=c.items.map(it=>
+          '<div class="r"><span class="n"><i style="background:'+it.color+'"></i>'+esc(it.name)+'</span><span class="v num">'+(it.value/tot*100).toFixed(1)+'%</span></div>').join("");
+      }
+      mount(id,Object.assign({aria:c.title},c),BUILDERS[c.type]);
+    });
+    idx+=list.length;
+  };
+  fill("gridA",DATA.gridA); fill("gridB",DATA.gridB); fill("gridC",DATA.gridC);
+
+  const a=DATA.audit,cnt={pass:0,warn:0,fail:0};
+  a.rows.forEach(r=>cnt[r.status]=(cnt[r.status]||0)+1);
+  document.getElementById("auditMeta").textContent="来源："+a.source+" · 共 "+a.rows.length+" 项复核 · 生成时间 "+DATA.meta.generatedAt;
+  document.getElementById("auditSum").innerHTML=
+    '<span class="tag green">通过 '+cnt.pass+'</span><span class="tag amber">需关注 '+(cnt.warn||0)+'</span><span class="tag red">不一致 '+(cnt.fail||0)+'</span>';
+  const LBL={pass:'<span class="st-pass">✓ 一致</span>',warn:'<span class="st-warn">△ 尾差</span>',fail:'<span class="st-fail">✕ 不一致</span>'};
+  document.getElementById("auditBody").innerHTML=a.rows.map(r=>
+    '<tr><td class="num">'+esc(r.id)+'</td><td>'+esc(r.name)+'</td><td><code>'+esc(r.formula)+'</code></td>'+
+    '<td class="r num">'+esc(r.computed)+'</td><td class="r num">'+esc(r.reported)+'</td><td class="r num">'+esc(r.diff)+'</td><td>'+(LBL[r.status]||"")+'</td></tr>').join("");
+  document.getElementById("auditNote").textContent=a.note;
+  document.getElementById("globalNote").textContent=DATA.globalNote;
+}
+render();
+</script>
+</body>
+</html>

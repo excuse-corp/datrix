@@ -1,10 +1,13 @@
 import { ChatContext } from '@/app/chat-context';
+import { useInterfaceStyle } from '@/hooks/use-interface-style';
 import { ChartData } from '@/types/chat';
+import { terminalChartTheme } from '@/utils/terminal-chart-theme';
 import { Chart } from '@berryv/g2-react';
 import { useContext, useMemo } from 'react';
 
 export default function PieChart({ chart }: { key: string; chart: ChartData }) {
   const { mode } = useContext(ChatContext);
+  const interfaceStyle = useInterfaceStyle();
 
   // Transform raw data into pie chart format
   const pieData = useMemo(() => {
@@ -32,11 +35,11 @@ export default function PieChart({ chart }: { key: string; chart: ChartData }) {
         <div className='opacity-80 text-sm mb-2'>{chart.chart_desc}</div>
         <div className='h-[300px]'>
           <Chart
-            style={{ height: '100%' }}
+            style={{ height: '100%', background: interfaceStyle === 'terminal' ? '#FAF6EE' : undefined }}
             options={{
               autoFit: true,
               data: pieData,
-              theme: mode,
+              theme: interfaceStyle === 'terminal' ? terminalChartTheme : mode,
               animate: {
                 enter: {
                   type: 'waveIn',
@@ -57,13 +60,13 @@ export default function PieChart({ chart }: { key: string; chart: ChartData }) {
                   },
                   style: {
                     lineWidth: 1,
-                    stroke: '#fff',
+                    stroke: interfaceStyle === 'terminal' ? '#FAF6EE' : '#fff',
                   },
                   state: {
                     active: {
                       style: {
                         lineWidth: 2,
-                        stroke: '#fff',
+                        stroke: interfaceStyle === 'terminal' ? '#FAF6EE' : '#fff',
                         fillOpacity: 0.9,
                       },
                     },
@@ -79,7 +82,7 @@ export default function PieChart({ chart }: { key: string; chart: ChartData }) {
                   title: false,
                   itemName: {
                     style: {
-                      fill: mode === 'dark' ? '#fff' : '#333',
+                      fill: interfaceStyle === 'terminal' ? '#292824' : mode === 'dark' ? '#fff' : '#333',
                     },
                   },
                   itemValue: {

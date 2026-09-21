@@ -1,0 +1,1 @@
+{"title": "x", "charts": [{"type": "radar", "labels": ["a"], "datasets": [{"data": [1]}]}], "tables": [{"title": "t", "columns": ["a", "b"], "rows": [["only-one"]]}]}

@@ -34,7 +34,7 @@ export function renderModelIcon(model?: string, props?: { width: number; height:
 
 function ModelSelector({ onChange }: Props) {
   const { t } = useTranslation();
-  const { modelList, model } = useContext(ChatContext);
+  const { modelList, model, setModel } = useContext(ChatContext);
   if (!modelList || modelList.length <= 0) {
     return null;
   }
@@ -45,11 +45,12 @@ function ModelSelector({ onChange }: Props) {
       className='min-w-[120px]'
       popupMatchSelectWidth={false}
       onChange={val => {
+        setModel(val);
         onChange?.(val);
       }}
     >
       {modelList.map(item => (
-        <Select.Option key={item} title={item}>
+        <Select.Option key={item} value={item} title={item}>
           <div className='flex items-center'>
             {renderModelIcon(item)}
             <span className='ml-2'>{item}</span>

@@ -54,8 +54,32 @@ CREATE TABLE sync.pcm_project_info (
   project_id integer
 );
 
+CREATE TABLE public.vm_list (
+  id integer NOT NULL,
+  name varchar(200) NOT NULL,
+  power_state varchar(20) NOT NULL,
+  health_state varchar(10) NOT NULL,
+  provisioned varchar(20) NOT NULL,
+  used_space varchar(20) NOT NULL,
+  host_cpu varchar(20) NOT NULL,
+  host_memory varchar(20) NOT NULL,
+  imported_at timestamp without time zone,
+  CONSTRAINT pk_vm_list PRIMARY KEY (id)
+);
+
 COMMENT ON TABLE sync.pcm_project_info IS
   '第三方平台同步的远程 dbo.vw_xmk_project_contract_report 空表，不由 DataMan 写入。';
+
+COMMENT ON TABLE public.vm_list IS
+  '虚拟机清单(来源:虚拟机清单.xlsx)';
+COMMENT ON COLUMN public.vm_list.name IS '名称';
+COMMENT ON COLUMN public.vm_list.power_state IS '状况(电源)';
+COMMENT ON COLUMN public.vm_list.health_state IS '状态(健康)';
+COMMENT ON COLUMN public.vm_list.provisioned IS '置备的空间';
+COMMENT ON COLUMN public.vm_list.used_space IS '已用空间';
+COMMENT ON COLUMN public.vm_list.host_cpu IS '主机CPU';
+COMMENT ON COLUMN public.vm_list.host_memory IS '主机内存';
+COMMENT ON COLUMN public.vm_list.imported_at IS '导入时间';
 
 CREATE VIEW reporting.vw_information_project_contract_report AS
 SELECT
@@ -96,12 +120,40 @@ SELECT
   source.project_id
 FROM sync.pcm_project_info AS source;
 
+CREATE VIEW reporting.vw_vm_list AS
+SELECT
+  source.id,
+  source.name,
+  source.power_state,
+  source.health_state,
+  source.provisioned,
+  source.used_space,
+  source.host_cpu,
+  source.host_memory,
+  source.imported_at
+FROM public.vm_list AS source;
+
 COMMENT ON VIEW reporting.vw_information_project_contract_report IS
   'DataMan 信息化项目场景唯一允许读取的视图。';
+
+COMMENT ON VIEW reporting.vw_vm_list IS
+  'DataMan 虚拟机清单场景唯一允许读取的视图。';
+COMMENT ON COLUMN reporting.vw_vm_list.id IS '虚拟机清单ID';
+COMMENT ON COLUMN reporting.vw_vm_list.name IS '名称';
+COMMENT ON COLUMN reporting.vw_vm_list.power_state IS '状况(电源)';
+COMMENT ON COLUMN reporting.vw_vm_list.health_state IS '状态(健康)';
+COMMENT ON COLUMN reporting.vw_vm_list.provisioned IS '置备的空间';
+COMMENT ON COLUMN reporting.vw_vm_list.used_space IS '已用空间';
+COMMENT ON COLUMN reporting.vw_vm_list.host_cpu IS '主机CPU';
+COMMENT ON COLUMN reporting.vw_vm_list.host_memory IS '主机内存';
+COMMENT ON COLUMN reporting.vw_vm_list.imported_at IS '导入时间';
 
 GRANT USAGE ON SCHEMA sync TO dataman_sync;
 GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE ON TABLE
   sync.pcm_project_info TO dataman_sync;
+GRANT USAGE ON SCHEMA public TO dataman_sync;
+GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE ON TABLE
+  public.vm_list TO dataman_sync;
 
 GRANT USAGE ON SCHEMA sync TO dataman_reader;
 GRANT SELECT ON TABLE sync.pcm_project_info TO dataman_reader;
@@ -110,4 +162,5 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA sync
 
 GRANT USAGE ON SCHEMA reporting TO dataman_reader;
 GRANT SELECT ON TABLE reporting.vw_information_project_contract_report TO dataman_reader;
+GRANT SELECT ON TABLE reporting.vw_vm_list TO dataman_reader;
 SQL

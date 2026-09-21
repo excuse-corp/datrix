@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Skillalley — Classes Dashboard</title>
+<style>
+/* ============================================================
+   Skillalley dashboard — pixel-informed HTML replica
+   Source canvas: 1824 x 1310
+   Palette sampled from source:
+     primary #6266ea | lavender #f0eeff | page #f8fbfb
+     orange #ff6b00 | peach #ffc9a1 | pink #ffcee6 | yellow #ffd166
+   ============================================================ */
+:root{
+  --purple:#6266ea;
+  --purple-d:#4b4fd8;
+  --purple-l:#878aef;
+  --lav:#f0eeff;
+  --lav-2:#e9e6ff;
+  --blue:#ecf6ff;
+  --page:#f8fbfb;
+  --ink:#141432;
+  --ink-2:#3b3d5c;
+  --grey:#8b8fa3;
+  --grey-l:#b9bccb;
+  --orange:#ff6b00;
+  --peach:#ffb066;
+  --pink:#ffcee6;
+  --magenta:#e07fe0;
+  --yellow:#ffd166;
+  --line:#eceef4;
+  --r-lg:28px;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%}
+body{
+  font-family:"Plus Jakarta Sans","Poppins","Manrope","Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,"PingFang SC","Microsoft YaHei",sans-serif;
+  background:#e7e9f2;
+  -webkit-font-smoothing:antialiased;
+  overflow:hidden;
+}
+.viewport{
+  position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+  background:radial-gradient(120% 120% at 50% 0%,#eef0f8 0%,#e2e5f0 100%);
+}
+.stage{
+  width:1824px;height:1310px;position:relative;flex:none;
+  transform-origin:center center;
+  background:linear-gradient(155deg,#e6dcf4 0%,#f4f2fb 26%,var(--page) 62%,#f6f7fb 100%);
+  border-radius:30px;overflow:hidden;
+  box-shadow:0 40px 90px rgba(40,44,90,.22);
+}
+.stage *{position:absolute}
+
+/* ---------- icons ---------- */
+.ic{width:20px;height:20px;display:block;stroke:currentColor;fill:none;stroke-width:1.7;
+    stroke-linecap:round;stroke-linejoin:round}
+.ic.s18{width:18px;height:18px}
+.ic.s16{width:16px;height:16px}
+.ic.s22{width:22px;height:22px}
+.ic.s24{width:24px;height:24px}
+
+/* ============================================================
+   LEFT SIDEBAR  (0 → 377)
+   ============================================================ */
+.sidebar{left:0;top:0;width:377px;height:1310px;
+  background:linear-gradient(180deg,#f2e8fa 0%,#f3ecfa 16%,#f7f4fc 38%,var(--page) 62%);
+}
+.brand{left:56px;top:100px;display:flex;align-items:center;gap:12px}
+.brand .mark{width:38px;height:38px;border-radius:12px;position:absolute;
+  background:conic-gradient(from 210deg,#6266ea,#9b6bf0,#ff8fb8,#6266ea);
+  box-shadow:0 8px 18px rgba(98,102,234,.35)}
+.brand .mark::after{content:"";position:absolute;left:12px;top:11px;width:14px;height:14px;
+  border-radius:50%;background:#fff;opacity:.92}
+.brand .name{left:52px;top:4px;font-size:25px;font-weight:700;letter-spacing:-.4px;color:var(--ink)}
+
+.nav{left:30px;top:206px;width:317px;height:560px}
+.nav .item{left:0;width:317px;height:56px;display:flex;align-items:center;gap:16px;
+  padding:0 22px;color:#6f7288;font-size:19px;font-weight:500;border-radius:16px}
+.nav .item .ic{color:#8e91a6}
+.nav .item .lbl{position:absolute;left:60px;top:50%;transform:translateY(-50%)}
+.nav .item.on{background:var(--purple);color:#fff;box-shadow:0 14px 26px rgba(98,102,234,.34)}
+.nav .item.on .ic{color:#fff}
+.nav .badge{left:auto;right:20px;top:50%;transform:translateY(-50%);
+  min-width:28px;height:28px;padding:0 8px;border-radius:14px;background:var(--purple);
+  color:#fff;font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center}
+.nav .item.on .badge{background:#fff;color:var(--purple)}
+
+/* sidebar 3D illustration */
+.sillo{left:0;top:700px;width:377px;height:420px}
+.sillo .blob{left:-40px;top:60px;width:420px;height:330px;border-radius:50%;
+  background:radial-gradient(60% 60% at 40% 35%,#dcd6fb 0%,#e7e3fd 45%,rgba(240,238,255,0) 74%);
+  filter:blur(2px)}
+.sillo .ring{left:150px;top:36px;width:210px;height:210px;border-radius:50%;
+  border:26px solid #cfc9f9;box-shadow:0 26px 50px rgba(120,110,220,.22);opacity:.9}
+.sillo .cube{left:96px;top:120px;width:120px;height:120px;border-radius:22px;
+  background:linear-gradient(150deg,#7a7df0,#5a5ee6);transform:rotate(-18deg);
+  box-shadow:0 26px 44px rgba(90,94,230,.34)}
+.sillo .cube::after{content:"";position:absolute;left:22px;top:22px;width:76px;height:76px;
+  border-radius:16px;background:rgba(255,255,255,.16)}
+.sillo .ball{left:236px;top:214px;width:96px;height:96px;border-radius:50%;
+  background:radial-gradient(38% 34% at 34% 30%,#fff 0%,#ffd7ea 34%,#ff9fd0 72%,#f277b6 100%);
+  box-shadow:0 22px 38px rgba(240,120,180,.32)}
+.sillo .plate{left:36px;top:262px;width:250px;height:74px;border-radius:38px;
+  background:linear-gradient(120deg,#ffffff,#eef0fb);transform:rotate(-8deg);
+  box-shadow:0 20px 34px rgba(120,124,180,.20)}
+.sillo .dot{border-radius:50%}
+.sillo .d1{left:296px;top:96px;width:26px;height:26px;background:#ffc46b}
+.sillo .d2{left:52px;top:150px;width:18px;height:18px;background:#8f92f2}
+.sillo .d3{left:322px;top:300px;width:14px;height:14px;background:#7fd8d0}
+
+/* go pro card */
+.gopro{left:48px;top:1058px;width:278px;height:168px;border-radius:26px;background:#fff;
+  box-shadow:0 22px 44px rgba(96,100,160,.14);display:block}
+.gopro .ava{left:26px;top:-30px;width:74px;height:74px;border-radius:24px;
+  background:linear-gradient(150deg,#ffd6a5,#ff9fb0);display:flex;align-items:center;justify-content:center;
+  box-shadow:0 14px 26px rgba(255,150,140,.34)}
+.gopro .ava svg{width:38px;height:38px;stroke:#fff;fill:none;stroke-width:2}
+.gopro .t{left:26px;top:58px;font-size:21px;font-weight:700;color:var(--ink)}
+.gopro .s{left:26px;top:90px;font-size:14.5px;color:var(--grey);line-height:1.45;width:220px}
+.gopro .cta{left:26px;top:124px;height:30px;padding:0 16px;border-radius:15px;
+  background:var(--lav);color:var(--purple);font-size:14px;font-weight:700;
+  display:flex;align-items:center}
+
+/* ============================================================
+   MAIN CARD  (377 → 1334)
+   ============================================================ */
+.main{left:377px;top:37px;width:957px;height:1233px;background:#fff;
+  border-radius:var(--r-lg);overflow:hidden;
+  box-shadow:0 26px 60px rgba(70,74,140,.10)}
+
+/* header */
+.h-title{left:82px;top:92px;font-size:44px;font-weight:800;letter-spacing:-1.2px;color:var(--ink);white-space:nowrap}
+.h-sub1{left:82px;top:160px;font-size:27px;font-weight:600;color:#2c2e4e;white-space:nowrap}
+.h-sub2{left:82px;top:200px;font-size:19px;font-weight:500;color:var(--grey);white-space:nowrap}
+.h-sub2 .fire{color:var(--orange)}
+.btn-upgrade{left:81px;top:272px;height:74px;padding:0 40px;border-radius:20px;
+  background:linear-gradient(120deg,#6d71ef,#5a5ee6);color:#fff;font-size:21px;font-weight:700;
+  display:flex;align-items:center;gap:14px;box-shadow:0 20px 38px rgba(98,102,234,.34)}
+.btn-upgrade .play{width:34px;height:34px;border-radius:50%;background:rgba(255,255,255,.22);
+  display:flex;align-items:center;justify-content:center}
+.btn-upgrade .play svg{width:14px;height:14px;fill:#fff;stroke:none}
+
+/* header 3D art */
+.hart{left:470px;top:20px;width:470px;height:520px}
+.hart .orange{left:520px;top:78px;width:74px;height:52px;border-radius:26px;
+  background:linear-gradient(140deg,#ffb066,#ff6b00);transform:rotate(-14deg);
+  box-shadow:0 16px 30px rgba(255,110,20,.30)}
+.hart .orange2{left:628px;top:182px;width:76px;height:46px;border-radius:24px;
+  background:linear-gradient(140deg,#ffd08a,#ff8a2b);transform:rotate(12deg);
+  box-shadow:0 14px 26px rgba(255,140,40,.26)}
+.hart .pinkc{left:470px;top:214px;width:120px;height:120px;border-radius:34px;
+  background:linear-gradient(150deg,#c9c6fb,#8f92f2);transform:rotate(-16deg);
+  box-shadow:0 22px 40px rgba(130,130,235,.28)}
+.hart .pinkc::after{content:"";left:30px;top:30px;width:60px;height:60px;border-radius:50%;
+  background:radial-gradient(40% 40% at 34% 30%,#ffe3f1,#ff8fc6)}
+.hart .arc{left:452px;top:262px;width:300px;height:300px;border-radius:50%;
+  border:34px solid transparent;
+  background:linear-gradient(#fff,#fff) padding-box,
+             conic-gradient(from 200deg,#6266ea 0deg,#8f92f2 90deg,#c9c6fb 150deg,rgba(0,0,0,0) 152deg) border-box;
+  -webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 35px),#000 calc(100% - 34px));
+          mask:radial-gradient(farthest-side,transparent calc(100% - 35px),#000 calc(100% - 34px));
+  opacity:.95}
+.hart .blobA{left:470px;top:250px;width:300px;height:290px;border-radius:50% 50% 46% 54%/56% 44% 56% 44%;
+  background:radial-gradient(60% 60% at 36% 30%,#d9d5fc 0%,#ece9fe 52%,rgba(240,238,255,0) 78%)}
+.hart .steps{left:520px;top:300px;width:230px;height:210px}
+.hart .st{position:absolute;border-radius:16px;background:linear-gradient(140deg,#7b7ef1,#5a5ee6);
+  box-shadow:0 14px 26px rgba(90,94,230,.26)}
+.hart .st1{left:0;top:150px;width:120px;height:56px}
+.hart .st2{left:52px;top:88px;width:120px;height:56px;opacity:.92}
+.hart .st3{left:104px;top:26px;width:120px;height:56px;opacity:.82}
+.hart .st4{left:156px;top:-36px;width:120px;height:56px;opacity:.7}
+.hart .spark{left:640px;top:300px;width:22px;height:22px;border-radius:50%;background:#ff8a2b}
+.hart .spark2{left:470px;top:150px;width:14px;height:14px;border-radius:50%;background:#ffcee6}
+
+/* day header */
+.day{left:80px;top:512px;font-size:24px;font-weight:700;color:var(--ink)}
+.day .dim{color:var(--grey-l);font-weight:500;margin:0 6px}
+.day-nav{left:790px;top:506px;display:flex;gap:10px}
+.day-nav span{width:40px;height:40px;border-radius:14px;background:#f6f7fb;color:#9a9db0;
+  display:flex;align-items:center;justify-content:center}
+.day-nav span.a{background:var(--lav);color:var(--purple)}
+
+/* time gutter */
+.gutter{left:0;top:560px;width:120px;height:660px}
+.gutter i{left:44px;width:56px;text-align:right;font-style:normal;font-size:15px;
+  color:var(--grey-l);font-weight:600;letter-spacing:.3px}
+.gutter i::after{content:"";position:absolute;left:74px;top:50%;width:470px;height:1px;
+  background:repeating-linear-gradient(90deg,#f0f1f7 0 6px,transparent 6px 12px)}
+
+/* timeline cards */
+.tl{left:217px;top:596px;width:658px;height:640px}
+.card{left:0;width:658px;border-radius:24px;padding:0 34px}
+.card .time{font-size:15px;font-weight:700;letter-spacing:.4px;color:var(--purple)}
+.card h3{font-size:27px;font-weight:700;letter-spacing:-.5px;color:var(--ink);line-height:1.2}
+.card p{font-size:16.5px;color:var(--grey);line-height:1.5}
+.card .tag{height:30px;padding:0 14px;border-radius:15px;font-size:13.5px;font-weight:700;
+  display:flex;align-items:center}
+
+/* card 1 */
+.c1{top:0;height:278px;background:var(--lav)}
+.c1 .time{left:34px;top:34px}
+.c1 h3{left:34px;top:66px;width:400px}
+.c1 p{left:34px;top:150px;width:360px}
+.c1 .tag{left:34px;top:196px;background:#fff;color:var(--purple)}
+.ring{right:34px;top:34px;width:88px;height:88px}
+.ring svg{width:88px;height:88px;transform:rotate(-90deg)}
+.ring .tr{fill:none;stroke:#dcd8fb;stroke-width:9}
+.ring .pv{fill:none;stroke:var(--orange);stroke-width:9;stroke-linecap:round}
+.ring b{left:0;top:0;width:88px;height:88px;display:flex;align-items:center;justify-content:center;
+  font-size:22px;font-weight:800;color:var(--ink)}
+.c1 .ava{left:470px;top:150px;display:flex}
+.c1 .ava i{width:38px;height:38px;border-radius:50%;border:3px solid #fff;margin-left:-10px}
+.c1 .ava i:nth-child(1){background:#abbdff}
+.c1 .ava i:nth-child(2){background:#ffcee6}
+.c1 .ava i:nth-child(3){background:#ffc9a1}
+.c1 .ava i:nth-child(4){background:#c8f2e6}
+
+/* card 2 */
+.c2{top:294px;height:80px;background:var(--blue);display:flex;align-items:center}
+.c2 .bar{left:0;top:0;width:8px;height:80px;border-radius:4px 0 0 4px;background:#57a6ff}
+.c2 .time{left:34px;top:50%;transform:translateY(-50%);color:#3d84d8}
+.c2 h3{left:170px;top:50%;transform:translateY(-50%);font-size:22px}
+.c2 .mini{right:34px;top:50%;transform:translateY(-50%);display:flex;gap:8px}
+.c2 .mini i{width:30px;height:30px;border-radius:50%;background:#dbeafe;border:2px solid #fff}
+
+/* card 3 */
+.c3{top:428px;height:280px;background:linear-gradient(135deg,#6a6dee,#5659e0);
+  box-shadow:0 26px 48px rgba(90,94,230,.30)}
+.c3 .time{left:34px;top:32px;color:#c3c5ff}
+.c3 h3{left:34px;top:64px;width:420px;color:#fff}
+.c3 p{left:34px;top:146px;width:380px;color:#c9caff}
+.c3 .tag{left:34px;top:196px;background:rgba(255,255,255,.18);color:#fff}
+.c3 .ring .tr{stroke:rgba(255,255,255,.28)}
+.c3 .ring .pv{stroke:var(--yellow)}
+.c3 .ring b{color:#fff}
+.c3 .live{left:470px;top:34px;height:32px;padding:0 14px;border-radius:16px;background:rgba(255,255,255,.16);
+  color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;gap:8px}
+.c3 .live em{width:9px;height:9px;border-radius:50%;background:#ff6b6b}
+
+/* bottom fade of main card */
+.main .fade{left:0;bottom:0;width:957px;height:60px;
+  background:linear-gradient(180deg,rgba(255,255,255,0),#fff)}
+
+/* ============================================================
+   RIGHT PANEL  (1334 → 1824)
+   ============================================================ */
+.right{left:1334px;top:0;width:490px;height:1310px}
+.search{left:66px;top:94px;width:358px;height:56px;border-radius:16px;background:#f2f9fc;
+  display:flex;align-items:center}
+.search svg{margin:0 14px 0 20px;color:#a4a9b8}
+.search span{font-size:17px;color:#a9adbb}
+.search .go{left:auto;right:6px;top:6px;width:44px;height:44px;border-radius:12px;
+  background:var(--purple);display:flex;align-items:center;justify-content:center;
+  box-shadow:0 10px 20px rgba(98,102,234,.32)}
+.search .go svg{margin:0;color:#fff}
+
+.tag-premium{left:82px;top:206px;height:34px;padding:0 18px;border-radius:17px;
+  background:var(--lav);color:var(--purple);font-size:15px;font-weight:700;
+  display:flex;align-items:center;gap:8px}
+.tag-premium svg{width:15px;height:15px}
+.r-title{left:82px;top:256px;width:330px;font-size:33px;font-weight:800;line-height:1.22;
+  letter-spacing:-.8px;color:var(--ink)}
+.r-label{left:82px;top:378px;font-size:20px;font-weight:700;color:var(--ink)}
+.r-count{left:auto;right:82px;top:380px;font-size:17px;font-weight:700;color:var(--grey)}
+
+.avatars{left:82px;top:424px;width:340px;height:60px}
+.avatars i{position:absolute;top:0;width:54px;height:54px;border-radius:50%;
+  border:3px solid #fff;box-shadow:0 8px 16px rgba(90,94,160,.16)}
+.avatars i:nth-child(1){left:0;background:linear-gradient(150deg,#c9d4ff,#8fa4f5)}
+.avatars i:nth-child(2){left:38px;background:linear-gradient(150deg,#ffd9ea,#f79ac4)}
+.avatars i:nth-child(3){left:76px;background:linear-gradient(150deg,#ffe0c2,#ff9f5e)}
+.avatars i:nth-child(4){left:114px;background:linear-gradient(150deg,#d5f6ee,#6fd0bb)}
+.avatars i.more{left:152px;background:#f0eeff;color:var(--purple);font-size:16px;font-weight:800;
+  display:flex;align-items:center;justify-content:center;border-style:dashed;border-color:#d6d2fb}
+
+.r-sec{left:82px;width:326px;height:78px;border-radius:20px;background:#fff;
+  box-shadow:0 14px 30px rgba(96,100,160,.10);display:flex;align-items:center}
+.r-sec .ico{left:16px;top:50%;transform:translateY(-50%);width:46px;height:46px;border-radius:14px;
+  display:flex;align-items:center;justify-content:center}
+.r-sec .k{left:78px;top:16px;font-size:14.5px;font-weight:600;color:var(--grey)}
+.r-sec .v{left:78px;top:41px;font-size:19px;font-weight:700;color:var(--ink)}
+.r-sec .chev{left:auto;right:20px;top:50%;transform:translateY(-50%);color:#c9ccd8}
+
+.r-date{left:82px;top:512px;width:326px;height:96px;border-radius:20px;background:var(--lav);
+  padding:0 22px;display:flex;align-items:center}
+.r-date .ico{left:22px;top:50%;transform:translateY(-50%);width:48px;height:48px;border-radius:15px;
+  background:#fff;color:var(--purple);display:flex;align-items:center;justify-content:center}
+.r-date .k{left:86px;top:22px;font-size:14.5px;font-weight:600;color:#7a7ea8}
+.r-date .v{left:86px;top:48px;font-size:19px;font-weight:700;color:var(--ink)}
+
+.join{left:82px;top:1000px;width:326px;height:74px;border-radius:22px;
+  background:linear-gradient(120deg,#6d71ef,#5659e0);color:#fff;font-size:21px;font-weight:700;
+  display:flex;align-items:center;justify-content:center;gap:14px;
+  box-shadow:0 24px 46px rgba(90,94,230,.34)}
+.join .p{width:34px;height:34px;border-radius:50%;background:rgba(255,255,255,.22);
+  display:flex;align-items:center;justify-content:center}
+.join .p svg{width:14px;height:14px;fill:#fff;stroke:none}
+
+/* right panel decorative 3D */
+.r-art{left:1360px;top:1120px;width:440px;height:200px}
+.r-art .b1{left:40px;top:40px;width:150px;height:150px;border-radius:44px;
+  background:linear-gradient(150deg,#dcd8fb,#b9b4f7);transform:rotate(-14deg);
+  box-shadow:0 22px 40px rgba(120,116,220,.22)}
+.r-art .b2{left:180px;top:96px;width:110px;height:110px;border-radius:50%;
+  background:radial-gradient(40% 36% at 34% 30%,#fff,#ffd7ea 40%,#ff9fd0 78%);
+  box-shadow:0 18px 32px rgba(240,130,185,.26)}
+.r-art .b3{left:280px;top:20px;width:70px;height:70px;border-radius:20px;
+  background:linear-gradient(140deg,#ffd9a0,#ff9a3c);transform:rotate(18deg);
+  box-shadow:0 16px 28px rgba(255,150,60,.26)}
+
+/* floating chips in right panel */
+.chip{height:34px;padding:0 16px;border-radius:17px;background:#fff;font-size:14.5px;
+  font-weight:600;color:#6f7288;display:flex;align-items:center;gap:8px;
+  box-shadow:0 10px 22px rgba(96,100,160,.10)}
+.chip i{width:9px;height:9px;border-radius:50%}
+
+/* utility */
+.hr{height:1px;background:var(--line)}
+</style>
+</head>
+<body>
+<div class="viewport">
+  <div class="stage" id="stage">
+
+    <!-- ================= SIDEBAR ================= -->
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="mark"></span>
+        <span class="name">skillalley</span>
+      </div>
+
+      <nav class="nav">
+        <div class="item" style="top:0">
+          <svg class="ic" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg>
+          <span class="lbl">Dashboard</span>
+        </div>
+        <div class="item on" style="top:68px">
+          <svg class="ic" viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H19v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H19v3H6.5"/></svg>
+          <span class="lbl">Classes</span>
+        </div>
+        <div class="item" style="top:136px">
+          <svg class="ic" viewBox="0 0 24 24"><rect x="2.5" y="5" width="19" height="14" rx="3"/><path d="M10 9.2l5 2.8-5 2.8z"/></svg>
+          <span class="lbl">Courses</span>
+        </div>
+        <div class="item" style="top:204px">
+          <svg class="ic" viewBox="0 0 24 24"><path d="M3 17l5-6 4 3.5L21 6"/><path d="M15 6h6v6"/></svg>
+          <span class="lbl">Earnings</span>
+        </div>
+        <div class="item" style="top:272px">
+          <svg class="ic" viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5"/><path d="M9 13h7M9 17h5"/></svg>
+          <span class="lbl">Statements</span>
+        </div>
+        <div class="item" style="top:340px">
+          <svg class="ic" viewBox="0 0 24 24"><path d="M4 20V9M10 20V4M16 20v-7M22 20H2"/></svg>
+          <span class="lbl">Insights</span>
+        </div>
+        <div class="item" style="top:408px">
+          <svg class="ic" viewBox="0 0 24 24"><rect x="2.5" y="5" width="19" height="14" rx="3"/><path d="M3.5 7l8.5 6 8.5-6"/></svg>
+          <span class="lbl">Messages</span>
+          <span class="badge">6</span>
+        </div>
+        <div class="item" style="top:476px">
+          <svg class="ic" viewBox="0 0 24 24"><path d="M3 12h4l2.5-6 4 12L16 12h5"/></svg>
+          <span class="lbl">Activities</span>
+        </div>
+      </nav>
+
+      <!-- 3D illustration -->
+      <div class="sillo">
+        <span class="blob"></span>
+        <span class="ring"></span>
+        <span class="plate"></span>
+        <span class="cube"></span>
+        <span class="ball"></span>
+        <span class="dot d1"></span>
+        <span class="dot d2"></span>
+        <span class="dot d3"></span>
+      </div>
+
+      <!-- Go Pro card -->
+      <div class="gopro">
+        <span class="ava">
+          <svg viewBox="0 0 24 24"><path d="M12 3l2.6 5.6 6.1.8-4.5 4.2 1.2 6-5.4-3-5.4 3 1.2-6L3.3 9.4l6.1-.8z"/></svg>
+        </span>
+        <span class="t">Go Pro Now</span>
+        <span class="s">Unlock every class, live session and downloadable resource.</span>
+        <span class="cta">Upgrade</span>
+      </div>
+    </aside>
+
+    <!-- ================= MAIN ================= -->
+    <section class="main">
+      <h1 class="h-title">Get Thousands Premium Courses.</h1>
+      <div class="h-sub1">Upgrade to watch, play, learn,</div>
+      <div class="h-sub2">make, and discover. <span class="fire">🔥</span></div>
+
+      <div class="btn-upgrade">
+        <span class="play"><svg viewBox="0 0 24 24"><path d="M6 4l14 8-14 8z"/></svg></span>
+        Upgrade Now
+      </div>
+
+      <!-- header art -->
+      <div class="hart">
+        <span class="blobA"></span>
+        <span class="arc"></span>
+        <span class="pinkc"></span>
+        <span class="orange"></span>
+        <span class="orange2"></span>
+        <span class="spark"></span>
+        <span class="spark2"></span>
+        <div class="steps">
+          <span class="st st1"></span><span class="st st2"></span>
+          <span class="st st3"></span><span class="st st4"></span>
+        </div>
+      </div>
+
+      <div class="day">Monday <span class="dim">|</span> 31 Aug</div>
+      <div class="day-nav">
+        <span><svg class="ic s18" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></span>
+        <span class="a"><svg class="ic s18" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></span>
+      </div>
+
+      <!-- hour gutter -->
+      <div class="gutter">
+        <i style="top:36px">08:00</i>
+        <i style="top:168px">09:00</i>
+        <i style="top:300px">10:00</i>
+        <i style="top:432px">11:00</i>
+        <i style="top:564px">12:00</i>
+      </div>
+
+      <!-- timeline -->
+      <div class="tl">
+        <!-- card 1 -->
+        <article class="card c1">
+          <span class="time">08:00 - 09:30</span>
+          <h3>Business Thinking for Designers</h3>
+          <p>Bring a business mind to design, transform your career.</p>
+          <span class="tag">Design · 90 min</span>
+          <div class="ava"><i></i><i></i><i></i><i></i></div>
+          <div class="ring">
+            <svg viewBox="0 0 88 88"><circle class="tr" cx="44" cy="44" r="37"/>
+              <circle class="pv" cx="44" cy="44" r="37" stroke-dasharray="232.5" stroke-dashoffset="58.1"/></svg>
+            <b>75</b>
+          </div>
+        </article>
+
+        <!-- card 2 -->
+        <article class="card c2">
+          <span class="bar"></span>
+          <span class="time">09:30 - 10:30</span>
+          <h3>Design Team Meeting</h3>
+          <div class="mini"><i></i><i></i><i></i></div>
+        </article>
+
+        <!-- card 3 -->
+        <article class="card c3">
+          <span class="time">11:00 - 12:30</span>
+          <h3>The Design Engineering Process</h3>
+          <p>The engineering design process is a series of steps&hellip;</p>
+          <span class="tag">Live class</span>
+          <span class="live"><em></em>LIVE in 20 min</span>
+          <div class="ring">
+            <svg viewBox="0 0 88 88"><circle class="tr" cx="44" cy="44" r="37"/>
+              <circle class="pv" cx="44" cy="44" r="37" stroke-dasharray="232.5" stroke-dashoffset="34.9"/></svg>
+            <b>85</b>
+          </div>
+        </article>
+      </div>
+
+      <div class="fade"></div>
+    </section>
+
+    <!-- ================= RIGHT ================= -->
+    <aside class="right">
+      <div class="search">
+        <svg class="ic s22" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M16.5 16.5L21 21"/></svg>
+        <span>Search</span>
+        <span class="go"><svg class="ic s18" viewBox="0 0 24 24"><path d="M5 12h13M13 6l6 6-6 6"/></svg></span>
+      </div>
+
+      <div class="tag-premium">
+        <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 3l2.6 5.6 6.1.8-4.5 4.2 1.2 6-5.4-3-5.4 3 1.2-6L3.3 9.4l6.1-.8z"/></svg>
+        Premium Class
+      </div>
+
+      <h2 class="r-title">The Design Engineering Process</h2>
+
+      <div class="r-label">Participants</div>
+      <div class="r-count">128 going</div>
+
+      <div class="avatars">
+        <i></i><i></i><i></i><i></i><i class="more">3+</i>
+      </div>
+
+      <div class="r-date">
+        <span class="ico"><svg class="ic s22" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/></svg></span>
+        <span class="k">Monday, August 2020</span>
+        <span class="v">08:00 - 10:00 AM</span>
+      </div>
+
+      <div class="r-sec" style="top:632px">
+        <span class="ico" style="background:#ecf6ff;color:#3d84d8">
+          <svg class="ic s22" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5.5l3.5 2"/></svg>
+        </span>
+        <span class="k">Duration</span>
+        <span class="v">2 hours</span>
+      </div>
+
+      <div class="r-sec" style="top:732px">
+        <span class="ico" style="background:var(--lav);color:var(--purple)">
+          <svg class="ic s22" viewBox="0 0 24 24"><path d="M4 20V9M10 20V4M16 20v-7M22 20H2"/></svg>
+        </span>
+        <span class="k">Level</span>
+        <span class="v">Senior Designer</span>
+      </div>
+
+      <div class="r-sec" style="top:832px">
+        <span class="ico" style="background:#fff3e0;color:#f59e0b">
+          <svg class="ic s22" viewBox="0 0 24 24"><path d="M12 3l2.6 5.6 6.1.8-4.5 4.2 1.2 6-5.4-3-5.4 3 1.2-6L3.3 9.4l6.1-.8z"/></svg>
+        </span>
+        <span class="k">Language</span>
+        <span class="v">English</span>
+      </div>
+
+      <div class="chip" style="left:82px;top:930px"><i style="background:#ff6b6b"></i>Live session</div>
+      <div class="chip" style="left:212px;top:930px"><i style="background:#6fd0bb"></i>Q&amp;A</div>
+      <div class="chip" style="left:310px;top:930px"><i style="background:#8fa4f5"></i>Replay</div>
+
+      <div class="join">
+        <span class="p"><svg viewBox="0 0 24 24"><path d="M6 4l14 8-14 8z"/></svg></span>
+        Join Now
+      </div>
+
+      <div class="r-art">
+        <span class="b1"></span><span class="b2"></span><span class="b3"></span>
+      </div>
+    </aside>
+
+  </div>
+</div>
+
+<script>
+(function(){
+  var stage=document.getElementById('stage');
+  function fit(){
+    var s=Math.min(window.innerWidth/1824, window.innerHeight/1310)*0.985;
+    stage.style.transform='scale('+s+')';
+  }
+  window.addEventListener('resize',fit); fit();
+})();
+</script>
+</body>
+</html>

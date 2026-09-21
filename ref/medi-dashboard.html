@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Medi — Health Dashboard</title>
+<style>
+:root{
+  --green:#209F85;
+  --green-tint:#CEEBE4;
+  --green-soft:#F1F8F1;
+  --bg:#F2F8F1;
+  --card:#FFFFFF;
+  --orange:#FF5E23;
+  --orange-soft:#FDE7D9;
+  --ink:#1B2B27;
+  --muted:#9BB8AE;
+  --line:#E7F1EA;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#e9f1e9;
+  font-family:'Manrope',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Microsoft YaHei',sans-serif;
+  -webkit-font-smoothing:antialiased}
+body{display:flex;justify-content:center;padding:24px 0}
+
+/* ---------- stage: exact 1878x1212 canvas, auto-scaled ---------- */
+#viewport{width:min(1878px,100vw)}
+#stage{position:relative;width:1878px;height:1212px;transform-origin:top left;
+  background:var(--bg);border:1px solid #D8E7D6;border-radius:26px;overflow:hidden;
+  box-shadow:0 24px 70px rgba(32,159,133,.14)}
+
+.abs{position:absolute}
+.card{position:absolute;background:var(--card);border-radius:28px;
+  box-shadow:0 10px 26px rgba(32,120,100,.06)}
+
+/* ---------- sidebar (x18-163, y12-1199) ---------- */
+.sidebar{left:18px;top:12px;width:145px;height:1188px;background:var(--green);
+  border-radius:28px;display:flex;flex-direction:column;align-items:center;padding-top:44px}
+.logo-mark{width:44px;height:44px;border-radius:14px;background:#fff;display:grid;place-items:center;
+  box-shadow:0 6px 14px rgba(0,0,0,.12)}
+.logo-mark svg{width:24px;height:24px}
+.logo-txt{margin-top:12px;color:#fff;font-size:19px;font-weight:800;letter-spacing:.4px}
+.nav{margin-top:164px;display:flex;flex-direction:column;align-items:center;gap:63px;width:100%}
+.nav a{width:100%;height:44px;display:grid;place-items:center;color:#fff;opacity:.5;
+  text-decoration:none;transition:.18s;position:relative}
+.nav a:hover{opacity:1}
+.nav a.on{opacity:1}
+.nav a.on::before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:4px;
+  background:#fff;border-radius:0 4px 4px 0}
+.nav svg{width:24px;height:24px}
+.nav .spacer{flex:1}
+.nav a.bottom{margin-bottom:34px}
+
+/* ---------- search row (y71-126) ---------- */
+.search-ico{left:232px;top:85px;width:26px;height:26px;color:var(--green)}
+.search-ph{left:284px;top:86px;font-size:22px;font-weight:500;color:var(--muted)}
+.datepill{left:911px;top:71px;width:302px;height:55px;background:#fff;border-radius:28px;
+  display:flex;align-items:center;gap:11px;padding:0 22px;box-shadow:0 8px 20px rgba(32,120,100,.07)}
+.datepill svg{width:20px;height:20px;color:var(--green);flex:none}
+.datepill b{font-size:16px;font-weight:800;color:var(--ink)}
+.datepill span{font-size:15px;color:var(--muted);font-weight:500}
+
+/* ---------- promo (x240-1213, y180-405) ---------- */
+.promo{left:240px;top:180px;width:973px;height:225px;overflow:hidden}
+.promo-body{position:absolute;left:50px;top:42px;width:560px}
+.promo-body h2{font-size:31px;line-height:1.28;font-weight:800;color:var(--ink);letter-spacing:-.3px}
+.promo-body h2 em{font-style:normal;color:var(--orange)}
+.promo-body p{margin-top:22px;font-size:17px;line-height:1.55;color:var(--muted);font-weight:500;max-width:520px}
+.promo-ring{position:absolute;left:752px;top:152px;width:268px;height:268px;border-radius:50%;
+  background:var(--green-tint);transform:translate(-50%,-50%)}
+.promo-badge{position:absolute;left:752px;top:152px;width:190px;height:190px;border-radius:50%;
+  background:radial-gradient(circle at 32% 28%,#ff7a45,var(--orange) 62%);transform:translate(-50%,-50%);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;
+  box-shadow:0 14px 30px rgba(255,94,35,.30)}
+.promo-badge .off{font-size:46px;font-weight:800;line-height:1}
+.promo-badge .lbl{margin-top:7px;font-size:13px;font-weight:700;opacity:.92;letter-spacing:.7px}
+
+/* ---------- stats (x240-1213, y469-851) ---------- */
+.stats{left:240px;top:469px;width:973px;height:382px}
+.stats h3{position:absolute;left:46px;top:34px;font-size:22px;font-weight:800;color:var(--ink)}
+.yearpick{position:absolute;right:150px;top:36px;display:flex;align-items:center;gap:8px;
+  color:var(--green);font-size:17px;font-weight:800}
+.yearpick svg{width:13px;height:13px}
+.seg{position:absolute;display:flex;background:var(--green-soft);border-radius:14px;padding:4px}
+.stats .seg{right:34px;top:32px}
+.seg button{border:0;background:transparent;font:inherit;font-size:14px;font-weight:700;color:var(--muted);
+  padding:7px 17px;border-radius:11px;cursor:pointer;transition:.15s}
+.seg button.on{background:var(--green);color:#fff;box-shadow:0 4px 10px rgba(32,159,133,.28)}
+.chart{position:absolute;left:0;top:0;width:100%;height:100%}
+.tip{position:absolute;left:620px;top:138px;background:#fff;border:1px solid var(--line);
+  border-radius:14px;padding:10px 15px;box-shadow:0 10px 24px rgba(27,43,39,.13);white-space:nowrap}
+.tip b{display:block;font-size:14px;font-weight:800;color:var(--ink)}
+.tip span{display:block;margin-top:3px;font-size:13px;color:var(--orange);font-weight:700}
+
+/* ---------- heart rate (x196-712, y916-1200) ---------- */
+.heart{left:196px;top:916px;width:516px;height:284px;background:linear-gradient(135deg,#26ab8f,#1c9179);
+  border-radius:28px;overflow:hidden;box-shadow:0 14px 30px rgba(32,159,133,.24)}
+.heart .lbl{position:absolute;left:44px;top:34px;color:#fff;opacity:.85;font-size:19px;font-weight:700}
+.heart .val{position:absolute;left:42px;top:64px;color:#fff;font-size:78px;font-weight:800;line-height:1;letter-spacing:-2px}
+.heart .unit{position:absolute;left:194px;top:110px;color:#fff;opacity:.85;font-size:19px;font-weight:700}
+.heart .ecg{position:absolute;left:0;right:0;bottom:24px;width:100%;height:96px}
+.heart .dots{position:absolute;right:34px;top:38px;display:flex;gap:5px}
+.heart .dots i{width:5px;height:5px;border-radius:50%;background:rgba(255,255,255,.6)}
+
+/* ---------- activity (x746-1214, y916-1200) ---------- */
+.activity{left:746px;top:916px;width:468px;height:284px}
+.activity h3{position:absolute;left:44px;top:30px;font-size:20px;font-weight:800;color:var(--ink)}
+.activity .seg{right:30px;top:26px}
+.bars{position:absolute;left:44px;top:96px;width:380px;height:150px;display:flex;
+  align-items:flex-end;justify-content:space-between}
+.bars i{width:31px;border-radius:9px 9px 4px 4px;background:var(--orange-soft)}
+.bars i.hot{background:linear-gradient(180deg,#ff7a45,var(--orange))}
+.days{position:absolute;left:44px;top:254px;width:380px;display:flex;justify-content:space-between}
+.days span{width:31px;text-align:center;font-size:13px;font-weight:700;color:var(--muted)}
+
+/* ---------- right column (x1287-1852, y12-1199) ---------- */
+.side{left:1287px;top:12px;width:565px;height:1188px}
+.avatar{position:absolute;left:61px;top:49px;width:92px;height:92px;border-radius:50%;
+  background:linear-gradient(150deg,#dff2ec,#c4e7dd);display:grid;place-items:center;color:var(--green);
+  box-shadow:0 0 0 5px #fff,0 0 0 7px var(--green-tint)}
+.avatar svg{width:46px;height:46px}
+.pname{position:absolute;left:162px;top:64px;font-size:24px;font-weight:800;color:var(--ink);letter-spacing:-.2px}
+.pmeta{position:absolute;left:162px;top:102px;font-size:16px;font-weight:500;color:var(--muted)}
+.more{position:absolute;right:44px;top:72px;color:var(--green);font-size:26px;font-weight:800;line-height:1}
+.hr{position:absolute;left:44px;right:44px;height:1px;background:var(--line)}
+.hr.a{top:168px} .hr.b{top:262px}
+
+.metrics{position:absolute;left:44px;right:44px;top:190px;display:flex;justify-content:space-between}
+.metrics div{width:112px}
+.metrics .k{font-size:13px;font-weight:700;color:var(--muted);letter-spacing:.3px}
+.metrics .v{margin-top:9px;font-size:21px;font-weight:800;color:var(--ink)}
+
+.cal-h{position:absolute;left:44px;top:290px;display:flex;align-items:center;
+  justify-content:space-between;width:477px}
+.cal-h b{font-size:20px;font-weight:800;color:var(--ink)}
+.cal-nav{display:flex;gap:8px}
+.cal-nav button{width:30px;height:30px;border:0;border-radius:11px;background:var(--green-soft);
+  color:var(--green);cursor:pointer;display:grid;place-items:center;transition:.15s}
+.cal-nav button:hover{background:var(--green-tint)}
+.cal-nav svg{width:13px;height:13px}
+.cal{position:absolute;left:40px;top:481px;width:485px;height:231px;border-radius:26px;
+  background:linear-gradient(160deg,#26ab8f 0%,#209F85 54%,#6cc4b1 100%);padding:19px 22px;color:#fff}
+.cal .wd,.cal .grid{display:grid;grid-template-columns:repeat(7,1fr);text-align:center}
+.cal .wd{font-size:12px;font-weight:700;opacity:.7;margin-bottom:9px}
+.cal .grid{row-gap:5px}
+.cal .grid b{font-size:14px;font-weight:600;padding:5px 0;border-radius:11px;display:block}
+.cal .grid b.dim{opacity:.38;font-weight:500}
+.cal .grid b.today{background:#fff;color:var(--green);font-weight:800;box-shadow:0 6px 14px rgba(0,0,0,.18)}
+
+.appt{position:absolute;top:780px;width:232px;height:120px;background:var(--green-soft);
+  border-radius:22px;padding:20px 22px;overflow:hidden}
+.appt.l{left:44px} .appt.r{left:289px}
+.appt::before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--green)}
+.appt h4{font-size:18px;font-weight:800;color:var(--ink)}
+.appt .t{margin-top:8px;font-size:15px;font-weight:800;color:var(--green)}
+.appt .d{margin-top:7px;font-size:13px;font-weight:600;color:var(--muted)}
+
+.trt-h{position:absolute;left:44px;top:939px;font-size:20px;font-weight:800;color:var(--ink)}
+.trt{position:absolute;left:44px;width:477px;height:74px;background:#F7FBF9;border:1px solid var(--line);
+  border-radius:20px;display:flex;align-items:center;gap:16px;padding:0 20px}
+.trt.one{top:1005px} .trt.two{top:1089px}
+.trt .ic{width:42px;height:42px;border-radius:14px;background:var(--green-tint);color:var(--green);
+  display:grid;place-items:center;flex:none}
+.trt .ic svg{width:21px;height:21px}
+.trt b{display:block;font-size:17px;font-weight:800;color:var(--ink)}
+.trt span{display:block;margin-top:4px;font-size:14px;font-weight:500;color:var(--muted)}
+</style>
+</head>
+<body>
+<div id="viewport">
+<div id="stage">
+
+  <!-- ============ SIDEBAR ============ -->
+  <aside class="sidebar">
+    <div class="logo-mark">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M12 3v18M3 12h18" stroke="#209F85" stroke-width="3.4" stroke-linecap="round"/></svg>
+    </div>
+    <div class="logo-txt">Medi</div>
+    <nav class="nav">
+      <a class="on" href="#" title="Dashboard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="2"/><rect x="14" y="3" width="7" height="5" rx="2"/><rect x="14" y="12" width="7" height="9" rx="2"/><rect x="3" y="16" width="7" height="5" rx="2"/></svg></a>
+      <a href="#" title="Activity"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></a>
+      <a href="#" title="Calendar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="3"/><path d="M16 2v4M8 2v4M3 10h18"/></svg></a>
+      <a href="#" title="Messages"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.9 8.9 0 0 1-3.9-.9L3 21l2-4.6A8.4 8.4 0 0 1 12 3.1a8.4 8.4 0 0 1 9 8.4z"/></svg></a>
+      <a href="#" title="Documents"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a3 3 0 0 0-3 3v14a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V8z"/><path d="M14 2v6h6M9 14h6M9 17.5h4"/></svg></a>
+      <a href="#" title="Statistics"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg></a>
+      <div class="spacer"></div>
+      <a class="bottom" href="#" title="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 9 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.6 9a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></svg></a>
+    </nav>
+  </aside>
+
+  <!-- ============ SEARCH ROW ============ -->
+  <svg class="abs search-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></svg>
+  <div class="abs search-ph">Search your symptoms...</div>
+  <div class="abs datepill">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5.2l3.4 2"/></svg>
+    <b>14:02 AM</b><span>Today Nov, 19</span>
+  </div>
+
+  <!-- ============ PROMO ============ -->
+  <section class="card promo">
+    <div class="promo-body">
+      <h2>Today <em>-10% discount</em> on lung<br>examinations</h2>
+      <p>The package price includes: consultation of a pulmonologist, spirography, cardiogram</p>
+    </div>
+    <div class="promo-ring"></div>
+    <div class="promo-badge"><div class="off">-10%</div><div class="lbl">TODAY ONLY</div></div>
+  </section>
+
+  <!-- ============ STATS ============ -->
+  <section class="card stats">
+    <h3>Statistics of your health</h3>
+    <div class="yearpick">2019
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9l7 7 7-7"/></svg>
+    </div>
+    <div class="seg"><button class="on">Year</button><button>Month</button></div>
+    <svg class="chart" id="lineChart" viewBox="0 0 973 382" preserveAspectRatio="none"></svg>
+    <div class="tip"><b>10th of August</b><span>illness 7 days</span></div>
+  </section>
+
+  <!-- ============ HEART RATE ============ -->
+  <section class="abs heart">
+    <div class="lbl">Heart rate</div>
+    <div class="val">112</div>
+    <div class="unit">bpm</div>
+    <div class="dots"><i></i><i></i><i></i></div>
+    <svg class="ecg" viewBox="0 0 516 96" preserveAspectRatio="none" fill="none">
+      <path d="M0 62 H96 l12-30 14 54 13-42 11 18 h58 l10-22 13 40 12-30 9 12 H330 l12-26 13 44 12-32 9 14 H516"
+            stroke="rgba(255,255,255,.9)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+  </section>
+
+  <!-- ============ ACTIVITY ============ -->
+  <section class="card activity">
+    <h3>Your activity</h3>
+    <div class="seg"><button class="on">Week</button><button>Month</button></div>
+    <div class="bars">
+      <i style="height:48px"></i><i style="height:66px"></i><i class="hot" style="height:140px"></i>
+      <i style="height:81px"></i><i style="height:58px"></i><i style="height:76px"></i><i style="height:96px"></i>
+    </div>
+    <div class="days"><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span><span>Su</span></div>
+  </section>
+
+  <!-- ============ RIGHT COLUMN ============ -->
+  <section class="card side">
+    <div class="avatar">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="8.4" r="4"/><path d="M4.4 20.2a7.6 7.6 0 0 1 15.2 0"/></svg>
+    </div>
+    <div class="pname">Anastasia Turner</div>
+    <div class="pmeta">35 years, Houston</div>
+    <div class="more">&#8942;</div>
+    <div class="hr a"></div>
+
+    <div class="metrics">
+      <div><div class="k">Blood</div><div class="v">A+</div></div>
+      <div><div class="k">Height</div><div class="v">175 cm</div></div>
+      <div><div class="k">Weight</div><div class="v">64 kg</div></div>
+      <div><div class="k">Pressure</div><div class="v">120/81</div></div>
+    </div>
+    <div class="hr b"></div>
+
+    <div class="cal-h">
+      <b>November</b>
+      <div class="cal-nav">
+        <button aria-label="Previous month"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button>
+        <button aria-label="Next month"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg></button>
+      </div>
+    </div>
+
+    <div class="cal">
+      <div class="wd"><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span><span>Su</span></div>
+      <div class="grid" id="calGrid"></div>
+    </div>
+
+    <div class="appt l"><h4>Dentist</h4><div class="t">8:00-9:30</div><div class="d">Dr. Alex Brown (cab. 39)</div></div>
+    <div class="appt r"><h4>Cardiologist</h4><div class="t">9:45-11:50</div><div class="d">Dr. Erika Clark (cab. 61)</div></div>
+
+    <div class="trt-h">Your treatment</div>
+    <div class="trt one">
+      <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.5 3.5a4.9 4.9 0 0 1 7 7l-7 7a4.9 4.9 0 0 1-7-7z"/><path d="M7 7l10 10"/></svg></div>
+      <div><b>Gentle Iron</b><span>2 capsules with meals every day</span></div>
+    </div>
+    <div class="trt two">
+      <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.4"/><path d="M12 2v2.6M12 19.4V22M2 12h2.6M19.4 12H22M4.9 4.9l1.9 1.9M17.2 17.2l1.9 1.9M19.1 4.9l-1.9 1.9M6.8 17.2l-1.9 1.9"/></svg></div>
+      <div><b>Vitamin D</b><span>1 tablet after a meal every day</span></div>
+    </div>
+  </section>
+
+</div>
+</div>
+
+<script>
+/* ---- fit the 1878x1212 stage into the viewport ---- */
+function fit(){
+  var vp=document.getElementById('viewport'), st=document.getElementById('stage');
+  var s=vp.clientWidth/1878;
+  st.style.transform='scale('+s+')';
+  vp.style.height=(1212*s)+'px';
+}
+window.addEventListener('resize',fit); fit();
+
+/* ---- November 2019, Monday-first (Nov 1 = Friday, today = 19) ---- */
+(function(){
+  var cells=[];
+  [28,29,30,31].forEach(function(d){cells.push({d:d,c:'dim'});});
+  for(var d=1;d<=30;d++){cells.push({d:d,c:(d===19?'today':'')});}
+  cells.push({d:1,c:'dim'});
+  document.getElementById('calGrid').innerHTML=cells.map(function(c){
+    return '<b class="'+c.c+'">'+c.d+'</b>';
+  }).join('');
+})();
+
+/* ---- health line chart ---- */
+(function(){
+  var svg=document.getElementById('lineChart');
+  var L=50,R=950,T=96,B=322,max=20;
+  var data=[12,8,14,9,15,10,13,7,12,6,10,5];
+  var months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  function X(i){return L+i*(R-L)/(data.length-1);}
+  function Y(v){return B-(v/max)*(B-T);}
+  var pts=data.map(function(v,i){return [X(i),Y(v)];});
+
+  var d='M'+pts[0][0].toFixed(1)+','+pts[0][1].toFixed(1);
+  for(var i=0;i<pts.length-1;i++){
+    var p0=pts[i-1]||pts[i], p1=pts[i], p2=pts[i+1], p3=pts[i+2]||p2;
+    var c1x=p1[0]+(p2[0]-p0[0])/6, c1y=p1[1]+(p2[1]-p0[1])/6;
+    var c2x=p2[0]-(p3[0]-p1[0])/6, c2y=p2[1]-(p3[1]-p1[1])/6;
+    d+=' C'+c1x.toFixed(1)+','+c1y.toFixed(1)+' '+c2x.toFixed(1)+','+c2y.toFixed(1)+' '+p2[0].toFixed(1)+','+p2[1].toFixed(1);
+  }
+
+  var s='';
+  s+='<defs><linearGradient id="ag" x1="0" y1="0" x2="0" y2="1">'+
+     '<stop offset="0%" stop-color="#209F85" stop-opacity=".20"/>'+
+     '<stop offset="100%" stop-color="#209F85" stop-opacity="0"/></linearGradient></defs>';
+
+  [0,5,10,15,20].forEach(function(v){
+    var y=Y(v);
+    s+='<line x1="'+L+'" y1="'+y+'" x2="'+R+'" y2="'+y+'" stroke="#EAF3ED" stroke-width="1" stroke-dasharray="4 6"/>';
+    s+='<text x="'+(L-14)+'" y="'+(y+5)+'" text-anchor="end" font-size="14" font-weight="600" fill="#B4CBC2">'+v+'</text>';
+  });
+  s+='<path d="'+d+' L'+R+','+B+' L'+L+','+B+' Z" fill="url(#ag)"/>';
+  s+='<path d="'+d+'" fill="none" stroke="#209F85" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>';
+  months.forEach(function(m,i){
+    s+='<text x="'+X(i).toFixed(1)+'" y="'+(B+34)+'" text-anchor="middle" font-size="14" font-weight="600" fill="#B4CBC2">'+m+'</text>';
+  });
+  pts.forEach(function(p){
+    s+='<circle cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="4.5" fill="#fff" stroke="#209F85" stroke-width="2.6"/>';
+  });
+  var hp=pts[7];
+  s+='<line x1="'+hp[0].toFixed(1)+'" y1="'+(hp[1]+10).toFixed(1)+'" x2="'+hp[0].toFixed(1)+'" y2="'+B+'" stroke="#FF5E23" stroke-width="1.4" stroke-dasharray="4 5" opacity=".55"/>';
+  s+='<circle cx="'+hp[0].toFixed(1)+'" cy="'+hp[1].toFixed(1)+'" r="9" fill="#FF5E23" opacity=".18"/>';
+  s+='<circle cx="'+hp[0].toFixed(1)+'" cy="'+hp[1].toFixed(1)+'" r="6" fill="#FF5E23" stroke="#fff" stroke-width="2.6"/>';
+  svg.innerHTML=s;
+})();
+</script>
+</body>
+</html>

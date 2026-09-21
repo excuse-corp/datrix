@@ -7,6 +7,7 @@ RUNTIME_DIR="$ROOT_DIR/logs/dataman-services"
 DB_COMPOSE_FILE="$ROOT_DIR/docker/dataman-postgres/compose.yml"
 DB_ENV_FILE="$ROOT_DIR/docker/dataman-postgres/.env"
 ASK_DATA_ENV_FILE="$ROOT_DIR/configs/.env.ask-data"
+CHENGQIN_METRIC_ENV_FILE="$ROOT_DIR/.env.dataman.local"
 DBGPT_CONFIG="${DATAMAN_DBGPT_CONFIG:-$ROOT_DIR/configs/dataman-runtime.toml}"
 BACKEND_PORT="${DATAMAN_BACKEND_PORT:-7771}"
 BACKEND_PID_FILE="$RUNTIME_DIR/dbgpt.pid"
@@ -107,6 +108,13 @@ main() {
     # shellcheck disable=SC1090
     source "$ASK_DATA_ENV_FILE"
     set +a
+  fi
+  if [[ -f "$CHENGQIN_METRIC_ENV_FILE" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "$CHENGQIN_METRIC_ENV_FILE"
+    set +a
+    log "Loaded Chengqin metric API environment from .env.dataman.local"
   fi
 
   log "Starting PostgreSQL"

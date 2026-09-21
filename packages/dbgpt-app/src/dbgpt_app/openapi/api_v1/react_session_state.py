@@ -543,7 +543,10 @@ def update_react_session_after_turn(
     final_content: str,
     *,
     skills_dir: str = SKILLS_DIR,
-    status: str = "completed",
+    status: str,
+    termination_reason: Optional[str] = None,
+    error_message: Optional[str] = None,
+    run_summary: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     matched = react_state.get("matched") if isinstance(react_state, dict) else None
     metadata = getattr(matched, "metadata", None)
@@ -587,11 +590,15 @@ def update_react_session_after_turn(
         **(state.get("workflow_state") or {}),
         "last_turn_id": react_state.get("turn_id"),
         "last_status": status,
+        "last_termination_reason": termination_reason,
     }
     state["checkpoint"] = {
         "last_status": status,
         "last_turn_id": react_state.get("turn_id"),
         "last_final_content": _truncate(final_content or "", 2000),
+        "termination_reason": termination_reason,
+        "error_message": _truncate(error_message or "", 1000) if error_message else None,
+        "run_summary": run_summary or {},
         "updated_at": _now_iso(),
     }
     state["updated_at"] = _now_iso()

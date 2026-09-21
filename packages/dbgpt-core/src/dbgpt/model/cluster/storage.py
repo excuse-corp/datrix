@@ -187,15 +187,27 @@ class ModelStorage:
     def __init__(self, storage: StorageInterface):
         self._storage = storage
 
+    def all_model_items(
+        self, enabled: Optional[bool] = True
+    ) -> List[ModelStorageItem]:
+        """Get persisted model records, optionally filtered by enabled state.
+
+        ``enabled=None`` returns both running-at-startup and disabled records.
+        """
+        conditions = {}
+        if enabled is not None:
+            conditions["enabled"] = enabled
+        return self._storage.query(
+            QuerySpec(conditions=conditions), ModelStorageItem
+        )
+
     def all_models(self, enabled: bool = True) -> List[WorkerStartupRequest]:
         """Get all stored models.
 
         Returns:
             List[WorkerStartupRequest]: The list of worker startup requests.
         """
-        models = self._storage.query(
-            QuerySpec(conditions={"enabled": enabled}), ModelStorageItem
-        )
+        models = self.all_model_items(enabled=enabled)
         return [model.to_startup_req() for model in models]
 
     def query_models(
@@ -228,8 +240,38 @@ class ModelStorage:
             "enabled": enabled,
         }
         conditions.update(kwargs)
+        # Storage backends differ in how they treat ``None`` conditions. Keep
+        # optional filters out of the query so ``enabled=None`` means "any
+        # persisted state" consistently for database and in-memory storage.
+        conditions = {key: value for key, value in conditions.items() if value is not None}
         models = self._storage.query(QuerySpec(conditions=conditions), ModelStorageItem)
         return [model.to_startup_req() for model in models]
+
+    def set_enabled(
+        self,
+        model_name: str,
+        worker_type: str,
+        enabled: bool,
+        sys_code: Optional[str] = None,
+        user_name: Optional[str] = None,
+        host: Optional[str] = None,
+        port: Optional[int] = None,
+    ) -> int:
+        """Update the auto-start flag without changing model parameters."""
+        conditions = {
+            "model": model_name,
+            "worker_type": worker_type,
+            "sys_code": sys_code,
+            "user_name": user_name,
+            "host": host,
+            "port": port,
+        }
+        conditions = {key: value for key, value in conditions.items() if value is not None}
+        models = self._storage.query(QuerySpec(conditions=conditions), ModelStorageItem)
+        for model in models:
+            model.enabled = enabled
+            self._storage.save_or_update(model)
+        return len(models)
 
     def save_or_update(
         self, request: WorkerStartupRequest, enabled: bool = True

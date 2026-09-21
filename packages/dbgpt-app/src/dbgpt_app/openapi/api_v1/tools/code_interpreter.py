@@ -9,6 +9,7 @@ import sys
 import uuid
 from typing import Any, Dict, List, Optional
 
+from dbgpt.agent import ActionOutput
 from dbgpt.agent.resource.tool.base import tool
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,19 @@ def _try_repair_truncated_code(raw_code: str) -> Optional[str]:
 
 
 def make_code_interpreter(react_state: Dict[str, Any]):
+    def _failed_result(
+        chunks: List[Dict[str, Any]],
+        error_message: str,
+    ) -> ActionOutput:
+        payload = json.dumps({"chunks": chunks}, ensure_ascii=False)
+        return ActionOutput(
+            is_exe_success=False,
+            content=payload,
+            observations=payload,
+            error_type="tool_error",
+            error_message=error_message,
+        )
+
     @tool(
         description=(
             "Execute Python code for data analysis and computation. "
@@ -112,20 +126,21 @@ def make_code_interpreter(react_state: Dict[str, Any]):
                     "Please regenerate complete, syntactically valid Python code. "
                     "Keep code under 80 lines."
                 )
-                return json.dumps(
-                    {
-                        "chunks": [
-                            {"output_type": "code", "content": code.strip()},
-                            {"output_type": "text", "content": error_msg},
-                        ]
-                    },
-                    ensure_ascii=False,
+                return _failed_result(
+                    [
+                        {"output_type": "code", "content": code.strip()},
+                        {"output_type": "text", "content": error_msg},
+                    ],
+                    error_msg,
                 )
 
         output_text = ""
+        is_success = True
+        error_message = None
+        proc = None
         try:
             tmp_path = os.path.join(work_dir, "_run.py")
-            with open(tmp_path, "w") as tmp:
+            with open(tmp_path, "w", encoding="utf-8") as tmp:
                 tmp.write(full_code)
 
             proc = await asyncio.create_subprocess_exec(
@@ -139,16 +154,36 @@ def make_code_interpreter(react_state: Dict[str, Any]):
             output_text = stdout.decode("utf-8", errors="replace")
             error_text = stderr.decode("utf-8", errors="replace")
 
-            if proc.returncode != 0 and error_text:
-                output_text = (
-                    output_text + "\n[ERROR]\n" + error_text
-                    if output_text
-                    else error_text
+            if proc.returncode != 0:
+                is_success = False
+                error_message = (
+                    error_text.strip()
+                    or f"Python process exited with status {proc.returncode}"
                 )
+                if error_text:
+                    output_text = (
+                        output_text + "\n[ERROR]\n" + error_text
+                        if output_text
+                        else error_text
+                    )
+                elif not output_text:
+                    output_text = error_message
         except asyncio.TimeoutError:
             output_text = "Execution timed out (60s limit)"
+            is_success = False
+            error_message = output_text
+            if proc is not None and proc.returncode is None:
+                try:
+                    proc.kill()
+                    await proc.wait()
+                except Exception:
+                    logger.debug(
+                        "Failed to terminate timed-out code process", exc_info=True
+                    )
         except Exception as e:
             output_text = f"Execution error: {e}"
+            is_success = False
+            error_message = output_text
 
         chunks: List[Dict[str, Any]] = [
             {"output_type": "code", "content": code.strip()},
@@ -202,6 +237,9 @@ def make_code_interpreter(react_state: Dict[str, Any]):
                 f"  - {url}" for url in all_images
             )
             chunks.append({"output_type": "text", "content": img_summary})
+
+        if not is_success:
+            return _failed_result(chunks, error_message or output_text.strip())
 
         return json.dumps({"chunks": chunks}, ensure_ascii=False)
 

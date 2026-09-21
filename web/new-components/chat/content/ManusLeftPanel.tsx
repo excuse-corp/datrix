@@ -40,6 +40,7 @@ import ObservationFormatter from './ObservationFormatter';
 import TaskPlanCard, { TaskItem } from './TaskPlanCard';
 
 export type StepStatus = 'pending' | 'running' | 'completed' | 'error' | 'cancelled';
+export type RunStatus = 'running' | 'completed' | 'incomplete' | 'failed' | 'cancelled';
 
 export type StepType =
   | 'read'
@@ -132,6 +133,9 @@ export interface ManusLeftPanelProps {
   onSkillCardClick?: (skillName: string) => void;
   onSkillDownload?: (skillName: string) => void;
   taskPlan?: TaskItem[];
+  runStatus?: RunStatus;
+  terminationReason?: string;
+  errorMessage?: string;
 }
 
 // Get step icon based on type and status
@@ -954,12 +958,45 @@ const ManusLeftPanel: React.FC<ManusLeftPanelProps> = ({
   onSkillCardClick,
   onSkillDownload,
   taskPlan,
+  runStatus,
+  terminationReason,
+  errorMessage,
 }) => {
   const { t } = useTranslation();
   const hasRunningStep = useMemo(
     () => sections.some(section => section.steps.some(step => step.status === 'running')),
     [sections],
   );
+  const terminalRunStatus = runStatus && runStatus !== 'running' ? runStatus : undefined;
+  const runStatusMeta = useMemo(() => {
+    if (!terminalRunStatus) return null;
+    if (terminalRunStatus === 'completed') {
+      return {
+        icon: <CheckOutlined className='text-xs text-emerald-500' />,
+        label: t('task_completed'),
+        textClass: 'text-emerald-600 dark:text-emerald-400',
+      };
+    }
+    if (terminalRunStatus === 'cancelled') {
+      return {
+        icon: <MinusCircleOutlined className='text-xs text-gray-500' />,
+        label: t('task_cancelled'),
+        textClass: 'text-gray-600 dark:text-gray-300',
+      };
+    }
+    if (terminalRunStatus === 'incomplete') {
+      return {
+        icon: <ExclamationCircleOutlined className='text-xs text-amber-500' />,
+        label: t('task_incomplete'),
+        textClass: 'text-amber-600 dark:text-amber-400',
+      };
+    }
+    return {
+      icon: <ExclamationCircleOutlined className='text-xs text-red-500' />,
+      label: t('task_failed'),
+      textClass: 'text-red-600 dark:text-red-400',
+    };
+  }, [terminalRunStatus, t]);
   const showAnswerGenerationStatus = Boolean(isWorking && !hasRunningStep);
   const handleStepClick = useCallback(
     (stepId: string, sectionId: string) => {
@@ -1144,10 +1181,15 @@ const ManusLeftPanel: React.FC<ManusLeftPanelProps> = ({
               )}
             </div>
 
-            <div className='flex items-center gap-1.5 mt-5'>
-              <CheckOutlined className='text-xs text-emerald-500' />
-              <span className='text-sm text-emerald-600 dark:text-emerald-400 font-medium'>{t('task_completed')}</span>
-            </div>
+            {runStatusMeta && (
+              <div className='flex items-center gap-1.5 mt-5 flex-wrap'>
+                {runStatusMeta.icon}
+                <span className={`text-sm ${runStatusMeta.textClass} font-medium`}>{runStatusMeta.label}</span>
+                {terminalRunStatus !== 'completed' && (terminationReason || errorMessage) && (
+                  <span className='text-xs text-gray-500 dark:text-gray-400'>{terminationReason || errorMessage}</span>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>

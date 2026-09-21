@@ -174,6 +174,9 @@ untracked runtime `configs/.env.ask-data` as `DATAMAN_DATA_DB_PASSWORD`. The
 source configuration in `configs/ask-data.example.toml` already binds the
 `dataman_data` source to the read-only reporting view.
 
+When adding a new third-party synchronization table and its AskData reporting
+view, follow `configs/DATAMAN_DATA_SYNC_GUIDE.md`.
+
 The information-project Scene definition is in
 `dataman1111/scenes/information_project_contract_report.semantic.md`. After the
 DataMan API is running, create it with:

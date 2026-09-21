@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>2024年度业务数据报告</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    /* Warm orange theme derived from reference palette */
+    --primary: #D67040;        /* terracotta orange */
+    --primary-light: #F8E4D6;  /* soft apricot tint */
+    --primary-lighter: #FDF6F1;
+    --primary-dark: #5C2E18;   /* deep roasted brown */
+    --primary-mid: #A8481F;    /* burnt orange */
+    --accent: #D8C2AF;         /* warm sand */
+    --success: #2F7D57;        /* olive green */
+    --warning: #C98A2E;        /* amber */
+    --danger: #B3382C;         /* brick red */
+    --bg: #F1F1EA;             /* warm off-white */
+    --card-bg: #FFFFFF;
+    --text: #33261F;           /* espresso */
+    --text-muted: #8A7A6E;     /* taupe */
+    --border: #E4D6C8;         /* sand border */
+    --shadow: 0 2px 10px rgba(214,112,64,0.10);
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+         background:var(--bg); color:var(--text); line-height:1.6; }
+  .header { background:linear-gradient(135deg,var(--primary-dark) 0%,var(--primary-mid) 55%,var(--primary) 100%);
+            color:#fff; padding:32px 40px; position:relative; overflow:hidden; }
+  .header::after { content:""; position:absolute; right:-60px; top:-70px; width:240px; height:240px;
+                   border-radius:50%; background:rgba(248,228,214,0.14); }
+  .header h1 { font-size:26px; font-weight:700; letter-spacing:1px; }
+  .header .subtitle { font-size:14px; opacity:.85; margin-top:6px; }
+  .container { max-width:1200px; margin:0 auto; padding:28px 24px; }
+  .kpi-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+              gap:18px; margin-bottom:28px; }
+  .kpi-card { background:var(--card-bg); border-radius:12px; padding:22px 24px;
+              box-shadow:var(--shadow); border-left:4px solid var(--primary); }
+  .kpi-card .label { font-size:13px; color:var(--text-muted); }
+  .kpi-card .value { font-size:30px; font-weight:700; color:var(--primary-mid);
+                     margin:6px 0 2px; }
+  .kpi-card .trend { font-size:12px; }
+  .trend.up { color:var(--success); } .trend.down { color:var(--danger); }
+  .section-title { font-size:18px; font-weight:700; color:var(--primary-dark);
+                   margin:24px 0 14px; padding-left:12px;
+                   border-left:4px solid var(--primary); }
+  .card { background:var(--card-bg); border-radius:12px; padding:24px;
+          box-shadow:var(--shadow); margin-bottom:22px; }
+  .chart-row { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr));
+               gap:22px; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th { background:var(--primary-light); color:var(--primary-dark); text-align:left;
+       padding:12px 14px; font-weight:600; }
+  td { padding:11px 14px; border-bottom:1px solid var(--border); }
+  tr:hover td { background:var(--primary-lighter); }
+  .badge { display:inline-block; padding:2px 10px; border-radius:20px;
+           font-size:12px; font-weight:600; }
+  .badge.blue { background:var(--primary-light); color:var(--primary-mid); }
+  .badge.green { background:#DFF0E6; color:var(--success); }
+  .badge.orange { background:#FBEBCF; color:var(--warning); }
+  .badge.red { background:#FBE0DC; color:var(--danger); }
+
+  /* ---- Data validation panel ---- */
+  .validation-panel { background:var(--card-bg); border-radius:12px; padding:22px 24px;
+                      box-shadow:var(--shadow); margin-bottom:26px;
+                      border:1px solid var(--border); border-top:4px solid var(--primary); }
+  .validation-head { display:flex; flex-wrap:wrap; align-items:center; gap:12px; margin-bottom:14px; }
+  .validation-head .v-title { font-size:16px; font-weight:700; color:var(--primary-dark); }
+  .validation-summary { margin-left:auto; font-size:13px; color:var(--text-muted); }
+  .v-status { display:inline-block; padding:3px 12px; border-radius:20px; font-size:12px; font-weight:700; }
+  .v-status.pass { background:#DFF0E6; color:var(--success); }
+  .v-status.warn { background:#FBEBCF; color:var(--warning); }
+  .v-status.fail { background:#FBE0DC; color:var(--danger); }
+  .v-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:10px; }
+  .v-item { display:flex; gap:10px; align-items:flex-start; padding:12px 14px; border-radius:10px;
+            background:var(--primary-lighter); border:1px solid var(--border); font-size:13px; }
+  .v-item.pass { border-left:4px solid var(--success); }
+  .v-item.warn { border-left:4px solid var(--warning); }
+  .v-item.fail { border-left:4px solid var(--danger); }
+  .v-mark { font-weight:700; font-size:14px; line-height:1.4; }
+  .v-item.pass .v-mark { color:var(--success); }
+  .v-item.warn .v-mark { color:var(--warning); }
+  .v-item.fail .v-mark { color:var(--danger); }
+  .v-name { font-weight:600; color:var(--text); }
+  .v-detail { color:var(--text-muted); font-size:12px; margin-top:2px; }
+  .v-empty { font-size:13px; color:var(--text-muted); }
+
+  .footer { text-align:center; padding:24px; color:var(--text-muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>2024年度业务数据报告</h1>
+  <div class="subtitle">统计周期：2024-01 至 2024-12</div>
+</div>
+<div class="container">
+  <!-- KPI_CARDS -->
+  <div class="kpi-grid"><div class="kpi-card"><div class="label">总营收</div><div class="value">¥1.28亿</div><div class="trend up">↑ +12.5%</div></div>
+<div class="kpi-card"><div class="label">新增客户</div><div class="value">386</div><div class="trend up">↑ +8.2%</div></div>
+<div class="kpi-card"><div class="label">项目数量</div><div class="value">52</div><div class="trend down">↓ -3.1%</div></div>
+<div class="kpi-card"><div class="label">回款率</div><div class="value">91.3%</div><div class="trend up">↑ +2.4%</div></div></div>
+  <!-- VALIDATION -->
+  <div class="validation-panel"><div class="validation-head"><span class="v-title">数据校验结果</span><span class="v-status pass">全部通过</span><span class="validation-summary">通过 8 · 提醒 0 · 异常 0</span></div><div class="v-list"><div class="v-item pass"><span class="v-mark">✓</span><div><div class="v-name">KPI 区块完整性</div><div class="v-detail">共 4 个指标</div></div></div><div class="v-item pass"><span class="v-mark">✓</span><div><div class="v-name">KPI 数值可解析</div><div class="v-detail">4 个指标均可解析为数值</div></div></div><div class="v-item pass"><span class="v-mark">✓</span><div><div class="v-name">趋势方向一致性</div><div class="v-detail">涨跌符号与方向标记一致</div></div></div><div class="v-item pass"><span class="v-mark">✓</span><div><div class="v-name">图表数据长度对齐</div><div class="v-detail">2 个图表标签与数值一一对应</div></div></div><div class="v-item pass"><span class="v-mark">✓</span><div><div class="v-name">图表数值合法性</div><div class="v-detail">无空值与异常负值</div></div></div><div class="v-item pass"><span class="v-mark">✓</span><div><div class="v-name">占比合计校验</div><div class="v-detail">占比类图表合计接近 100%</div></div></div><div class="v-item pass"><span class="v-mark">✓</span><div><div class="v-name">表格行列一致性</div><div class="v-detail">1 个表格行列对齐</div></div></div><div class="v-item pass"><span class="v-mark">✓</span><div><div class="v-name">徽章列引用有效</div><div class="v-detail">徽章列均可在表头中找到</div></div></div></div></div>
+  <!-- CHARTS -->
+  <div class="chart-row"><div class="card"><div class="section-title">月度营收趋势</div><div style="position:relative;height:320px"><canvas id="chart0"></canvas></div></div><div class="card"><div class="section-title">业务线占比</div><div style="position:relative;height:320px"><canvas id="chart1"></canvas></div></div></div>
+  <!-- TABLES -->
+  <div class="card"><div class="section-title">重点项目一览</div><table><thead><tr><th>项目名称</th><th>金额(万)</th><th>负责人</th><th>状态</th></tr></thead><tbody><tr><td>ERP升级项目</td><td>520</td><td>张伟</td><td><span class="badge blue">进行中</span></td></tr><tr><td>数据中台建设</td><td>380</td><td>李娜</td><td><span class="badge green">已完成</span></td></tr><tr><td>安全合规改造</td><td>210</td><td>王强</td><td><span class="badge red">逾期</span></td></tr></tbody></table></div>
+</div>
+<div class="footer">数据来源：业务管理系统 · 由 data-report 技能生成</div>
+<script>
+new Chart(document.getElementById('chart0'),{type:'line',data:{labels:["1月", "2月", "3月", "4月", "5月", "6月"],datasets:[{"label": "营收(万元)", "data": [180.0, 210.0, 195.0, 240.0, 260.0, 300.0], "borderColor": "#D67040", "backgroundColor": "#D6704033", "tension": 0.35, "fill": true}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'}}}});
+new Chart(document.getElementById('chart1'),{type:'doughnut',data:{labels:["信息化", "运维", "咨询", "其他"],datasets:[{"label": "占比", "data": [45.0, 30.0, 15.0, 10.0], "backgroundColor": ["#D67040", "#C98A2E", "#A8481F", "#D8C2AF"]}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'}}}});
+</script>
+</body>
+</html>

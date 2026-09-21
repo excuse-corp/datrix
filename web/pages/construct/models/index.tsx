@@ -1,9 +1,11 @@
 import { apiInterceptors, getDefaultModel, getModelList, setDefaultModel, startModel, stopModel } from '@/client/api';
 import ModelForm from '@/components/model/model-form';
+import { useInterfaceStyle } from '@/hooks/use-interface-style';
 import BlurredCard, { InnerDropdown } from '@/new-components/common/blurredCard';
 import ConstructLayout from '@/new-components/layout/Construct';
 import { IModelData } from '@/types/model';
 import { getModelIcon } from '@/utils/constants';
+import { isDashboardStyle } from '@/utils/interface-style';
 import { EditOutlined, PlusOutlined, StarOutlined } from '@ant-design/icons';
 import { Button, Modal, Tag, message } from 'antd';
 import moment from 'moment';
@@ -17,6 +19,8 @@ function Models() {
   const [editingModel, setEditingModel] = useState<IModelData | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [defaultModel, setDefaultModelName] = useState<string | null>(null);
+  const interfaceStyle = useInterfaceStyle();
+  const isDashboard = isDashboardStyle(interfaceStyle);
 
   async function getModels() {
     const [, res] = await apiInterceptors(getModelList());
@@ -117,39 +121,76 @@ function Models() {
     return getModelIcon(name);
   };
 
+  const healthyCount = models.filter(item => item.healthy).length;
+  const unhealthyCount = models.length - healthyCount;
+
   return (
     <ConstructLayout>
-      <div className='px-6 overflow-y-auto'>
-        <div className='flex justify-between items-center mb-6'>
-          <div className='flex items-center gap-4'>
-            {/* <Input
-              variant="filled"
-              prefix={<SearchOutlined />}
-              placeholder={t('please_enter_the_keywords')}
-              onChange={onSearch}
-              onPressEnter={onSearch}
-              allowClear
-              className="w-[230px] h-[40px] border-1 border-white backdrop-filter backdrop-blur-lg bg-white bg-opacity-30 dark:border-[#6f7f95] dark:bg-[#6f7f95] dark:bg-opacity-60"
-            /> */}
-          </div>
+      <div className='dashboard-models-page px-6 overflow-y-auto'>
+        {isDashboard ? (
+          <>
+            <div className='dashboard-page-header'>
+              <div>
+                <div className='dashboard-page-title'>模型管理</div>
+                <div className='dashboard-page-subtitle'>查看模型健康状态、默认模型和运行地址</div>
+              </div>
+              <div className='flex items-center gap-4'>
+                <Button
+                  className='border-none text-white bg-button-gradient'
+                  icon={<PlusOutlined />}
+                  onClick={() => {
+                    setEditingModel(null);
+                    setIsModalOpen(true);
+                  }}
+                >
+                  {t('create_model')}
+                </Button>
+              </div>
+            </div>
 
-          <div className='flex items-center gap-4'>
-            <Button
-              className='border-none text-white bg-button-gradient'
-              icon={<PlusOutlined />}
-              onClick={() => {
-                setEditingModel(null);
-                setIsModalOpen(true);
-              }}
-            >
-              {t('create_model')}
-            </Button>
+            <div className='dashboard-summary-strip'>
+              <div className='dashboard-summary-item'>
+                <div className='dashboard-summary-label'>总模型</div>
+                <div className='dashboard-summary-value'>{models.length}</div>
+              </div>
+              <div className='dashboard-summary-item'>
+                <div className='dashboard-summary-label'>Healthy</div>
+                <div className='dashboard-summary-value'>{healthyCount}</div>
+              </div>
+              <div className='dashboard-summary-item'>
+                <div className='dashboard-summary-label'>Unhealthy</div>
+                <div className='dashboard-summary-value'>{unhealthyCount}</div>
+              </div>
+              <div className='dashboard-summary-item'>
+                <div className='dashboard-summary-label'>默认模型</div>
+                <div className='dashboard-summary-value truncate' title={defaultModel ?? undefined}>
+                  {defaultModel || '未设置'}
+                </div>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className='flex justify-between items-center mb-6'>
+            <div className='flex items-center gap-4' />
+            <div className='flex items-center gap-4'>
+              <Button
+                className='border-none text-white bg-button-gradient'
+                icon={<PlusOutlined />}
+                onClick={() => {
+                  setEditingModel(null);
+                  setIsModalOpen(true);
+                }}
+              >
+                {t('create_model')}
+              </Button>
+            </div>
           </div>
-        </div>
+        )}
 
-        <div className='flex flex-wrap mx-[-8px] '>
+        <div className='dashboard-model-grid flex flex-wrap mx-[-8px]'>
           {models.map(item => (
             <BlurredCard
+              className='dashboard-model-card'
               logo={returnLogo(item.model_name)}
               description={
                 <div className='flex flex-col gap-1 relative text-xs bottom-4'>
@@ -234,6 +275,18 @@ function Models() {
               rightTopHover={false}
               RightBottom={
                 <div className='flex gap-2'>
+                  {item.running === false && (
+                    <Button
+                      size='small'
+                      type='primary'
+                      onClick={e => {
+                        e.stopPropagation();
+                        startTheModel(item);
+                      }}
+                    >
+                      {t('start_model')}
+                    </Button>
+                  )}
                   {item.worker_type === 'llm' && defaultModel !== item.model_name && (
                     <Button
                       size='small'
@@ -263,10 +316,13 @@ function Models() {
               }
               Tags={
                 <div>
-                  <Tag color={item.healthy ? 'green' : 'red'} title={item.health_reason ?? undefined}>
-                    {item.healthy ? 'Healthy' : 'Unhealthy'}
+                  <Tag
+                    color={item.running === false ? 'default' : item.healthy ? 'green' : 'red'}
+                    title={item.health_reason ?? undefined}
+                  >
+                    {item.running === false ? '已停止' : item.healthy ? 'Healthy' : 'Unhealthy'}
                   </Tag>
-                  <Tag>{item.worker_type}</Tag>
+                  <Tag className='model-worker-type-tag'>{item.worker_type}</Tag>
                   {defaultModel === item.model_name && <Tag color='blue'>默认</Tag>}
                 </div>
               }

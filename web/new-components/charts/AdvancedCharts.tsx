@@ -5,6 +5,8 @@
  * Enhanced with advanced interactions: zoom, pan, brush selection, and data point click handlers.
  */
 
+import { useInterfaceStyle } from '@/hooks/use-interface-style';
+import { TERMINAL_CHART_COLORS } from '@/utils/terminal-chart-theme';
 import {
   FullscreenExitOutlined,
   FullscreenOutlined,
@@ -212,7 +214,6 @@ const getTooltipConfig = (config: ChartConfig) => ({
     },
     customContent: (title: string, items: any[]) => {
       if (!items?.length) return '';
-      const xField = config.xField || 'x';
       const yField = config.yField || 'y';
 
       return `
@@ -525,7 +526,7 @@ const AreaChart: React.FC<{ config: ChartConfig; chartRef: React.MutableRefObjec
       ...getInteractionConfig(config),
       ...getClickHandlerConfig(config, chartRef),
       areaStyle: () => ({
-        fill: GRADIENT_COLORS.blue,
+        fill: config.colors?.[0] || GRADIENT_COLORS.blue,
         fillOpacity: 0.25,
       }),
       line: {
@@ -628,7 +629,15 @@ export interface AdvancedChartProps {
   style?: React.CSSProperties;
 }
 
-const AdvancedChart: React.FC<AdvancedChartProps> = ({ config, className, style }) => {
+const AdvancedChart: React.FC<AdvancedChartProps> = ({ config: inputConfig, className, style }) => {
+  const interfaceStyle = useInterfaceStyle();
+  const config = useMemo(
+    () =>
+      interfaceStyle === 'terminal'
+        ? { ...inputConfig, colors: inputConfig.colors || TERMINAL_CHART_COLORS }
+        : inputConfig,
+    [inputConfig, interfaceStyle],
+  );
   const chartRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);

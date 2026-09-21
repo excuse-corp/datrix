@@ -15,6 +15,35 @@ from ..llm.llm import _build_model_request
 
 logger = logging.getLogger(__name__)
 
+_LLM_ERROR_TEXT_MARKERS = (
+    "LLMServer Generate Error",
+    "LLM Chat Generrate Error",
+    "LLM generate stream is null",
+    "APIConnectionError",
+    "Connection error",
+    "ModelNotFound",
+)
+
+
+def _model_output_error_message(output: Optional[ModelOutput]) -> Optional[str]:
+    if not output:
+        return "LLM generate stream is null!"
+    try:
+        error_code = int(getattr(output, "error_code", 0) or 0)
+    except Exception:
+        error_code = 0
+    try:
+        text = output.gen_text_with_thinking() or ""
+    except Exception:
+        text = getattr(output, "text", None) or ""
+    if error_code != 0:
+        return text or f"LLM returned error_code={error_code}"
+    if any(marker in text for marker in _LLM_ERROR_TEXT_MARKERS):
+        return text
+    if "Model " in text and " not found" in text:
+        return text
+    return None
+
 
 class AIWrapper:
     """AIWrapper for LLM."""
@@ -228,6 +257,9 @@ class AIWrapper:
 
             async for output in self._llm_client.generate_stream(model_request.copy()):
                 model_output = output
+                output_error = _model_output_error_message(output)
+                if output_error:
+                    raise RuntimeError(output_error)
                 delta_text = ""
                 delta_thinking = ""
                 if output.has_text:
@@ -267,8 +299,9 @@ class AIWrapper:
                             conv_id,
                             temp_message,
                         )
-            if not model_output:
-                raise ValueError("LLM generate stream is null!")
+            output_error = _model_output_error_message(model_output)
+            if output_error:
+                raise RuntimeError(output_error)
             parsed_output = model_output.gen_text_with_thinking()
 
             if verbose:

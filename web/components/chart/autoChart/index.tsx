@@ -1,5 +1,7 @@
 import { ChatContext } from '@/app/chat-context';
 import i18n, { I18nKeys } from '@/app/i18n';
+import { useInterfaceStyle } from '@/hooks/use-interface-style';
+import { terminalChartTheme } from '@/utils/terminal-chart-theme';
 import { DownloadOutlined } from '@ant-design/icons';
 import { Advice, Advisor, Datum } from '@antv/ava';
 import { Chart, ChartRef } from '@berryv/g2-react';
@@ -19,6 +21,7 @@ export const AutoChart = (props: AutoChartProps) => {
   // 处理空值数据 (为'-'的数据)
   const data = processNilData(originalData) as Datum[];
   const { mode } = useContext(ChatContext);
+  const interfaceStyle = useInterfaceStyle();
 
   const [advisor, setAdvisor] = useState<Advisor>();
   const [advices, setAdvices] = useState<Advice[]>([]);
@@ -114,7 +117,7 @@ export const AutoChart = (props: AutoChartProps) => {
             options={{
               ...spec,
               autoFit: true,
-              theme: mode,
+              theme: interfaceStyle === 'terminal' ? terminalChartTheme : mode,
               height: 300,
             }}
             ref={chartRef}
@@ -122,7 +125,7 @@ export const AutoChart = (props: AutoChartProps) => {
         );
       }
     }
-  }, [advices, mode, renderChartType]);
+  }, [advices, mode, renderChartType, interfaceStyle]);
 
   if (renderChartType) {
     return (

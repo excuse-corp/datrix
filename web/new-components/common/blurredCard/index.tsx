@@ -37,21 +37,28 @@ const BlurredCard: React.FC<{
 }) => {
   if (typeof description === 'string') {
     description = (
-      <p className='line-clamp-2 relative bottom-4 text-ellipsis min-h-[42px] text-sm text-[#525964] dark:text-[rgba(255,255,255,0.65)]'>
+      <p className='dashboard-card-description line-clamp-2 relative bottom-4 text-ellipsis min-h-[42px] text-sm text-[#525964] dark:text-[rgba(255,255,255,0.65)]'>
         {description}
       </p>
     );
+  } else {
+    description = <div className='dashboard-card-description'>{description}</div>;
   }
 
   return (
-    <div className={cls('hover-underline-gradient flex justify-center mt-6 relative group w-1/3 px-2 mb-6', className)}>
+    <div
+      className={cls(
+        'dashboard-card-shell hover-underline-gradient flex justify-center mt-6 relative group w-1/3 px-2 mb-6',
+        className,
+      )}
+    >
       <div
         onClick={onClick}
-        className='backdrop-filter backdrop-blur-lg cursor-pointer  bg-white bg-opacity-70 border-2 border-white rounded-lg shadow p-4 relative w-full h-full dark:border-[#6f7f95] dark:bg-[#6f7f95] dark:bg-opacity-60'
+        className='dashboard-card-surface backdrop-filter backdrop-blur-lg cursor-pointer bg-white bg-opacity-70 border-2 border-white rounded-lg shadow p-4 relative w-full h-full dark:border-[#6f7f95] dark:bg-[#6f7f95] dark:bg-opacity-60'
       >
-        <div className='flex items-end relative bottom-8 justify-between w-full'>
+        <div className='dashboard-card-heading flex items-end relative bottom-8 justify-between w-full'>
           <div className='flex items-end gap-4 w-11/12  flex-1'>
-            <div className='bg-white rounded-lg shadow-sm w-14 h-14 flex items-center p-3'>
+            <div className='dashboard-card-icon bg-white rounded-lg shadow-sm w-14 h-14 flex items-center p-3'>
               {scene ? (
                 <AppDefaultIcon scene={scene} width={14} height={14} />
               ) : (
@@ -65,7 +72,7 @@ const BlurredCard: React.FC<{
               {name.length > 6 ? (
                 <Tooltip title={name}>
                   <span
-                    className='line-clamp-1 text-ellipsis font-semibold text-base'
+                    className='dashboard-card-name line-clamp-1 text-ellipsis font-semibold text-base'
                     style={{
                       maxWidth: '60%',
                     }}
@@ -75,7 +82,7 @@ const BlurredCard: React.FC<{
                 </Tooltip>
               ) : (
                 <span
-                  className='line-clamp-1 text-ellipsis font-semibold text-base'
+                  className='dashboard-card-name line-clamp-1 text-ellipsis font-semibold text-base'
                   style={{
                     maxWidth: '60%',
                   }}
@@ -143,7 +150,8 @@ const InnerDropdown: React.FC<{ menu: DropDownProps['menu'] }> = ({ menu }) => {
   return (
     <Dropdown
       menu={menu}
-      getPopupContainer={node => node.parentNode as HTMLElement}
+      overlayClassName='model-card-dropdown'
+      getPopupContainer={() => document.body}
       placement='bottomRight'
       autoAdjustOverflow={false}
     >

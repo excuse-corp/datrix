@@ -10,13 +10,16 @@
  * - step.meta: Step metadata { type, id, thought, action, action_input }
  * - step.done: Step completed { type, id, status }
  * - context.status: Context budget status { type, used, budget, ratio, state, compact_layer }
- * - final: Final answer { type, content }
- * - done: Stream completed { type }
+ * - run.completed/run.failed/run.incomplete/run.cancelled: Terminal run status
+ * - final: Final answer { type, content, status, termination_reason }
+ * - done: SSE stream ended { type }
  */
 
 import { MessagePart, ReasoningPart, ToolPart, ToolStatus } from '@/new-components/chat/content/OpenCodeSessionTurn';
 
 // SSE Event Types
+export type ReactRunStatus = 'completed' | 'incomplete' | 'failed' | 'cancelled' | 'running';
+
 export interface SSEStepStartEvent {
   type: 'step.start';
   step: number;
@@ -44,11 +47,23 @@ export interface SSEStepDoneEvent {
   type: 'step.done';
   id: string;
   status: 'done' | 'failed';
+  error_type?: string;
+  error_message?: string;
 }
 
 export interface SSEFinalEvent {
   type: 'final';
   content: string;
+  status?: ReactRunStatus;
+  termination_reason?: string;
+  error_message?: string;
+}
+
+export interface SSERunStateEvent {
+  type: 'run.completed' | 'run.failed' | 'run.incomplete' | 'run.cancelled';
+  status?: ReactRunStatus;
+  termination_reason?: string;
+  error_message?: string;
 }
 
 export interface SSEDoneEvent {
@@ -107,6 +122,7 @@ export type SSEEvent =
   | SSEQuestionAskedEvent
   | SSEQuestionRepliedEvent
   | SSEQuestionRejectedEvent
+  | SSERunStateEvent
   | SSEFinalEvent
   | SSEDoneEvent;
 
@@ -144,6 +160,9 @@ export class ReActSSEState {
   private endTime?: number;
   private _contextStatus: ContextStatus | null = null;
   private _pendingQuestion: SSEQuestionAskedEvent | null = null;
+  private runStatus: ReactRunStatus | null = null;
+  private terminationReason?: string;
+  private errorMessage?: string;
 
   constructor() {
     this.startTime = Date.now();
@@ -175,6 +194,12 @@ export class ReActSSEState {
       case 'question.replied':
       case 'question.rejected':
         this._pendingQuestion = null;
+        break;
+      case 'run.completed':
+      case 'run.failed':
+      case 'run.incomplete':
+      case 'run.cancelled':
+        this.handleRunState(event);
         break;
       case 'final':
         this.handleFinal(event);
@@ -237,12 +262,22 @@ export class ReActSSEState {
 
     step.status = event.status === 'done' ? 'completed' : 'error';
     if (event.status === 'failed') {
-      step.error = 'Step execution failed';
+      step.error = event.error_message || event.error_type || 'Step execution failed';
     }
+  }
+
+  private handleRunState(event: SSERunStateEvent): void {
+    const statusFromType = event.type.replace('run.', '') as ReactRunStatus;
+    this.runStatus = event.status || statusFromType;
+    this.terminationReason = event.termination_reason;
+    this.errorMessage = event.error_message;
   }
 
   private handleFinal(event: SSEFinalEvent): void {
     this.finalContent = event.content;
+    if (event.status) this.runStatus = event.status;
+    if (event.termination_reason) this.terminationReason = event.termination_reason;
+    if (event.error_message) this.errorMessage = event.error_message;
   }
 
   private handleDone(): void {
@@ -444,7 +479,11 @@ export class ReActSSEState {
       }
     }
 
-    if (this.isDone) return 'Completed';
+    if (this.runStatus === 'completed') return 'Completed';
+    if (this.runStatus === 'incomplete') return this.terminationReason || 'Incomplete';
+    if (this.runStatus === 'failed') return this.errorMessage || this.terminationReason || 'Failed';
+    if (this.runStatus === 'cancelled') return 'Cancelled';
+    if (this.isDone) return 'Stream ended';
     return 'Thinking...';
   }
 }

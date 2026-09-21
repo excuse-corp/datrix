@@ -17,6 +17,8 @@ export type IModelData = {
   nostream_api: string;
   provider?: string;
   params?: ModelParams;
+  enabled?: boolean;
+  running?: boolean;
 };
 
 export type BaseModelParams = {

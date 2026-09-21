@@ -695,3 +695,29 @@ export const githubDark = {
     'editor.selectionHighlightBorder': '#444d56',
   },
 };
+
+/** Warm paper editor used by the terminal interface. */
+export const terminal = {
+  base: 'vs',
+  inherit: true,
+  rules: [
+    { token: '', foreground: '292824', background: 'FAF6EE' },
+    { token: 'comment', foreground: '716B60', fontStyle: 'italic' },
+    { token: 'keyword', foreground: '9B4F46' },
+    { token: 'string', foreground: '49634C' },
+    { token: 'number', foreground: '9A6A2F' },
+    { token: 'type', foreground: '6F5A36' },
+    { token: 'identifier', foreground: '292824' },
+    { token: 'delimiter', foreground: '716B60' },
+  ],
+  colors: {
+    'editor.foreground': '#292824',
+    'editor.background': '#FAF6EE',
+    'editor.selectionBackground': '#D7CBB9',
+    'editor.lineHighlightBackground': '#F0E9DD',
+    'editorCursor.foreground': '#292824',
+    'editorWhitespace.foreground': '#C9C0B1',
+    'editorIndentGuide.background': '#DED5C7',
+    'editorIndentGuide.activeBackground': '#958B7E',
+  },
+};

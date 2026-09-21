@@ -1,4 +1,6 @@
 import { ModelSvg } from '@/components/icons';
+import { useInterfaceStyle } from '@/hooks/use-interface-style';
+import { isDashboardStyle } from '@/utils/interface-style';
 import Icon, { ConsoleSqlOutlined, MessageOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { ConfigProvider, Tabs } from 'antd';
 import { t } from 'i18next';
@@ -40,11 +42,13 @@ function ConstructLayout({ children, className }: { children: React.ReactNode; c
     },
   ];
   const router = useRouter();
+  const interfaceStyle = useInterfaceStyle();
+  const isDashboard = isDashboardStyle(interfaceStyle);
   const activeKey = router.pathname.split('/')[2];
   // const isDarkMode = window.matchMedia('(prefers-color-scheme: dark)').matches; // unused
 
   return (
-    <div className='flex flex-col h-full w-full  dark:bg-gradient-dark bg-gradient-light bg-cover bg-center'>
+    <div className='dashboard-construct-layout flex flex-col h-full w-full dark:bg-gradient-dark bg-gradient-light bg-cover bg-center'>
       <ConfigProvider
         theme={{
           components: {
@@ -72,7 +76,7 @@ function ConstructLayout({ children, className }: { children: React.ReactNode; c
             return {
               key: items.key,
               label: items.name,
-              children: children,
+              children: isDashboard ? <div className='dashboard-main-canvas'>{children}</div> : children,
               icon: items.icon,
             };
           })}

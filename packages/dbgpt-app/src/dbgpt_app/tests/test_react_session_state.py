@@ -76,6 +76,7 @@ def test_update_react_session_after_turn_records_skill_and_artifacts(tmp_path):
         history_steps,
         "data-report skill 已完成",
         skills_dir=str(tmp_path),
+        status="completed",
     )
 
     assert updated["active_skill"]["name"] == "data-report"

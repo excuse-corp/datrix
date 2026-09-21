@@ -1,3 +1,4 @@
+import { STORAGE_INTERFACE_STYLE_KEY } from '@/utils/constants/index';
 import { createCache, StyleProvider } from '@ant-design/cssinjs';
 import Document, { DocumentContext, Head, Html, Main, NextScript } from 'next/document';
 import { doExtraStyle } from '../genAntdCss';
@@ -37,6 +38,11 @@ class MyDocument extends Document {
     return (
       <Html lang='en'>
         <Head>
+          <script
+            dangerouslySetInnerHTML={{
+              __html: `(function(){try{var s=localStorage.getItem('${STORAGE_INTERFACE_STYLE_KEY}');document.documentElement.dataset.interfaceStyle=s==='workspace'||s==='dashboard'?s:'dashboard';}catch(e){document.documentElement.dataset.interfaceStyle='dashboard';}})();`,
+            }}
+          />
           <link rel='icon' href='/favicon.ico' sizes='any' />
           <link rel='icon' type='image/png' href='/datrix-brand.png' />
           <link rel='apple-touch-icon' href='/datrix-brand.png' />

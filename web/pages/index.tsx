@@ -24,7 +24,6 @@ import { listScenes, type AskDataQueryResponse, type SceneSummary } from '@/util
 import axios from '@/utils/ctx-axios';
 import {
   ArrowUpOutlined,
-  AudioOutlined,
   BarChartOutlined,
   CheckCircleFilled,
   CodeOutlined,
@@ -582,6 +581,16 @@ interface FileAttachment {
 }
 
 // Define message type for chat
+type ReactRunStatus = 'completed' | 'incomplete' | 'failed' | 'cancelled' | 'running';
+
+const normalizeReactRunStatus = (status: unknown): ReactRunStatus | undefined => {
+  if (status === 'completed' || status === 'incomplete' || status === 'failed' || status === 'cancelled') {
+    return status;
+  }
+  if (status === 'running') return 'running';
+  return undefined;
+};
+
 interface ChatMessage {
   id?: string;
   role: 'human' | 'view';
@@ -602,6 +611,9 @@ interface ChatMessage {
   taskPlan?: TaskItem[];
   attachedConnectors?: AttachedConnector[];
   askDataResult?: AskDataQueryResponse;
+  runStatus?: ReactRunStatus;
+  terminationReason?: string;
+  errorMessage?: string;
 }
 
 interface ContextStatus {
@@ -658,6 +670,7 @@ function persistContextStatus(status: ContextStatus) {
 
 const CHAT_DIALOGUE_UPSERT_EVENT = 'dataman:chat-dialogue-upsert';
 const CHAT_DIALOGUE_REFRESH_EVENT = 'dataman:chat-dialogue-refresh';
+const CHAT_NEW_TASK_EVENT = 'dataman:chat-new-task';
 
 function notifyChatDialogueUpsert(convUid: string, userInput: string) {
   if (typeof window === 'undefined') return;
@@ -692,6 +705,8 @@ interface ExecutionStep {
   status: 'running' | 'done' | 'failed' | 'cancelled';
   action?: string;
   actionInput?: string;
+  errorType?: string;
+  errorMessage?: string;
   askDataCallId?: string;
   askDataReused?: boolean;
   parentId?: string;
@@ -842,9 +857,9 @@ const _convertExecutionToMessageParts = (
       type: 'tool',
       tool: toolName,
       state: {
-        status: statusMap[step.status] || 'completed',
+        status: statusMap[step.status] || 'pending',
         input: { description: step.title || 'Step', detail: step.detail },
-        output: outputText || step.detail,
+        output: outputText || step.errorMessage || step.detail,
       },
     };
   });
@@ -1211,6 +1226,41 @@ const Playground: NextPage = () => {
                 context: msg.context || CANCELLED_RESPONSE_TEXT,
                 thinking: false,
                 taskPlan: msg.taskPlan ? cancelTaskItems(msg.taskPlan) : msg.taskPlan,
+                runStatus: 'cancelled',
+                terminationReason: 'cancelled',
+              }
+            : msg,
+        ),
+      );
+    } else {
+      setExecutionMap(prev => {
+        let changed = false;
+        const next = Object.entries(prev).reduce<typeof prev>(
+          (acc, [messageId, current]) => {
+            let stepChanged = false;
+            const steps = current.steps.map<ExecutionStep>(step => {
+              if (step.status !== 'running') return step;
+              changed = true;
+              stepChanged = true;
+              return { ...step, status: 'cancelled' };
+            });
+            acc[messageId] = stepChanged ? { ...current, steps } : current;
+            return acc;
+          },
+          {} as typeof prev,
+        );
+        return changed ? next : prev;
+      });
+      setMessages(prev =>
+        prev.map(msg =>
+          msg.role === 'view' && (msg.thinking || msg.runStatus === 'running')
+            ? {
+                ...msg,
+                context: msg.context || CANCELLED_RESPONSE_TEXT,
+                thinking: false,
+                taskPlan: msg.taskPlan ? cancelTaskItems(msg.taskPlan) : msg.taskPlan,
+                runStatus: 'cancelled',
+                terminationReason: 'cancelled',
               }
             : msg,
         ),
@@ -1228,6 +1278,13 @@ const Playground: NextPage = () => {
     const questionRequestId = run?.pendingQuestionRequestId || pendingQuestion?.request_id;
 
     if (!run) {
+      if (conversationId) {
+        fetch(`${process.env.API_BASE_URL ?? ''}/api/v1/chat/react-agent/cancel`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ conv_uid: conversationId }),
+        }).catch(() => undefined);
+      }
       if (questionRequestId) {
         fetch(`${process.env.API_BASE_URL ?? ''}/api/v1/chat/question/${questionRequestId}/reject`, {
           method: 'POST',
@@ -1246,7 +1303,7 @@ const Playground: NextPage = () => {
     activeRunRef.current = null;
     markRunCancelled(run.responseId);
     notifyChatDialogueRefresh();
-  }, [markRunCancelled, pendingQuestion?.request_id, requestBackendRunCancel]);
+  }, [conversationId, markRunCancelled, pendingQuestion?.request_id, requestBackendRunCancel]);
 
   const normalizeText = (value: unknown): string => {
     if (typeof value === 'string') return value;
@@ -1338,6 +1395,20 @@ const Playground: NextPage = () => {
     // Only route-id changes should drive history switching; depending on conversationId would clear new chats created on `/`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router.isReady, router.query.id, resetConversationSurface]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handleNewTask = () => {
+      historyLoadSeqRef.current += 1;
+      setHistoryLoading(false);
+      setConversationId(null);
+      resetConversationSurface();
+    };
+
+    window.addEventListener(CHAT_NEW_TASK_EVENT, handleNewTask);
+    return () => window.removeEventListener(CHAT_NEW_TASK_EVENT, handleNewTask);
+  }, [resetConversationSurface]);
 
   useEffect(() => {
     const lastView = [...messages].reverse().find(msg => msg.role === 'view');
@@ -2125,6 +2196,7 @@ const Playground: NextPage = () => {
         context: '',
         order: currentOrder,
         thinking: true,
+        runStatus: 'running',
       },
     ]);
 
@@ -2178,6 +2250,25 @@ const Playground: NextPage = () => {
         activeRunRef.current = null;
       }
       setLoading(false);
+    };
+
+    const applyRunOutcome = (payload: any) => {
+      const statusFromType = typeof payload.type === 'string' ? payload.type.replace(/^run\./, '') : undefined;
+      const runStatus = normalizeReactRunStatus(payload.status || statusFromType);
+      if (!runStatus) return;
+      setMessages(prev =>
+        prev.map(msg =>
+          msg.id === responseId && msg.role === 'view'
+            ? {
+                ...msg,
+                runStatus,
+                terminationReason:
+                  typeof payload.termination_reason === 'string' ? payload.termination_reason : undefined,
+                errorMessage: typeof payload.error_message === 'string' ? payload.error_message : undefined,
+              }
+            : msg,
+        ),
+      );
     };
 
     // Build ext_info once so file, skill, and connector context stays stable during this send.
@@ -2395,7 +2486,11 @@ const Playground: NextPage = () => {
           }
           return;
         }
-        if (payload.type === 'run.cancelled') {
+        if (typeof payload.type === 'string' && payload.type.startsWith('run.')) {
+          applyRunOutcome(payload);
+          if (payload.type !== 'run.cancelled') {
+            return;
+          }
           activeRun.cancelled = true;
           activeRunRef.current = null;
           markRunCancelled(responseId);
@@ -2649,7 +2744,14 @@ const Playground: NextPage = () => {
             });
           }
         } else if (payload.type === 'final') {
-          settleResponseState();
+          applyRunOutcome(payload);
+          const finalStepStatus =
+            payload.status === 'failed' || payload.status === 'incomplete'
+              ? 'failed'
+              : payload.status === 'cancelled'
+                ? 'cancelled'
+                : 'done';
+          settleResponseState(finalStepStatus);
           notifyChatDialogueRefresh();
           setMessages(prev =>
             prev.map(msg => {
@@ -2658,6 +2760,10 @@ const Playground: NextPage = () => {
                 ...msg,
                 context: cleanFinalContent(payload.content || ''),
                 thinking: false,
+                runStatus: normalizeReactRunStatus(payload.status) || msg.runStatus,
+                terminationReason:
+                  typeof payload.termination_reason === 'string' ? payload.termination_reason : msg.terminationReason,
+                errorMessage: typeof payload.error_message === 'string' ? payload.error_message : msg.errorMessage,
               };
             }),
           );
@@ -2785,6 +2891,9 @@ const Playground: NextPage = () => {
         if (lastMsg && lastMsg.role === 'view') {
           lastMsg.context = err?.message || 'Error occurred';
           lastMsg.thinking = false;
+          lastMsg.runStatus = 'failed';
+          lastMsg.terminationReason = 'frontend_exception';
+          lastMsg.errorMessage = err?.message || 'Failed to get response';
         }
         return newMessages;
       });
@@ -2821,22 +2930,29 @@ const Playground: NextPage = () => {
 
         if (payload && payload.version === 1 && payload.type === 'react-agent') {
           const historyPayloadSteps = expandAskDataHistorySteps(payload.steps || [], askDataSceneNameByIdRef.current);
-          const steps: ExecutionStep[] = historyPayloadSteps.map((s: any, idx: number) => ({
-            id: s.id || `history-step-${idx}`,
-            step: idx + 1,
-            title: s.title || s.action || `Step ${idx + 1}`,
-            detail: s.detail || '',
-            status: (s.status === 'cancelled' ? 'cancelled' : s.status === 'failed' ? 'failed' : 'done') as
-              | 'done'
-              | 'failed'
-              | 'cancelled',
-            action: s.action,
-            actionInput: s.action_input || undefined,
-            askDataCallId: s.ask_data_call_id || undefined,
-            askDataReused: Boolean(s.ask_data_reused),
-            parentId: s.parent_id || undefined,
-            todoMeta: s.todo_meta || undefined,
-          }));
+          const steps: ExecutionStep[] = historyPayloadSteps.map((s: any, idx: number) => {
+            const historyStatus: ExecutionStep['status'] =
+              s.status === 'done' || s.status === 'completed'
+                ? 'done'
+                : s.status === 'cancelled'
+                  ? 'cancelled'
+                  : 'failed';
+            return {
+              id: s.id || `history-step-${idx}`,
+              step: idx + 1,
+              title: s.title || s.action || `Step ${idx + 1}`,
+              detail: s.detail || '',
+              status: historyStatus,
+              action: s.action,
+              actionInput: s.action_input || undefined,
+              errorType: s.error_type || undefined,
+              errorMessage: s.error_message || undefined,
+              askDataCallId: s.ask_data_call_id || undefined,
+              askDataReused: Boolean(s.ask_data_reused),
+              parentId: s.parent_id || undefined,
+              todoMeta: s.todo_meta || undefined,
+            };
+          });
 
           const outputs: Record<string, ExecutionOutput[]> = {};
           const stepThoughts: Record<string, string> = {};
@@ -2935,6 +3051,9 @@ const Playground: NextPage = () => {
               : Array.isArray(payload.tasks)
                 ? payload.tasks
                 : undefined,
+            runStatus: normalizeReactRunStatus(payload.status),
+            terminationReason: typeof payload.termination_reason === 'string' ? payload.termination_reason : undefined,
+            errorMessage: typeof payload.error_message === 'string' ? payload.error_message : undefined,
           });
         } else {
           newMessages.push({
@@ -2948,9 +3067,31 @@ const Playground: NextPage = () => {
       }
     });
 
+    const lastMessage = newMessages[newMessages.length - 1];
+    const hasPendingAssistantReply = lastMessage?.role === 'human';
+    if (hasPendingAssistantReply) {
+      const viewId = generateUUID();
+      newMessages.push({
+        id: viewId,
+        role: 'view',
+        context: '',
+        order: lastMessage.order,
+        thinking: true,
+        runStatus: 'running',
+      });
+      newExecutionMap[viewId] = {
+        steps: [],
+        outputs: {},
+        activeStepId: null,
+        collapsed: false,
+        stepThoughts: {},
+      };
+    }
+
     setMessages(newMessages);
     setExecutionMap(newExecutionMap);
     setArtifacts(allArtifacts);
+    setLoading(hasPendingAssistantReply);
     if (Object.keys(restoredSkillNames).length > 0) {
       setCreatedSkillNames(prev => ({ ...prev, ...restoredSkillNames }));
     }
@@ -2958,8 +3099,14 @@ const Playground: NextPage = () => {
     const lastView = [...newMessages].reverse().find(m => m.role === 'view');
     if (lastView?.id) {
       setActiveMessageId(lastView.id);
-      setStreamingSummary(lastView.context || '');
-      setSummaryComplete(true);
+      setActiveViewMsgId(lastView.id);
+      if (lastView.thinking || lastView.runStatus === 'running') {
+        setStreamingSummary('');
+        setSummaryComplete(false);
+      } else {
+        setStreamingSummary(lastView.context || '');
+        setSummaryComplete(true);
+      }
     }
   };
 
@@ -3000,6 +3147,22 @@ const Playground: NextPage = () => {
       }
     }
   };
+
+  const hasRestoredPendingRun = useMemo(
+    () => messages.some(msg => msg.role === 'view' && msg.thinking && msg.runStatus === 'running'),
+    [messages],
+  );
+
+  useEffect(() => {
+    if (!conversationId || !hasRestoredPendingRun || activeRunRef.current) return;
+    const timer = window.setInterval(() => {
+      void loadConversation(conversationId);
+    }, 4000);
+    return () => window.clearInterval(timer);
+    // loadConversation is intentionally omitted: it is recreated each render and
+    // the polling target is fully determined by conversationId.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId, hasRestoredPendingRun]);
 
   const _QuickAction = ({ icon, text, onClick }: { icon: any; text: string; onClick?: () => void }) => (
     <div
@@ -3045,9 +3208,11 @@ const Playground: NextPage = () => {
               <Spin size='large' tip='加载对话历史...' />
             </div>
           ) : messages.length > 0 ? (
-            <div className={`flex-1 flex overflow-hidden ${rightPanelCollapsed ? 'justify-center' : ''}`}>
+            <div
+              className={`dashboard-chat-workspace flex-1 flex overflow-hidden ${rightPanelCollapsed ? 'justify-center' : ''}`}
+            >
               <div
-                className={`${rightPanelCollapsed ? 'flex-1 max-w-[800px] border-r-0' : 'flex-[2] min-w-0 border-r border-gray-200/80 dark:border-gray-800'} flex flex-col overflow-hidden bg-white dark:bg-[#111217] transition-all duration-300 relative`}
+                className={`dashboard-chat-primary-panel ${rightPanelCollapsed ? 'dashboard-chat-panel-collapsed flex-1 max-w-[800px] border-r-0' : 'dashboard-chat-panel-open flex-[2] min-w-0 border-r border-gray-200/80 dark:border-gray-800'} flex flex-col overflow-hidden bg-white dark:bg-[#111217] transition-all duration-300 relative`}
               >
                 <div className='flex-1 min-h-0 overflow-y-auto'>
                   {rounds.map((round, roundIndex) => {
@@ -3096,6 +3261,9 @@ const Playground: NextPage = () => {
                           attachedSkill={round.humanMsg?.attachedSkill}
                           attachedDb={round.humanMsg?.attachedDb}
                           taskPlan={round.viewMsg?.taskPlan}
+                          runStatus={round.viewMsg?.runStatus}
+                          terminationReason={round.viewMsg?.terminationReason}
+                          errorMessage={round.viewMsg?.errorMessage}
                           attachedConnectors={round.humanMsg?.attachedConnectors}
                           assistantText={roundAssistantText}
                           stepThoughts={stepThoughts}
@@ -3456,17 +3624,6 @@ const Playground: NextPage = () => {
                                 className='mr-0.5'
                               />
 
-                              {/* Voice Button */}
-                              <Tooltip title={t('voice_input')}>
-                                <Button
-                                  type='text'
-                                  shape='circle'
-                                  icon={<AudioOutlined className='text-gray-500 text-[18px]' />}
-                                  onClick={() => message.info(t('voice_input_coming_soon'))}
-                                  className='flex-shrink-0 h-9 w-9 transition-all duration-200 flex items-center justify-center hover:bg-gray-100 dark:hover:bg-gray-800'
-                                />
-                              </Tooltip>
-
                               {/* Send Button with blue gradient + gloss animation */}
                               <Button
                                 type='primary'
@@ -3474,7 +3631,7 @@ const Playground: NextPage = () => {
                                 icon={loading ? <StopOutlined /> : <ArrowUpOutlined />}
                                 onClick={() => (loading ? handleCancelRun() : handleStart())}
                                 disabled={!loading && !query.trim() && !uploadedFile}
-                                className={`group/send relative overflow-hidden border-none shadow-lg flex-shrink-0 h-9 w-9 transition-all duration-200 ${
+                                className={`dashboard-chat-send-button group/send relative overflow-hidden border-none shadow-lg flex-shrink-0 h-9 w-9 transition-all duration-200 ${
                                   loading
                                     ? 'bg-gradient-to-br from-[#ef4444] to-[#dc2626] hover:shadow-red-300/40 hover:shadow-xl hover:scale-105'
                                     : query.trim() || uploadedFile
@@ -3518,7 +3675,7 @@ const Playground: NextPage = () => {
                 <Tooltip title={rightPanelCollapsed ? t('expand_panel') : t('collapse_panel')} placement='left'>
                   <button
                     onClick={() => setRightPanelCollapsed(prev => !prev)}
-                    className='absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-4 h-8 flex items-center justify-center bg-white dark:bg-[#1a1b1e] border border-gray-200 dark:border-gray-700 rounded-full shadow-sm hover:bg-gray-100 dark:hover:bg-gray-800 hover:w-5 hover:shadow-md transition-all duration-200 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
+                    className='dashboard-chat-panel-toggle absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-4 h-8 flex items-center justify-center bg-white dark:bg-[#1a1b1e] border border-gray-200 dark:border-gray-700 rounded-full shadow-sm hover:bg-gray-100 dark:hover:bg-gray-800 hover:w-5 hover:shadow-md transition-all duration-200 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
                   >
                     {rightPanelCollapsed ? (
                       <LeftOutlined style={{ fontSize: 10 }} />
@@ -3529,7 +3686,7 @@ const Playground: NextPage = () => {
                 </Tooltip>
               </div>
               <div
-                className={`${rightPanelCollapsed ? 'w-0 min-w-0 overflow-hidden opacity-0' : 'flex-[3] min-w-0 overflow-hidden'} bg-[#f8f8fb] dark:bg-[#0f1114] flex flex-col transition-all duration-300`}
+                className={`dashboard-chat-context-panel ${rightPanelCollapsed ? 'w-0 min-w-0 overflow-hidden opacity-0' : 'flex-[3] min-w-0 overflow-hidden'} bg-[#f8f8fb] dark:bg-[#0f1114] flex flex-col transition-all duration-300`}
               >
                 {(() => {
                   const activeViewMsg = messages.find(m => m.id === selectedViewMsgId && m.role === 'view');
@@ -3593,6 +3750,22 @@ const Playground: NextPage = () => {
             // Welcome Mode: Display Hero Section
             <div className='industrial-welcome relative flex-1 flex flex-col items-center justify-center px-6 py-4 overflow-y-auto'>
               <div className='industrial-welcome-content w-full max-w-[860px] flex flex-col items-center animate-fade-in-up'>
+                <div className='terminal-only terminal-window-title'>
+                  <span>DATRIX / TERMINAL</span>
+                  <span aria-hidden='true'>[ ~ / workspace ]</span>
+                </div>
+                <div className='terminal-only terminal-intro'>
+                  <div className='terminal-command-line'>
+                    <span>datrix@workspace</span>:~$ datrix
+                  </div>
+                  <pre className='terminal-wordmark' aria-label='Datrix'>{`╔╦╗╔═╗╔╦╗╦═╗╦═╗ ╦
+ ║║╠═╣ ║ ╠╦╝║╔╩╦╝
+═╩╝╩ ╩ ╩ ╩╚═╩╩ ╚═`}</pre>
+                  <p>用自然语言查询数据、调用技能、生成报告。</p>
+                  <div className='terminal-help'>
+                    <span>ENTER</span> 发送问题 <span>SHIFT + ENTER</span> 换行 <span>/</span> 选择技能
+                  </div>
+                </div>
                 <div className='industrial-hero-header w-full flex flex-col items-center'>
                   <h1
                     className={`industrial-hero-title text-4xl md:text-5xl text-gray-900 dark:text-gray-100 text-center flex items-center gap-4 ${
@@ -3619,6 +3792,9 @@ const Playground: NextPage = () => {
                   <div className='industrial-command-frame w-full relative transition-all duration-500 rounded-[28px] shadow-[0_16px_48px_rgba(0,0,0,0.12),0_6px_20px_rgba(0,0,0,0.08)] hover:shadow-[0_24px_64px_rgba(0,0,0,0.2),0_12px_32px_rgba(0,0,0,0.1)] dark:shadow-[0_16px_48px_rgba(0,0,0,0.4)] dark:hover:shadow-[0_24px_64px_rgba(0,0,0,0.5)]'>
                     {/* White Inner Box - Clean Glass Card */}
                     <div className='industrial-command-shell bg-white/95 backdrop-blur-md dark:bg-[#1e1f24]/95 rounded-[28px] border border-gray-100 dark:border-[#33353b] shadow-[inset_0_1px_0_rgba(255,255,255,1)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] p-5 relative z-10'>
+                      <div className='terminal-only terminal-command-line terminal-input-prompt'>
+                        <span>datrix@workspace</span>:~$ <span className='terminal-prompt-action'>ask</span>
+                      </div>
                       {/* Uploaded File Tags */}
                       {uploadedFile && (
                         <div className='flex flex-wrap gap-2 mb-2'>
@@ -3814,6 +3990,14 @@ const Playground: NextPage = () => {
                               </Button>
                             </Tooltip>
                           </Popover>
+
+                          {/* Separator dot */}
+                          <div className='w-px h-4 bg-gray-200 dark:bg-gray-700 mx-0.5' />
+
+                          {/* Model Selector */}
+                          <div className='model-selector-premium'>
+                            <ModelSelector onChange={val => setModel(val)} />
+                          </div>
                         </div>
 
                         <div className='flex items-center gap-3'>
@@ -3835,7 +4019,7 @@ const Playground: NextPage = () => {
                             icon={loading ? <StopOutlined /> : <ArrowUpOutlined />}
                             onClick={() => (loading ? handleCancelRun() : handleStart())}
                             disabled={!loading && !query.trim() && !uploadedFile}
-                            className={`group/send relative overflow-hidden border-none shadow-lg transition-all duration-200 ${
+                            className={`dashboard-chat-send-button group/send relative overflow-hidden border-none shadow-lg transition-all duration-200 ${
                               loading
                                 ? 'bg-gradient-to-br from-[#ef4444] to-[#dc2626] hover:shadow-red-300/40 hover:shadow-xl hover:scale-105'
                                 : query.trim() || uploadedFile
@@ -3870,6 +4054,10 @@ const Playground: NextPage = () => {
                       </div>
                     </div>
                   </div>
+                </div>
+                <div className='terminal-only terminal-window-status'>
+                  <span>{loading ? '[ 执行中 ]' : '[ 等待输入 ]'}</span>
+                  <span>UTF-8 / 自然语言</span>
                 </div>
               </div>
               <p className='industrial-hero-slogan absolute bottom-6 left-6 right-6 text-center text-sm text-gray-400 dark:text-gray-500 md:text-base'>

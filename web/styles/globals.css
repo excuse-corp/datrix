@@ -1,5 +1,8 @@
 @import './katex-override.css';
 @import './opencode-theme.css';
+@import './terminal-theme.css';
+@import './dashboard-theme.css';
+@import './workspace-theme.css';
 
 @tailwind base;
 @tailwind components;

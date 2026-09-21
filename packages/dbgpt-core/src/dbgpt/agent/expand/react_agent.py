@@ -24,6 +24,21 @@ from .actions.react_action import ReActAction, Terminate
 
 logger = logging.getLogger(__name__)
 
+_LLM_ERROR_TEXT_MARKERS = (
+    "LLMServer Generate Error",
+    "LLM Chat Generrate Error",
+    "LLM generate stream is null",
+    "APIConnectionError",
+    "Connection error",
+    "ModelNotFound",
+)
+
+
+def _looks_like_llm_error(text: str) -> bool:
+    return any(marker in text for marker in _LLM_ERROR_TEXT_MARKERS) or bool(
+        "Model " in text and " not found" in text
+    )
+
 _REACT_DEFAULT_GOAL = """Answer the following questions or solve the tasks by \
 selecting the right ACTION from the ACTION SPACE as best as you can. 
 # ACTION SPACE Simple Description #
@@ -96,7 +111,7 @@ _REACT_WRITE_MEMORY_TEMPLATE = """\
 
 
 class ReActAgent(ConversableAgent):
-    max_retry_count: int = 30
+    max_retry_count: int = 100
     run_mode: AgentRunMode = AgentRunMode.LOOP
 
     profile: ProfileConfig = ProfileConfig(
@@ -243,6 +258,15 @@ class ReActAgent(ConversableAgent):
         message_content = message.content
         if not message_content:
             raise ValueError("The response is empty.")
+        if _looks_like_llm_error(message_content):
+            return ActionOutput(
+                is_exe_success=False,
+                content=message_content,
+                observations=message_content,
+                have_retry=False,
+                error_type="llm_error",
+                error_message=message_content,
+            )
         try:
             steps = self.parser.parse_current_step(message_content)
             err_msg = None
@@ -254,7 +278,13 @@ class ReActAgent(ConversableAgent):
             elif len(steps) != 1:
                 err_msg = "Only one action is allowed each time."
             if err_msg:
-                return ActionOutput(is_exe_success=False, content=err_msg)
+                return ActionOutput(
+                    is_exe_success=False,
+                    content=err_msg,
+                    observations=err_msg,
+                    error_type="parse_error",
+                    error_message=err_msg,
+                )
         except Exception as e:
             logger.warning(f"review error: {e}")
 

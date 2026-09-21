@@ -191,6 +191,33 @@ async def run_tool(
             tool_result = await tool_pack.async_execute(resource_name=name, **args)
             status = Status.COMPLETE.value
             is_terminal = tool_pack.is_terminal(name)
+            if isinstance(tool_result, ActionOutput):
+                if tool_result.action is None:
+                    tool_result.action = name
+                if tool_result.observations is None:
+                    tool_result.observations = tool_result.content
+                if tool_result.terminate is None:
+                    tool_result.terminate = is_terminal
+                if render_protocol or need_vis_render:
+                    plugin_param = {
+                        "name": name,
+                        "args": args,
+                        "status": Status.COMPLETE.value
+                        if tool_result.is_exe_success
+                        else Status.FAILED.value,
+                        "logo": None,
+                        "result": tool_result.content,
+                        "err_msg": tool_result.error_message,
+                    }
+                    if render_protocol:
+                        tool_result.view = await render_protocol.display(
+                            content=plugin_param
+                        )
+                    elif need_vis_render:
+                        raise NotImplementedError(
+                            "The render_protocol should be implemented."
+                        )
+                return tool_result
         except Exception as e:
             response_success = False
             logger.exception(f"Tool [{name}] execute failed!")

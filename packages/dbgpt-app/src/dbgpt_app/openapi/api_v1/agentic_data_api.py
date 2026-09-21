@@ -66,6 +66,288 @@ AUTO_DATA_MARKER_PATTERN = re.compile(
     r"###([A-Z0-9_]+)_START###\s*(.*?)\s*###\1_END###", re.DOTALL
 )
 
+REACT_STATUS_COMPLETED = "completed"
+REACT_STATUS_INCOMPLETE = "incomplete"
+REACT_STATUS_FAILED = "failed"
+REACT_STATUS_CANCELLED = "cancelled"
+
+REACT_REASON_TERMINATE = "terminate"
+REACT_REASON_MAX_STEPS = "max_steps_exceeded"
+REACT_REASON_LLM_ERROR = "llm_error"
+REACT_REASON_PARSE_ERROR = "parse_error"
+REACT_REASON_TOOL_ERROR = "tool_error"
+REACT_REASON_TASK_PLAN_INCOMPLETE = "task_plan_incomplete"
+REACT_REASON_REPEATED_ACTION = "repeated_action"
+REACT_REASON_CANCELLED = "cancelled"
+REACT_REASON_EXCEPTION = "exception"
+REACT_REASON_STOPPED_WITHOUT_TERMINATE = "stopped_without_terminate"
+
+_LLM_ERROR_TEXT_MARKERS = (
+    "LLMServer Generate Error",
+    "LLM Chat Generrate Error",
+    "LLM generate stream is null",
+    "APIConnectionError",
+    "Connection error",
+    "ModelNotFound",
+)
+
+
+def _env_int(
+    name: str,
+    default: int,
+    *,
+    min_value: Optional[int] = None,
+    max_value: Optional[int] = None,
+) -> int:
+    raw = os.getenv(name)
+    try:
+        value = int(raw) if raw not in (None, "") else default
+    except Exception:
+        value = default
+    if min_value is not None:
+        value = max(min_value, value)
+    if max_value is not None:
+        value = min(max_value, value)
+    return value
+
+
+def _looks_like_llm_error_text(text: Any) -> bool:
+    if not isinstance(text, str) or not text:
+        return False
+    return any(marker in text for marker in _LLM_ERROR_TEXT_MARKERS) or bool(
+        "Model " in text and " not found" in text
+    )
+
+
+def _is_skill_like_react_task(
+    user_input: str,
+    pre_matched_skill: Optional[Any] = None,
+) -> bool:
+    if pre_matched_skill is not None:
+        return True
+    text = (user_input or "").lower()
+    return any(
+        marker in text
+        for marker in (
+            "skill",
+            "技能",
+            "data-report",
+            "report",
+            "模板",
+            "脚本",
+            "优化开发",
+        )
+    )
+
+
+def _react_max_steps_for(user_input: str, pre_matched_skill: Optional[Any]) -> int:
+    hard_limit = _env_int("DATAMAN_REACT_MAX_STEPS_HARD_LIMIT", 100, min_value=1)
+    default_steps = _env_int(
+        "DATAMAN_REACT_MAX_STEPS_DEFAULT", 100, min_value=1, max_value=hard_limit
+    )
+    skill_steps = _env_int(
+        "DATAMAN_REACT_MAX_STEPS_SKILL", 100, min_value=1, max_value=hard_limit
+    )
+    return (
+        skill_steps
+        if _is_skill_like_react_task(user_input, pre_matched_skill)
+        else default_steps
+    )
+
+
+def _react_llm_error_limit() -> int:
+    return _env_int("DATAMAN_REACT_LLM_ERROR_LIMIT", 2, min_value=1)
+
+
+def _react_parse_error_limit() -> int:
+    return _env_int("DATAMAN_REACT_PARSE_ERROR_LIMIT", 3, min_value=1)
+
+
+def _react_same_action_repeat_limit() -> int:
+    return _env_int("DATAMAN_REACT_SAME_ACTION_REPEAT_LIMIT", 3, min_value=1)
+
+
+def _react_step_counts(history_steps: List[Dict[str, Any]]) -> Dict[str, int]:
+    completed_steps = sum(1 for item in history_steps if item.get("status") == "done")
+    failed_steps = sum(1 for item in history_steps if item.get("status") == "failed")
+    cancelled_steps = sum(
+        1 for item in history_steps if item.get("status") == REACT_STATUS_CANCELLED
+    )
+    return {
+        "steps_count": len(history_steps),
+        "completed_steps": completed_steps,
+        "failed_steps": failed_steps,
+        "cancelled_steps": cancelled_steps,
+    }
+
+
+def _has_open_task_plan(todo_list: List[Dict[str, Any]]) -> bool:
+    return any(
+        item.get("status") in {"pending", "in_progress", "failed"}
+        for item in todo_list or []
+    )
+
+
+def _last_failed_step_error_type(history_steps: List[Dict[str, Any]]) -> Optional[str]:
+    for item in reversed(history_steps):
+        if item.get("status") != "failed":
+            continue
+        error_type = item.get("error_type")
+        if error_type:
+            return str(error_type)
+        step_text = "\n".join(
+            str(part)
+            for part in (
+                item.get("thought"),
+                item.get("detail"),
+                item.get("action"),
+                item.get("error_message"),
+                item.get("outputs"),
+            )
+            if part
+        )
+        if _looks_like_llm_error_text(step_text):
+            return REACT_REASON_LLM_ERROR
+        if not item.get("action"):
+            return REACT_REASON_PARSE_ERROR
+        return REACT_REASON_TOOL_ERROR
+    return None
+
+
+def _react_outcome_payload(
+    *,
+    status: str,
+    termination_reason: str,
+    history_steps: List[Dict[str, Any]],
+    max_steps: int,
+    error_message: Optional[str] = None,
+) -> Dict[str, Any]:
+    summary = _react_step_counts(history_steps)
+    return {
+        "status": status,
+        "termination_reason": termination_reason,
+        "error_message": error_message,
+        "max_steps": max_steps,
+        **summary,
+    }
+
+
+def _compute_react_run_outcome(
+    reply: Any,
+    history_steps: List[Dict[str, Any]],
+    todo_list: List[Dict[str, Any]],
+    max_steps: int,
+) -> Dict[str, Any]:
+    action_report = getattr(reply, "action_report", None)
+    reply_content = getattr(reply, "content", "") or ""
+    reply_success = bool(getattr(reply, "success", True))
+
+    if not reply_success:
+        error_message = getattr(action_report, "error_message", None) or reply_content
+        error_type = getattr(action_report, "error_type", None)
+        if error_type == REACT_REASON_REPEATED_ACTION:
+            return _react_outcome_payload(
+                status=REACT_STATUS_INCOMPLETE,
+                termination_reason=REACT_REASON_REPEATED_ACTION,
+                history_steps=history_steps,
+                max_steps=max_steps,
+                error_message=error_message,
+            )
+        if error_type == REACT_REASON_PARSE_ERROR:
+            reason = REACT_REASON_PARSE_ERROR
+        elif error_type == REACT_REASON_LLM_ERROR or _looks_like_llm_error_text(
+            error_message
+        ):
+            reason = REACT_REASON_LLM_ERROR
+        else:
+            reason = _last_failed_step_error_type(history_steps) or REACT_REASON_EXCEPTION
+        return _react_outcome_payload(
+            status=REACT_STATUS_FAILED,
+            termination_reason=reason,
+            history_steps=history_steps,
+            max_steps=max_steps,
+            error_message=error_message,
+        )
+
+    if action_report and getattr(action_report, "terminate", False):
+        if _has_open_task_plan(todo_list):
+            return _react_outcome_payload(
+                status=REACT_STATUS_INCOMPLETE,
+                termination_reason=REACT_REASON_TASK_PLAN_INCOMPLETE,
+                history_steps=history_steps,
+                max_steps=max_steps,
+            )
+        return _react_outcome_payload(
+            status=REACT_STATUS_COMPLETED,
+            termination_reason=REACT_REASON_TERMINATE,
+            history_steps=history_steps,
+            max_steps=max_steps,
+        )
+
+    if action_report and not getattr(action_report, "is_exe_success", True):
+        error_type = getattr(action_report, "error_type", None)
+        if error_type == REACT_REASON_REPEATED_ACTION:
+            return _react_outcome_payload(
+                status=REACT_STATUS_INCOMPLETE,
+                termination_reason=REACT_REASON_REPEATED_ACTION,
+                history_steps=history_steps,
+                max_steps=max_steps,
+                error_message=getattr(action_report, "error_message", None)
+                or getattr(action_report, "content", None),
+            )
+        reason = (
+            REACT_REASON_LLM_ERROR
+            if error_type == REACT_REASON_LLM_ERROR
+            else REACT_REASON_PARSE_ERROR
+            if error_type == REACT_REASON_PARSE_ERROR
+            else REACT_REASON_TOOL_ERROR
+        )
+        return _react_outcome_payload(
+            status=REACT_STATUS_FAILED,
+            termination_reason=reason,
+            history_steps=history_steps,
+            max_steps=max_steps,
+            error_message=getattr(action_report, "error_message", None)
+            or getattr(action_report, "content", None),
+        )
+
+    reason = (
+        REACT_REASON_MAX_STEPS
+        if len(history_steps) >= max_steps
+        else REACT_REASON_STOPPED_WITHOUT_TERMINATE
+    )
+    if reason != REACT_REASON_MAX_STEPS and _has_open_task_plan(todo_list):
+        reason = REACT_REASON_TASK_PLAN_INCOMPLETE
+    return _react_outcome_payload(
+        status=REACT_STATUS_INCOMPLETE,
+        termination_reason=reason,
+        history_steps=history_steps,
+        max_steps=max_steps,
+    )
+
+
+def _final_content_for_outcome(final_content: str, outcome: Dict[str, Any]) -> str:
+    status = outcome.get("status")
+    reason = outcome.get("termination_reason")
+    error_message = (outcome.get("error_message") or "").strip()
+    if status == REACT_STATUS_COMPLETED:
+        return final_content or "任务已完成。"
+    if status == REACT_STATUS_FAILED:
+        if reason == REACT_REASON_LLM_ERROR:
+            base = "任务失败：模型调用失败，已停止执行。"
+        elif reason == REACT_REASON_PARSE_ERROR:
+            base = "任务失败：模型连续返回无法解析的 ReAct 格式。"
+        else:
+            base = "任务失败：执行过程中出现错误。"
+        return f"{base}\n{error_message}".strip() if error_message else base
+    if reason == REACT_REASON_MAX_STEPS:
+        return "任务未完成：已达到最大执行轮数，未收到 terminate。"
+    if reason == REACT_REASON_TASK_PLAN_INCOMPLETE:
+        return "任务未完成：执行流结束时仍有计划项未完成。"
+    if reason == REACT_REASON_REPEATED_ACTION:
+        return "任务未完成：检测到连续重复动作且没有新的有效产出。"
+    return final_content or "任务未完成：执行流结束但未收到 terminate。"
+
 
 def _skill_root_name(file_path: str) -> str:
     parts = PurePosixPath(str(file_path or "")).parts
@@ -1439,8 +1721,18 @@ async def _react_agent_stream(
             }
         )
 
-    def step_done(step_id: str, status: str = "done"):
-        return _sse_event({"type": "step.done", "id": step_id, "status": status})
+    def step_done(
+        step_id: str,
+        status: str = "done",
+        error_type: Optional[str] = None,
+        error_message: Optional[str] = None,
+    ):
+        payload = {"type": "step.done", "id": step_id, "status": status}
+        if error_type:
+            payload["error_type"] = error_type
+        if error_message:
+            payload["error_message"] = error_message
+        return _sse_event(payload)
 
     def step_meta(
         step_id: str,
@@ -2367,9 +2659,15 @@ print(json.dumps(summary, ensure_ascii=False))
     else:
         llm_config = LLMConfig(llm_client=llm_client)
 
+    react_max_steps = _react_max_steps_for(user_input, pre_matched_skill)
+    react_llm_error_limit = _react_llm_error_limit()
+    react_parse_error_limit = _react_parse_error_limit()
+    react_same_action_repeat_limit = _react_same_action_repeat_limit()
+
     REACT_AGENT_RUNS[run_id] = {
         "conv_uid": conv_id,
         "cancel_event": cancel_event,
+        "max_steps": react_max_steps,
     }
     pending_ask_data = REACT_ASK_DATA_PENDING.get(conv_id)
     if pending_ask_data and pending_ask_data.get("user_id") == (dialogue.user_name or "anonymous"):
@@ -2467,6 +2765,11 @@ print(json.dumps(summary, ensure_ascii=False))
     storage_conv.save_to_storage()
     storage_conv.start_new_round()
     storage_conv.add_user_message(user_input)
+    # Persist the human turn before the long-running stream completes.  The
+    # assistant/view payload is still written at terminal state, but a page
+    # reload or route change can now restore the latest user input instead of
+    # falling back to the previous completed round.
+    storage_conv.save_to_storage()
     context = AgentContext(
         conv_id=conv_id,
         gpts_app_code="react_agent",
@@ -2957,7 +3260,13 @@ only inside `Action Input.result`.
     )
 
     agent_builder = (
-        ReActAgent(max_retry_count=30)
+        ReActAgent(
+            max_retry_count=react_max_steps,
+            llm_inference_retry_count=react_llm_error_limit,
+            llm_error_retry_limit=react_llm_error_limit,
+            parse_error_retry_limit=react_parse_error_limit,
+            same_action_repeat_limit=react_same_action_repeat_limit,
+        )
         .bind(context)
         .bind(agent_memory)
         .bind(llm_config)
@@ -3093,6 +3402,63 @@ only inside `Action Input.result`.
             event = await asyncio.wait_for(stream_queue.get(), timeout=0.1)
         except asyncio.CancelledError:
             cancel_event.set()
+            if current_history_step is not None:
+                current_history_step["status"] = "cancelled"
+                history_steps.append(current_history_step)
+                current_history_step = None
+            for item in history_steps:
+                if item.get("status") == "running":
+                    item["status"] = "cancelled"
+            for item in _todo_list:
+                if item.get("status") in {"pending", "in_progress"}:
+                    item["status"] = "cancelled"
+
+            final_content = "任务已取消。"
+            outcome = _react_outcome_payload(
+                status=REACT_STATUS_CANCELLED,
+                termination_reason=REACT_REASON_CANCELLED,
+                history_steps=history_steps,
+                max_steps=react_max_steps,
+                error_message="SSE stream disconnected before completion",
+            )
+            try:
+                update_react_session_after_turn(
+                    session_state,
+                    react_state,
+                    history_steps,
+                    final_content,
+                    skills_dir=skills_dir,
+                    status=outcome["status"],
+                    termination_reason=outcome["termination_reason"],
+                    error_message=outcome.get("error_message"),
+                    run_summary=outcome,
+                )
+                save_react_session_state(session_state)
+            except Exception:
+                logger.debug(
+                    "Failed to save disconnected ReAct session state", exc_info=True
+                )
+            try:
+                history_payload = json.dumps(
+                    {
+                        "version": 1,
+                        "type": "react-agent",
+                        **outcome,
+                        "final_content": final_content,
+                        "steps": history_steps,
+                        "task_plan": list(_todo_list),
+                        "generated_images": react_state.get("generated_images", []),
+                        "session_state": session_state,
+                    },
+                    ensure_ascii=False,
+                )
+                storage_conv.add_view_message(history_payload)
+                storage_conv.end_current_round()
+                storage_conv.save_to_storage()
+            except Exception:
+                logger.debug(
+                    "Failed to persist disconnected ReAct run", exc_info=True
+                )
             if not agent_task.done():
                 agent_task.cancel()
             REACT_AGENT_RUNS.pop(run_id, None)
@@ -3388,6 +3754,8 @@ only inside `Action Input.result`.
                 "action_input": action_input_str,
                 "outputs": [],
                 "status": "running",
+                "error_type": action_output.get("error_type"),
+                "error_message": action_output.get("error_message"),
             }
 
             # Stream action code to frontend for right panel
@@ -3474,7 +3842,9 @@ only inside `Action Input.result`.
 
             # Mark step as done and track as last completed
             status = "done" if action_output.get("is_exe_success", True) else "failed"
-            yield step_done(react_step_id, status)
+            error_type = action_output.get("error_type")
+            error_message = action_output.get("error_message")
+            yield step_done(react_step_id, status, error_type, error_message)
             if (
                 status == "done"
                 and action
@@ -3489,6 +3859,10 @@ only inside `Action Input.result`.
             # --- History: finalize step ---
             if current_history_step is not None:
                 current_history_step["status"] = status
+                if error_type:
+                    current_history_step["error_type"] = error_type
+                if error_message:
+                    current_history_step["error_message"] = error_message
                 if ask_data_call_id:
                     current_history_step["ask_data_call_id"] = ask_data_call_id
                 if ask_data_reused:
@@ -3517,6 +3891,12 @@ only inside `Action Input.result`.
             logger.debug("Cancelled react agent task ended with error", exc_info=True)
 
         final_content = "任务已取消。"
+        outcome = _react_outcome_payload(
+            status=REACT_STATUS_CANCELLED,
+            termination_reason=REACT_REASON_CANCELLED,
+            history_steps=history_steps,
+            max_steps=react_max_steps,
+        )
         try:
             update_react_session_after_turn(
                 session_state,
@@ -3524,7 +3904,10 @@ only inside `Action Input.result`.
                 history_steps,
                 final_content,
                 skills_dir=skills_dir,
-                status="cancelled",
+                status=outcome["status"],
+                termination_reason=outcome["termination_reason"],
+                error_message=outcome.get("error_message"),
+                run_summary=outcome,
             )
             save_react_session_state(session_state)
         except Exception:
@@ -3533,6 +3916,7 @@ only inside `Action Input.result`.
             {
                 "version": 1,
                 "type": "react-agent",
+                **outcome,
                 "final_content": final_content,
                 "steps": history_steps,
                 "task_plan": list(_todo_list),
@@ -3545,8 +3929,8 @@ only inside `Action Input.result`.
         storage_conv.end_current_round()
         storage_conv.save_to_storage()
         REACT_AGENT_RUNS.pop(run_id, None)
-        yield _sse_event({"type": "run.cancelled", "run_id": run_id})
-        yield _sse_event({"type": "final", "content": final_content})
+        yield _sse_event({"type": "run.cancelled", "run_id": run_id, **outcome})
+        yield _sse_event({"type": "final", "content": final_content, **outcome})
         yield _sse_event({"type": "done"})
         return
 
@@ -3554,6 +3938,15 @@ only inside `Action Input.result`.
         reply = await agent_task
     except Exception as e:
         err_msg = f"React agent failed: {e}"
+        outcome = _react_outcome_payload(
+            status=REACT_STATUS_FAILED,
+            termination_reason=REACT_REASON_LLM_ERROR
+            if _looks_like_llm_error_text(str(e))
+            else REACT_REASON_EXCEPTION,
+            history_steps=history_steps,
+            max_steps=react_max_steps,
+            error_message=str(e),
+        )
         try:
             update_react_session_after_turn(
                 session_state,
@@ -3561,7 +3954,10 @@ only inside `Action Input.result`.
                 history_steps,
                 err_msg,
                 skills_dir=skills_dir,
-                status="failed",
+                status=outcome["status"],
+                termination_reason=outcome["termination_reason"],
+                error_message=outcome.get("error_message"),
+                run_summary=outcome,
             )
             save_react_session_state(session_state)
         except Exception:
@@ -3570,6 +3966,7 @@ only inside `Action Input.result`.
             {
                 "version": 1,
                 "type": "react-agent",
+                **outcome,
                 "final_content": err_msg,
                 "steps": history_steps,
                 "task_plan": list(_todo_list),
@@ -3582,7 +3979,8 @@ only inside `Action Input.result`.
         storage_conv.end_current_round()
         storage_conv.save_to_storage()
         REACT_AGENT_RUNS.pop(run_id, None)
-        yield _sse_event({"type": "final", "content": err_msg})
+        yield _sse_event({"type": "run.failed", "run_id": run_id, **outcome})
+        yield _sse_event({"type": "final", "content": err_msg, **outcome})
         yield _sse_event({"type": "done"})
         return
 
@@ -3635,6 +4033,14 @@ only inside `Action Input.result`.
     else:
         final_content = reply.content or ""
 
+    outcome = _compute_react_run_outcome(
+        reply=reply,
+        history_steps=history_steps,
+        todo_list=list(_todo_list),
+        max_steps=react_max_steps,
+    )
+    final_content = _final_content_for_outcome(final_content, outcome)
+
     try:
         update_react_session_after_turn(
             session_state,
@@ -3642,7 +4048,10 @@ only inside `Action Input.result`.
             history_steps,
             final_content,
             skills_dir=skills_dir,
-            status="completed",
+            status=outcome["status"],
+            termination_reason=outcome["termination_reason"],
+            error_message=outcome.get("error_message"),
+            run_summary=outcome,
         )
         save_react_session_state(session_state)
     except Exception:
@@ -3661,6 +4070,7 @@ only inside `Action Input.result`.
         {
             "version": 1,
             "type": "react-agent",
+            **outcome,
             "final_content": final_content,
             "steps": history_steps,
             "task_plan": list(_todo_list),
@@ -3674,7 +4084,10 @@ only inside `Action Input.result`.
     storage_conv.save_to_storage()
     REACT_AGENT_RUNS.pop(run_id, None)
 
-    yield _sse_event({"type": "final", "content": final_content})
+    yield _sse_event(
+        {"type": f"run.{outcome['status']}", "run_id": run_id, **outcome}
+    )
+    yield _sse_event({"type": "final", "content": final_content, **outcome})
     yield _sse_event({"type": "done"})
 
 
@@ -3940,6 +4353,17 @@ async def chat_react_agent_cancel(
     if body.run_id:
         run_state = REACT_AGENT_RUNS.get(body.run_id)
         if run_state:
+            cancel_event = run_state.get("cancel_event")
+            if cancel_event is not None:
+                cancel_event.set()
+                cancelled_run = True
+
+    if body.conv_uid:
+        for active_run_id, run_state in list(REACT_AGENT_RUNS.items()):
+            if body.run_id and active_run_id == body.run_id:
+                continue
+            if run_state.get("conv_uid") != body.conv_uid:
+                continue
             cancel_event = run_state.get("cancel_event")
             if cancel_event is not None:
                 cancel_event.set()

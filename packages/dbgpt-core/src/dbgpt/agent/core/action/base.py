@@ -53,6 +53,8 @@ class ActionOutput(BaseModel):
     action_reason: Optional[str] = None
     observations: Optional[str] = None
     have_retry: Optional[bool] = True
+    error_type: Optional[str] = None
+    error_message: Optional[str] = None
     ask_user: Optional[bool] = False
     # 如果当前agent能确定下个发言者，需要在这里指定
     next_speakers: Optional[List[str]] = None

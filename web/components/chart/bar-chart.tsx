@@ -1,10 +1,13 @@
 import { ChatContext } from '@/app/chat-context';
+import { useInterfaceStyle } from '@/hooks/use-interface-style';
 import { ChartData } from '@/types/chat';
+import { terminalChartTheme } from '@/utils/terminal-chart-theme';
 import { Chart } from '@berryv/g2-react';
 import { useContext, useMemo } from 'react';
 
 export default function BarChart({ chart }: { key: string; chart: ChartData }) {
   const { mode } = useContext(ChatContext);
+  const interfaceStyle = useInterfaceStyle();
 
   // Process data to ensure numeric values for proper y-axis ordering
   const processedChart = useMemo(() => {
@@ -35,10 +38,10 @@ export default function BarChart({ chart }: { key: string; chart: ChartData }) {
         <div className='opacity-80 text-sm mb-2'>{chart.chart_desc}</div>
         <div className='h-[300px]'>
           <Chart
-            style={{ height: '100%' }}
+            style={{ height: '100%', background: interfaceStyle === 'terminal' ? '#FAF6EE' : undefined }}
             options={{
               autoFit: true,
-              theme: mode,
+              theme: interfaceStyle === 'terminal' ? terminalChartTheme : mode,
               type: 'interval',
               data: processedChart.values,
               encode: { x: 'name', y: 'value', color: 'type' },

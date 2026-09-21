@@ -284,8 +284,10 @@ async def _build_model_responses(
     responses = []
     probe_targets = []
     model_storage = None
+    stored_model_items = []
     try:
         model_storage = get_model_storage()
+        stored_model_items = model_storage.all_model_items(enabled=None)
     except Exception as e:
         logger.debug("Model storage is unavailable when listing models: %s", e)
     managers = await controller.get_all_instances(
@@ -299,6 +301,7 @@ async def _build_model_responses(
             continue
         stored_params = None
         provider = None
+        stored_enabled = True
         if model_storage:
             try:
                 stored_models = model_storage.query_models(
@@ -306,12 +309,29 @@ async def _build_model_responses(
                     worker_type,
                     host=model.host,
                     port=model.port,
+                    enabled=None,
                 )
                 if not stored_models:
                     stored_models = model_storage.query_models(worker_name, worker_type)
                 if len(stored_models) == 1:
                     stored_params = stored_models[0].params
                     provider = stored_params.get("provider")
+                matching_items = [
+                    item
+                    for item in stored_model_items
+                    if item.model == worker_name
+                    and item.worker_type == worker_type
+                    and item.host == model.host
+                    and item.port == model.port
+                ]
+                if not matching_items:
+                    matching_items = [
+                        item
+                        for item in stored_model_items
+                        if item.model == worker_name and item.worker_type == worker_type
+                    ]
+                if len(matching_items) == 1:
+                    stored_enabled = matching_items[0].enabled
             except Exception as e:
                 logger.debug(
                     "Fetch stored params for model %s@%s failed: %s",
@@ -336,6 +356,8 @@ async def _build_model_responses(
             health_reason=health_reason,
             provider=provider,
             params=stored_params,
+            enabled=stored_enabled,
+            running=True,
         )
         if probe_llm_health and worker_type == WorkerType.LLM.value and model.healthy:
             probe_targets.append(
@@ -362,6 +384,34 @@ async def _build_model_responses(
             healthy, reason = probe_result
             responses[index].healthy = responses[index].healthy and healthy
             responses[index].health_reason = None if healthy else reason or "LLM probe failed"
+
+    active_keys = {(item.model_name, item.worker_type) for item in responses}
+    for stored in stored_model_items:
+        model_key = (stored.model, stored.worker_type)
+        if model_key in active_keys:
+            continue
+        responses.append(
+            ModelResponse(
+                model_name=stored.model,
+                worker_type=stored.worker_type,
+                host=stored.host,
+                port=stored.port,
+                manager_host="",
+                manager_port=-1,
+                healthy=False,
+                check_healthy=False,
+                last_heartbeat=None,
+                health_reason=(
+                    "Model is stopped"
+                    if not stored.enabled
+                    else "Model worker is not running"
+                ),
+                provider=stored.provider,
+                params=stored.params,
+                enabled=stored.enabled,
+                running=False,
+            )
+        )
     return responses
 
 
@@ -480,10 +530,26 @@ async def set_default_model(
 async def model_stop(
     request: WorkerStartupRequest,
     worker_manager: WorkerManager = Depends(get_worker_manager),
+    model_storage: ModelStorage = Depends(get_model_storage),
 ):
     try:
         request.params = {}
         await worker_manager.model_shutdown(request)
+        if not request.delete_after:
+            updated = model_storage.set_enabled(
+                request.model,
+                request.worker_type.value,
+                enabled=False,
+                sys_code=request.sys_code,
+                user_name=request.user_name,
+                host=request.host,
+                port=request.port,
+            )
+            if updated == 0:
+                logger.warning(
+                    "Stopped model %s but no persisted model record matched the worker",
+                    request.model,
+                )
         _clear_model_health_probe_cache()
         return Result.succ(True)
     except Exception as e:
@@ -570,6 +636,7 @@ async def start_model(
             worker_type=request.worker_type.value,
             user_name=request.user_name,
             sys_code=request.sys_code,
+            enabled=None,
             host=request.host,
             port=request.port,
         )
@@ -582,6 +649,15 @@ async def start_model(
             worker_type, request.model, healthy_only=False
         )
         if existing_workers:
+            model_storage.set_enabled(
+                request.model,
+                worker_type,
+                enabled=True,
+                sys_code=request.sys_code,
+                user_name=request.user_name,
+                host=models[0].host,
+                port=models[0].port,
+            )
             _clear_model_health_probe_cache()
             return Result.succ(True)
 
@@ -593,9 +669,27 @@ async def start_model(
                 worker_type, request.model, healthy_only=False
             )
             if existing_workers:
+                model_storage.set_enabled(
+                    request.model,
+                    worker_type,
+                    enabled=True,
+                    sys_code=request.sys_code,
+                    user_name=request.user_name,
+                    host=models[0].host,
+                    port=models[0].port,
+                )
                 _clear_model_health_probe_cache()
                 return Result.succ(True)
             raise
+        model_storage.set_enabled(
+            request.model,
+            worker_type,
+            enabled=True,
+            sys_code=request.sys_code,
+            user_name=request.user_name,
+            host=models[0].host,
+            port=models[0].port,
+        )
         _clear_model_health_probe_cache()
         return Result.succ(True)
     except Exception as e:

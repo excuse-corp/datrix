@@ -1,12 +1,11 @@
 import { ChatContext } from '@/app/chat-context';
 import { delDialogue, getDialogueList } from '@/client/api/request';
 import { apiInterceptors } from '@/client/api/tools/interceptors';
-import { DarkSvg, SunnySvg } from '@/components/icons';
 import InterfaceStyleSwitch from '@/components/layout/InterfaceStyleSwitch';
 import type { IChatDialogueSchema } from '@/types/chat';
-import { STORAGE_THEME_KEY } from '@/utils/constants/index';
-import Icon, {
+import {
   ApartmentOutlined,
+  AppstoreOutlined,
   BarChartOutlined,
   DeleteOutlined,
   MenuFoldOutlined,
@@ -16,7 +15,7 @@ import Icon, {
   RightOutlined,
   SettingOutlined,
 } from '@ant-design/icons';
-import { Popover, Skeleton, Tooltip, message } from 'antd';
+import { Skeleton, Tooltip, message } from 'antd';
 import cls from 'classnames';
 import moment from 'moment';
 import 'moment/locale/zh-cn';
@@ -38,9 +37,10 @@ type RouteItem = {
 
 const CHAT_DIALOGUE_UPSERT_EVENT = 'dataman:chat-dialogue-upsert';
 const CHAT_DIALOGUE_REFRESH_EVENT = 'dataman:chat-dialogue-refresh';
+const CHAT_NEW_TASK_EVENT = 'dataman:chat-new-task';
 
 function smallMenuItemStyle(active?: boolean) {
-  return `flex items-center justify-center mx-auto rounded w-14 h-14 text-xl hover:bg-blue-50/50 dark:hover:bg-blue-900/10 transition-colors cursor-pointer ${
+  return `dashboard-sidebar-compact-item flex items-center justify-center mx-auto rounded w-14 h-14 text-xl hover:bg-blue-50/50 dark:hover:bg-blue-900/10 transition-colors cursor-pointer ${
     active ? 'bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400 shadow-sm' : ''
   }`;
 }
@@ -62,7 +62,7 @@ function SidebarPictureIcon({
 }
 
 function SideBar() {
-  const { isMenuExpand, setIsMenuExpand, mode, setMode } = useContext(ChatContext);
+  const { isMenuExpand, setIsMenuExpand } = useContext(ChatContext);
   const router = useRouter();
   const { pathname, query } = router;
   const activeDialogueId = Array.isArray(query.id) ? query.id[0] : query.id;
@@ -126,11 +126,16 @@ function SideBar() {
     setIsMenuExpand(!isMenuExpand);
   }, [isMenuExpand, setIsMenuExpand]);
 
-  const handleToggleTheme = useCallback(() => {
-    const theme = mode === 'light' ? 'dark' : 'light';
-    setMode(theme);
-    localStorage.setItem(STORAGE_THEME_KEY, theme);
-  }, [mode, setMode]);
+  const handleNewTask = useCallback(
+    (e: React.MouseEvent<HTMLAnchorElement>) => {
+      e.preventDefault();
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent(CHAT_NEW_TASK_EVENT));
+      }
+      void router.push('/');
+    },
+    [router],
+  );
 
   const functions = useMemo(() => {
     const items: RouteItem[] = [
@@ -143,7 +148,7 @@ function SideBar() {
       },
       {
         key: 'ontology',
-        name: t('ontology') || 'Ontology',
+        name: t('ontology') || '全局本体',
         isActive: pathname.startsWith('/ontology'),
         icon: <ApartmentOutlined className='text-[24px]' />,
         path: '/ontology',
@@ -152,8 +157,7 @@ function SideBar() {
         key: 'skills',
         name: t('skills'),
         isActive: pathname.startsWith('/construct/skills'),
-        iconSrc: '/pictures/skills.svg',
-        activeIconSrc: '/pictures/skills_active.svg',
+        icon: <AppstoreOutlined className='text-[26px]' />,
         path: '/construct/skills',
       },
     ];
@@ -199,8 +203,8 @@ function SideBar() {
   // ============ COLLAPSED SIDEBAR ============
   if (!isMenuExpand) {
     return (
-      <div className='flex h-full flex-col justify-between bg-bar pt-4 dark:bg-[#232734] animate-fade animate-duration-300'>
-        <div>
+      <div className='dashboard-sidebar dashboard-sidebar-compact flex h-full flex-col justify-between bg-bar pt-4 dark:bg-[#232734] animate-fade animate-duration-300'>
+        <div className='dashboard-sidebar-compact-top'>
           <div className='flex flex-col items-center pb-2'>
             <Link href='/' className='flex justify-center items-center pb-2'>
               <Image src={logo} alt='Datrix' width={28} height={28} />
@@ -208,13 +212,20 @@ function SideBar() {
             <Tooltip title={t('Show_Sidebar') || '展开侧栏'} placement='right'>
               <div
                 onClick={handleToggleMenu}
-                className='flex items-center justify-center w-7 h-7 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-200 dark:hover:bg-gray-700 dark:hover:text-gray-300 cursor-pointer transition-colors'
+                className='dashboard-sidebar-compact-toggle flex items-center justify-center w-7 h-7 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-200 dark:hover:bg-gray-700 dark:hover:text-gray-300 cursor-pointer transition-colors'
               >
                 <MenuUnfoldOutlined style={{ fontSize: 14 }} />
               </div>
             </Tooltip>
           </div>
-          <div className='flex flex-col gap-4 items-center'>
+          <div className='dashboard-sidebar-compact-menu flex flex-col gap-4 items-center'>
+            <Link href='/' onClick={handleNewTask}>
+              <Tooltip title={t('new_task')} placement='right'>
+                <div className={smallMenuItemStyle(false)}>
+                  <PlusOutlined />
+                </div>
+              </Tooltip>
+            </Link>
             {functions.map(item => (
               <Link key={item.key} className='h-12 flex items-center' href={item.path}>
                 <Tooltip title={item.name} placement='right'>
@@ -233,7 +244,7 @@ function SideBar() {
             ))}
           </div>
         </div>
-        <div className='py-4'>
+        <div className='dashboard-sidebar-compact-bottom py-4'>
           <div className='flex flex-col items-center gap-3'>
             <Link href='/settings'>
               <Tooltip title={t('settings')} placement='right'>
@@ -251,7 +262,7 @@ function SideBar() {
 
   // ============ EXPANDED SIDEBAR ============
   return (
-    <div className='dataman-sidebar flex h-full w-[240px] min-w-[240px] flex-col bg-bar px-4 pt-4 dark:bg-[#232734] animate-fade animate-duration-300'>
+    <div className='dashboard-sidebar dataman-sidebar flex h-full w-[240px] min-w-[240px] flex-col bg-bar px-4 pt-4 dark:bg-[#232734] animate-fade animate-duration-300'>
       {/* LOGO + Collapse Toggle */}
       <div className='flex items-center justify-between p-2 pb-4'>
         <Link href='/' className='sidebar-brand flex items-center'>
@@ -269,7 +280,7 @@ function SideBar() {
       </div>
 
       {/* New Task Button */}
-      <Link href='/'>
+      <Link href='/' onClick={handleNewTask}>
         <div className='industrial-new-task flex items-center justify-center gap-2 px-4 py-2.5 mb-4 bg-black dark:bg-white dark:text-black text-white rounded-xl text-sm font-medium hover:opacity-90 transition-opacity cursor-pointer'>
           <PlusOutlined className='text-xs' />
           <span>{t('new_task')}</span>
@@ -363,14 +374,11 @@ function SideBar() {
 
       {/* Bottom controls */}
       <div className='pt-4 pb-2'>
-        <div className='flex items-center justify-around py-4 border-t border-dashed border-gray-200 dark:border-gray-700'>
-          <Popover content={mode === 'dark' ? 'Light' : 'Dark'}>
-            <div className='flex-1 flex items-center justify-center cursor-pointer text-xl' onClick={handleToggleTheme}>
-              {mode === 'dark' ? <Icon component={DarkSvg} /> : <Icon component={SunnySvg} />}
-            </div>
-          </Popover>
-          <InterfaceStyleSwitch compact />
-          <Link href='/settings' className='flex-1 flex items-center justify-center'>
+        <div className='dashboard-sidebar-bottom-controls flex items-center justify-center gap-4 py-4 border-t border-dashed border-gray-200 dark:border-gray-700'>
+          <div className='dashboard-sidebar-bottom-control'>
+            <InterfaceStyleSwitch compact />
+          </div>
+          <Link href='/settings' className='dashboard-sidebar-bottom-control'>
             <Tooltip title={t('settings')}>
               <div
                 className={cls('cursor-pointer text-xl', {

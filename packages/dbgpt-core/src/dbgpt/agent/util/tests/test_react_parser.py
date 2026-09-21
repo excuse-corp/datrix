@@ -91,6 +91,19 @@ Action Input: {"result": "The answer is 4"}"""
 
         assert parser.get_final_output(steps) == "The answer is 4"
 
+    def test_terminal_action_output_is_case_insensitive(self):
+        """Extract final output when terminate action casing varies."""
+        parser = ReActOutputParser()
+        text = """Thought: I've finished the calculation.
+Action: Terminate
+Action Input: {"result": "The answer is 4"}"""
+
+        steps = parser.parse(text)
+
+        assert len(steps) == 1
+        assert steps[0].is_terminal is True
+        assert parser.get_final_output(steps) == "The answer is 4"
+
     def test_multi_step_parsing(self):
         """Test parsing of multiple steps."""
         parser = ReActOutputParser()
@@ -449,6 +462,116 @@ Action Input: {"operation": "add", "a": 2, "b": 2}"""
         assert len(steps) == 1
         assert steps[0].thought == "I should calculate 2+2."
         assert steps[0].action == "calculator"
+
+    def test_parsing_with_inline_vis_thinking_block_keeps_action_line(self):
+        """Do not consume the newline before an action after vis-thinking."""
+        parser = ReActOutputParser()
+        text = """Thought: ``````vis-thinking
+I already have the data and should return the final answer.
+
+``````
+
+Action: terminate
+Action Input: {"result": "任博寒共有 5 个信息化项目。"}"""
+
+        steps = parser.parse_current_step(text)
+
+        assert len(steps) == 1
+        assert steps[0].action == "terminate"
+        assert steps[0].is_terminal is True
+        assert steps[0].action_input == {"result": "任博寒共有 5 个信息化项目。"}
+
+    def test_parsing_with_only_leading_vis_thinking_and_action(self):
+        """Accept a leading vis-thinking block even when Thought is omitted."""
+        parser = ReActOutputParser()
+        text = """``````vis-thinking
+I already have the data and should return the final answer.
+
+``````
+
+Action: terminate
+Action Input: {"result": "丁宇龙共有 3 个项目。"}"""
+
+        steps = parser.parse_current_step(text)
+
+        assert len(steps) == 1
+        assert steps[0].thought is None
+        assert steps[0].action == "terminate"
+        assert steps[0].is_terminal is True
+        assert steps[0].action_input == {"result": "丁宇龙共有 3 个项目。"}
+
+    def test_parsing_action_only_response(self):
+        """Accept action-only responses from models that omit Thought."""
+        parser = ReActOutputParser()
+        text = """Action: ask_data_query
+Action Input: {"question": "丁宇龙有哪些项目"}"""
+
+        steps = parser.parse_current_step(text)
+
+        assert len(steps) == 1
+        assert steps[0].thought is None
+        assert steps[0].action == "ask_data_query"
+        assert steps[0].action_input == {"question": "丁宇龙有哪些项目"}
+
+    def test_parsing_fullwidth_colon_labels_and_quoted_action(self):
+        """Accept Chinese fullwidth colons and markdown-wrapped action names."""
+        parser = ReActOutputParser()
+        text = """Thought：已有查询结果，可以返回。
+Action Intention：返回答案
+Action Reason：查询已完成
+Action：`terminate`
+Action Input：{"result": "任博寒共有 5 个信息化项目。"}"""
+
+        steps = parser.parse_current_step(text)
+
+        assert len(steps) == 1
+        assert steps[0].thought == "已有查询结果，可以返回。"
+        assert steps[0].action_intention == "返回答案"
+        assert steps[0].action_reason == "查询已完成"
+        assert steps[0].action == "terminate"
+        assert steps[0].action_input == {"result": "任博寒共有 5 个信息化项目。"}
+
+    def test_parsing_markdown_bold_action_lines_without_thought(self):
+        """Accept markdown list/bold wrappers around action labels."""
+        parser = ReActOutputParser()
+        text = """- **Action:** ask_data_query
+- **Action Input:** {"question": "任博寒有哪些信息化项目"}"""
+
+        steps = parser.parse_current_step(text)
+
+        assert len(steps) == 1
+        assert steps[0].thought is None
+        assert steps[0].action == "ask_data_query"
+        assert steps[0].action_input == {"question": "任博寒有哪些信息化项目"}
+
+    def test_parsing_json_code_fence_action_input(self):
+        """Parse JSON when Action Input is wrapped in a fenced code block."""
+        parser = ReActOutputParser()
+        text = """Action: terminate
+Action Input:
+```json
+{"result": "项目查询完成。"}
+```"""
+
+        steps = parser.parse_current_step(text)
+
+        assert len(steps) == 1
+        assert steps[0].action == "terminate"
+        assert steps[0].action_input == {"result": "项目查询完成。"}
+
+    def test_parsing_six_backtick_wrapped_response(self):
+        """Accept complete ReAct responses wrapped in long markdown fences."""
+        parser = ReActOutputParser()
+        text = """``````text
+Action: terminate
+Action Input: {"result": "完成"}
+``````"""
+
+        steps = parser.parse_current_step(text)
+
+        assert len(steps) == 1
+        assert steps[0].action == "terminate"
+        assert steps[0].action_input == {"result": "完成"}
 
     def test_parsing_with_markdown_code_fence_wrapper(self):
         """Test parsing when the model wraps the whole response in a code fence."""

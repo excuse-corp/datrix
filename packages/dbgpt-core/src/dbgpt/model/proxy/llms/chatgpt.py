@@ -31,6 +31,78 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+_QWEN38_DEFAULT_REASONING_EFFORT = "xhigh"
+_QWEN38_REASONING_EFFORTS = {"low", "medium", "xhigh"}
+_QWEN38_REASONING_EFFORT_ALIASES = {
+    "low": "low",
+    "medium": "medium",
+    "xhigh": "xhigh",
+    "x-high": "xhigh",
+    "x_high": "xhigh",
+    "high": "xhigh",
+    "max": "xhigh",
+    "maximum": "xhigh",
+    "deep": "xhigh",
+}
+
+
+def _is_qwen38_model(model: Optional[str]) -> bool:
+    if not model:
+        return False
+    return "qwen3.8" in model.lower()
+
+
+def _normalize_qwen38_reasoning_effort(value: Any) -> str:
+    if value is None or str(value).strip() == "":
+        return _QWEN38_DEFAULT_REASONING_EFFORT
+
+    raw_effort = str(value).strip().lower()
+    effort = _QWEN38_REASONING_EFFORT_ALIASES.get(raw_effort)
+    if effort:
+        return effort
+    if raw_effort in _QWEN38_REASONING_EFFORTS:
+        return raw_effort
+
+    logger.warning(
+        "Unsupported Qwen3.8 reasoning_effort %r; using %s",
+        value,
+        _QWEN38_DEFAULT_REASONING_EFFORT,
+    )
+    return _QWEN38_DEFAULT_REASONING_EFFORT
+
+
+def _normalize_optional_bool(value: Any) -> Optional[bool]:
+    if value is None or isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "y", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "n", "off"}:
+            return False
+    return bool(value)
+
+
+def _message_extra_value(obj: Any, key: str) -> Any:
+    value = getattr(obj, key, None)
+    if value:
+        return value
+    extra = getattr(obj, "model_extra", None)
+    if isinstance(extra, dict):
+        return extra.get(key)
+    if isinstance(obj, dict):
+        return obj.get(key)
+    return None
+
+
+def _message_reasoning_text(obj: Any) -> str:
+    return str(
+        _message_extra_value(obj, "reasoning_content")
+        or _message_extra_value(obj, "reasoning")
+        or ""
+    )
+
+
 @auto_register_resource(
     label=_("OpenAI Compatible Proxy LLM"),
     category=ResourceCategory.LLM_CLIENT,
@@ -90,6 +162,34 @@ class OpenAICompatibleDeployModelParameters(LLMDeployModelParameters):
         default=100, metadata={"help": _("Model concurrency limit")}
     )
 
+    thinking_enabled: Optional[bool] = field(
+        default=None,
+        metadata={
+            "help": _(
+                "Whether to enable thinking mode for OpenAI-compatible models that "
+                "support it. For Qwen3.8, this is sent as enable_thinking."
+            ),
+        },
+    )
+    reasoning_effort: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": _(
+                "Reasoning effort for OpenAI-compatible models that support it. "
+                "Qwen3.8 supports low, medium, and xhigh, defaulting to xhigh."
+            ),
+        },
+    )
+    thinking_budget: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": _(
+                "Thinking token budget for compatible providers. Do not set this "
+                "together with reasoning_effort for Qwen3.8 models."
+            ),
+        },
+    )
+
 
 async def chatgpt_generate_stream(
     model: ProxyModel, tokenizer, params, device, context_len=2048
@@ -145,6 +245,9 @@ class OpenAILLMClient(ProxyLLMClient):
         context_length: Optional[int] = 8192,
         openai_client: Optional["ClientType"] = None,
         openai_kwargs: Optional[Dict[str, Any]] = None,
+        thinking_enabled: Optional[bool] = None,
+        reasoning_effort: Optional[str] = None,
+        thinking_budget: Optional[int] = None,
         **kwargs,
     ):
         try:
@@ -173,6 +276,9 @@ class OpenAILLMClient(ProxyLLMClient):
         self._api_type = api_type
         self._client = openai_client
         self._openai_kwargs = openai_kwargs or {}
+        self._openai_compatible_thinking_enabled = thinking_enabled
+        self._openai_compatible_reasoning_effort = reasoning_effort
+        self._openai_compatible_thinking_budget = thinking_budget
         super().__init__(model_names=[model_alias], context_length=context_length)
 
         # Prepare openai client and cache default headers
@@ -208,6 +314,9 @@ class OpenAILLMClient(ProxyLLMClient):
             proxy=model_params.http_proxy,
             model_alias=model_params.real_provider_model_name,
             context_length=max(model_params.context_length or 8192, 8192),
+            thinking_enabled=getattr(model_params, "thinking_enabled", None),
+            reasoning_effort=getattr(model_params, "reasoning_effort", None),
+            thinking_budget=getattr(model_params, "thinking_budget", None),
             # full_url=model_params.proxy_server_url,
         )
 
@@ -257,7 +366,64 @@ class OpenAILLMClient(ProxyLLMClient):
             payload["stop"] = request.stop
         if request.top_p:
             payload["top_p"] = request.top_p
+        self._apply_qwen38_thinking_config(payload)
         return payload
+
+    def _apply_qwen38_thinking_config(self, payload: Dict[str, Any]) -> None:
+        """Normalize Qwen3.8 thinking parameters for OpenAI-compatible APIs."""
+        model = payload.get("model") or self.default_model
+        if not _is_qwen38_model(model):
+            return
+
+        raw_extra_body = payload.get("extra_body")
+        if raw_extra_body is None:
+            extra_body: Dict[str, Any] = {}
+        elif isinstance(raw_extra_body, dict):
+            extra_body = dict(raw_extra_body)
+        else:
+            logger.warning("Ignoring non-dict extra_body for Qwen3.8 model %s", model)
+            extra_body = {}
+
+        for key in ("enable_thinking", "reasoning_effort", "thinking_budget"):
+            if key in payload and key not in extra_body:
+                extra_body[key] = payload[key]
+            payload.pop(key, None)
+
+        configured_thinking = self._openai_compatible_thinking_enabled
+        enable_thinking = _normalize_optional_bool(
+            extra_body.get("enable_thinking", configured_thinking)
+        )
+        if enable_thinking is False:
+            extra_body["enable_thinking"] = False
+            extra_body.pop("reasoning_effort", None)
+            extra_body.pop("thinking_budget", None)
+            payload["extra_body"] = extra_body
+            return
+
+        extra_body["enable_thinking"] = True
+        configured_effort = self._openai_compatible_reasoning_effort
+        configured_budget = self._openai_compatible_thinking_budget
+
+        if "reasoning_effort" not in extra_body and configured_effort is not None:
+            extra_body["reasoning_effort"] = configured_effort
+        if "thinking_budget" not in extra_body and configured_budget is not None:
+            extra_body["thinking_budget"] = configured_budget
+
+        if "reasoning_effort" in extra_body:
+            extra_body["reasoning_effort"] = _normalize_qwen38_reasoning_effort(
+                extra_body["reasoning_effort"]
+            )
+            if "thinking_budget" in extra_body:
+                logger.warning(
+                    "Qwen3.8 does not support reasoning_effort and thinking_budget "
+                    "together; dropping thinking_budget for model %s",
+                    model,
+                )
+                extra_body.pop("thinking_budget", None)
+        elif "thinking_budget" not in extra_body:
+            extra_body["reasoning_effort"] = _QWEN38_DEFAULT_REASONING_EFFORT
+
+        payload["extra_body"] = extra_body
 
     async def generate(
         self,
@@ -300,9 +466,8 @@ class OpenAILLMClient(ProxyLLMClient):
         )
         reasoning_content = ""
         message_obj = chat_completion.choices[0].message
-        if hasattr(message_obj, "reasoning_content"):
-            reasoning_content = message_obj.reasoning_content
-        text = chat_completion.choices[0].message.content
+        reasoning_content = _message_reasoning_text(message_obj)
+        text = chat_completion.choices[0].message.content or ""
         usage = chat_completion.usage.dict()
         return ModelOutput.build(text, reasoning_content, usage=usage)
 
@@ -322,11 +487,13 @@ class OpenAILLMClient(ProxyLLMClient):
             if r.choices[0] is not None and r.choices[0].delta is None:
                 continue
             delta_obj = r.choices[0].delta
-            if hasattr(delta_obj, "reasoning_content"):
-                reasoning_content += delta_obj.reasoning_content or ""
-            if r.choices[0].delta.content is not None:
-                text += r.choices[0].delta.content
-            if text or reasoning_content:
+            new_reasoning = _message_reasoning_text(delta_obj)
+            if new_reasoning:
+                reasoning_content += new_reasoning
+            new_content = r.choices[0].delta.content or ""
+            if new_content:
+                text += new_content
+            if new_content or new_reasoning:
                 if hasattr(r, "usage") and r.usage is not None:
                     usage = r.usage.dict()
                 yield ModelOutput.build(text, reasoning_content, usage=usage)

@@ -137,8 +137,9 @@ const ChatContextProvider = ({ children }: { children: React.ReactElement }) => 
   }, []);
 
   useEffect(() => {
-    setModel(modelList[0]);
-  }, [modelList, modelList?.length]);
+    if (!modelList.length) return;
+    setModel(currentModel => (currentModel && modelList.includes(currentModel) ? currentModel : modelList[0]));
+  }, [modelList]);
 
   const contextValue = {
     isContract,
