@@ -21,6 +21,9 @@ if TYPE_CHECKING:
 
 _ASK_DATA_RESULT_ANALYSIS_GUIDANCE = [
     "先直接回答用户问题，再解释关键数字的业务含义。",
+    "在查数结果后必须给出“数据口径”说明，使用普通中文说明数据来自哪里、每一行代表什么、数字怎么算、统计范围和需要注意的业务规则。",
+    "数据口径说明只能依据 sql_explanation；缺失的内容明确说未识别，不要根据常识臆测。",
+    "面向不懂数据库的用户表达，不要直接复述 SQL、表名、字段名、聚合、粒度等数据库术语；优先使用 sql_explanation 中已经翻译好的中文说明。",
     "结合 ontology_context_for_analysis 中的实体、指标含义、指标关系和分析规则分析结果。",
     "只分析用户明确询问的范围；不要为了补充未要求的字段再次查询。",
     "存在空值、零值、极端值或查询警告时，提示可能的数据质量、口径或业务风险。",
@@ -608,6 +611,7 @@ def _main_agent_result_content(
                 "status": item.get("status"),
                 "row_count": item.get("row_count"),
                 "truncated": item.get("truncated"),
+                "data_caliber": item.get("sql_explanation"),
                 "columns": [
                     column.get("key")
                     for column in item.get("columns", [])
@@ -630,8 +634,13 @@ def _main_agent_result_content(
         scene_ids=scene_ids,
         result_columns=result_columns,
     )
+    has_data_caliber = any(
+        isinstance(scene.get("data_caliber"), dict)
+        for scene in compact["scenes"]
+    )
     if ontology_context:
         compact["ontology_context_for_analysis"] = ontology_context
+    if ontology_context or has_data_caliber:
         compact["analysis_guidance_for_final_answer"] = (
             _ASK_DATA_RESULT_ANALYSIS_GUIDANCE
         )
@@ -685,6 +694,7 @@ def _main_agent_result_content(
                 "status": scene.get("status"),
                 "row_count": scene.get("row_count"),
                 "truncated": True,
+                "data_caliber": scene.get("data_caliber"),
             }
             for scene in compact.get("scenes", [])
         ],
@@ -692,6 +702,10 @@ def _main_agent_result_content(
     }
     if ontology_context:
         minimal["ontology_context_for_analysis"] = ontology_context
+    if ontology_context or any(
+        isinstance(scene.get("data_caliber"), dict)
+        for scene in minimal["scene_summaries"]
+    ):
         minimal["analysis_guidance_for_final_answer"] = (
             _ASK_DATA_RESULT_ANALYSIS_GUIDANCE
         )

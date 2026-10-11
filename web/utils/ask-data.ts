@@ -69,6 +69,32 @@ export type SceneResult = {
   warnings?: string[];
   columns?: Array<{ key: string; name?: string }>;
   rows?: Array<Record<string, unknown>>;
+  sql?: string | null;
+  sql_explanation?: SqlExplanation | null;
+};
+export type SqlMetricExplanation = {
+  key: string;
+  label?: string;
+  field?: string | null;
+  aggregation?: string | null;
+  unit?: string | null;
+  definition?: string;
+  expression?: string;
+  null_handling?: string | null;
+};
+export type SqlExplanation = {
+  summary: string;
+  source?: string | null;
+  source_label?: string | null;
+  grain?: string[];
+  grain_description?: string;
+  metrics?: SqlMetricExplanation[];
+  filters?: string[];
+  time_scope?: string[];
+  order_by?: string[];
+  limit?: number | null;
+  distinct?: boolean;
+  business_rules?: string[];
 };
 export type Clarification = { question?: string; field?: string; options?: string[] };
 export type AskDataQueryResponse = {

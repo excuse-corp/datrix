@@ -76,6 +76,8 @@ class SceneResult(BaseModel):
     row_count: int = 0
     truncated: bool = False
     rag: dict[str, Any] = Field(default_factory=dict)
+    sql: str | None = None
+    sql_explanation: dict[str, Any] | None = None
     query_spec_hash: str
     compiler_version: str
     sql_hash: str

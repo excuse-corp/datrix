@@ -6,12 +6,13 @@ import hashlib
 from time import monotonic
 from typing import Any
 
+from .query.capabilities import metric_definition, metric_keys, schema_config
 from .query.compiler import CompiledQuery, QuerySpecCompiler
 from .query.executor import SafeSceneQueryExecutor
 from .query.query_spec import QuerySpec, ResultColumn, SceneResult
 from .rag.manager import SceneKnowledgeManager
+from .result.sql_explanation import build_sql_explanation
 from .schemas.snapshot import Snapshot, SnapshotStatus
-from .query.capabilities import metric_definition, metric_keys, schema_config
 
 
 class SceneQueryService:
@@ -64,6 +65,8 @@ class SceneQueryService:
             row_count=len(rows),
             truncated=truncated,
             rag=rag_result,
+            sql=compiled.sql,
+            sql_explanation=build_sql_explanation(compiled.sql, snapshot),
             query_spec_hash=compiled.query_spec_hash,
             compiler_version=compiled.compiler_version,
             sql_hash=compiled.sql_hash,
@@ -115,6 +118,8 @@ class SceneQueryService:
             row_count=len(rows),
             truncated=truncated,
             rag=rag_result,
+            sql=sql,
+            sql_explanation=build_sql_explanation(sql, snapshot),
             query_spec_hash=compiled.query_spec_hash,
             compiler_version=compiled.compiler_version,
             sql_hash=sql_hash,

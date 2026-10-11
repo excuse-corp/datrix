@@ -130,7 +130,7 @@ class ResultBundleBuilder:
         warnings: list[dict[str, str]],
         ontology_context: dict[str, Any] | None = None,
     ) -> str:
-        if status != "succeeded":
+        if status not in {"succeeded", "partial_succeeded"}:
             return "查询未完成，请根据返回的错误或澄清信息继续操作。"
         row_count = sum(result.row_count for result in results)
         scene_count = len({result.scene_id for result in results})
@@ -139,10 +139,22 @@ class ResultBundleBuilder:
             suffixes.append(
                 f"已结合 Ontology v{ontology_context.get('revision')} 的业务语义。"
             )
+        caliber_summaries = [
+            str(result.sql_explanation.get("summary") or "").strip()
+            for result in results
+            if isinstance(result.sql_explanation, dict)
+            and str(result.sql_explanation.get("summary") or "").strip()
+        ]
+        if caliber_summaries:
+            suffixes.append(
+                "数据口径："
+                + " ".join(summary[:800] for summary in caliber_summaries)
+            )
         if warnings:
             suffixes.append("结果包含警告，请查看 warnings。")
         suffix = "".join(suffixes)
-        return f"查询完成，返回 {scene_count} 个场景、{row_count} 行结果。{suffix}"
+        prefix = "查询部分完成" if status == "partial_succeeded" else "查询完成"
+        return f"{prefix}，返回 {scene_count} 个场景、{row_count} 行结果。{suffix}"
 
 
 __all__ = ["ResultBundleBuilder"]

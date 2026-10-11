@@ -3208,11 +3208,9 @@ const Playground: NextPage = () => {
               <Spin size='large' tip='加载对话历史...' />
             </div>
           ) : messages.length > 0 ? (
-            <div
-              className={`dashboard-chat-workspace flex-1 flex overflow-hidden ${rightPanelCollapsed ? 'justify-center' : ''}`}
-            >
+            <div className='dashboard-chat-workspace flex-1 flex overflow-hidden'>
               <div
-                className={`dashboard-chat-primary-panel ${rightPanelCollapsed ? 'dashboard-chat-panel-collapsed flex-1 max-w-[800px] border-r-0' : 'dashboard-chat-panel-open flex-[2] min-w-0 border-r border-gray-200/80 dark:border-gray-800'} flex flex-col overflow-hidden bg-white dark:bg-[#111217] transition-all duration-300 relative`}
+                className={`dashboard-chat-primary-panel ${rightPanelCollapsed ? 'dashboard-chat-panel-collapsed flex-1 max-w-[800px] border-r-0' : 'dashboard-chat-panel-open flex-[2] min-w-0 border-r border-gray-200/80 dark:border-gray-800'} flex flex-col overflow-hidden bg-white dark:bg-[#111217] relative`}
               >
                 <div className='flex-1 min-h-0 overflow-y-auto'>
                   {rounds.map((round, roundIndex) => {
@@ -3686,7 +3684,7 @@ const Playground: NextPage = () => {
                 </Tooltip>
               </div>
               <div
-                className={`dashboard-chat-context-panel ${rightPanelCollapsed ? 'w-0 min-w-0 overflow-hidden opacity-0' : 'flex-[3] min-w-0 overflow-hidden'} bg-[#f8f8fb] dark:bg-[#0f1114] flex flex-col transition-all duration-300`}
+                className={`dashboard-chat-context-panel ${rightPanelCollapsed ? 'w-0 min-w-0 overflow-hidden opacity-0 invisible' : 'flex-[3] min-w-0 overflow-hidden'} bg-[#f8f8fb] dark:bg-[#0f1114] flex flex-col`}
               >
                 {(() => {
                   const activeViewMsg = messages.find(m => m.id === selectedViewMsgId && m.role === 'view');

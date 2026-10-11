@@ -39,3 +39,5 @@ def test_scene_query_service_returns_scene_result():
     assert result.status == "succeeded"
     assert result.row_count == 1
     assert result.rows[0]["contract_amount"] == 10
+    assert result.sql and "vw_contracts" in result.sql
+    assert result.sql_explanation and result.sql_explanation["source"] == "vw_contracts"

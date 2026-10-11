@@ -148,6 +148,10 @@ async def test_ask_data_query_reuses_success_in_same_turn_before_sql(monkeypatch
                     "row_count": 1,
                     "columns": [{"key": "project_name"}],
                     "rows": [{"project_name": "项目A"}],
+                    "sql_explanation": {
+                        "summary": "按项目名称返回明细行。",
+                        "source": "vw_projects",
+                    },
                 }
             ],
             "errors": [],
@@ -172,6 +176,8 @@ async def test_ask_data_query_reuses_success_in_same_turn_before_sql(monkeypatch
     assert calls["build_sql"] == 1
     assert calls["execute"] == 1
     assert first_payload["query_complete"] is True
+    assert first_payload["scenes"][0]["data_caliber"]["source"] == "vw_projects"
+    assert first_payload["analysis_guidance_for_final_answer"]
     assert second_payload["reused"] is True
     assert second_payload["call_id"] == first_payload["call_id"]
     assert calls["idempotency_key"] == _ask_data_idempotency_key(

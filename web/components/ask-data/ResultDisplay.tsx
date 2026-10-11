@@ -1,5 +1,5 @@
 import type { AskDataQueryResponse, SceneResult } from '@/utils/ask-data';
-import { Alert, Card, Descriptions, Empty, Table, Tag, Typography } from 'antd';
+import { Alert, Card, Collapse, Descriptions, Empty, Table, Tag, Typography } from 'antd';
 
 const renderTable = (rows: Array<Record<string, unknown>>, columns?: Array<{ key: string; name?: string }>) => {
   const keys = columns?.length
@@ -49,6 +49,78 @@ function SceneResultTables({ results }: { results?: SceneResult[] }) {
             <Alert key={warning} className='mb-2' type='warning' showIcon message={warning} />
           ))}
           {item.rows?.length ? renderTable(item.rows, item.columns) : <Empty description='该场景没有可展示的明细行' />}
+          {item.sql_explanation && (
+            <Card className='mt-3' size='small' title='数据口径说明'>
+              <div className='flex flex-col gap-3'>
+                <Typography.Paragraph className='!mb-0 whitespace-pre-wrap'>
+                  {item.sql_explanation.summary}
+                </Typography.Paragraph>
+                <Descriptions
+                  size='small'
+                  column={{ xs: 1, md: 2 }}
+                  items={[
+                    {
+                      key: 'source',
+                      label: '数据来源',
+                      children: item.sql_explanation.source_label ?? item.sql_explanation.source ?? '-',
+                    },
+                    {
+                      key: 'grain',
+                      label: '每行代表',
+                      children: item.sql_explanation.grain_description ?? item.sql_explanation.grain?.join('、') ?? '-',
+                    },
+                    {
+                      key: 'filters',
+                      label: '统计范围',
+                      children: item.sql_explanation.filters?.join('；') || '无额外筛选',
+                    },
+                    {
+                      key: 'time_scope',
+                      label: '时间范围',
+                      children: item.sql_explanation.time_scope?.join('；') || '未识别到时间条件',
+                    },
+                  ]}
+                />
+                {!!item.sql_explanation.metrics?.length && (
+                  <div>
+                    <Typography.Text strong>数字怎么算</Typography.Text>
+                    <ul className='mb-0 mt-1 pl-5'>
+                      {item.sql_explanation.metrics.map(metric => (
+                        <li key={`${metric.key}-${metric.expression ?? ''}`}>
+                          {metric.definition ?? metric.label ?? metric.key}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {!!item.sql_explanation.business_rules?.length && (
+                  <div>
+                    <Typography.Text strong>需要注意</Typography.Text>
+                    <ul className='mb-0 mt-1 pl-5'>
+                      {item.sql_explanation.business_rules.map(rule => (
+                        <li key={rule}>{rule}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {item.sql && (
+                  <Collapse
+                    items={[
+                      {
+                        key: 'sql',
+                        label: '查看技术细节（SQL）',
+                        children: (
+                          <Typography.Text code className='block whitespace-pre-wrap'>
+                            {item.sql}
+                          </Typography.Text>
+                        ),
+                      },
+                    ]}
+                  />
+                )}
+              </div>
+            </Card>
+          )}
         </div>
       ))}
     </div>
