@@ -3,7 +3,14 @@ from concurrent.futures import Executor
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, AsyncIterator, Dict, List, Optional, Type, Union
 
-from dbgpt.core import MessageConverter, ModelMetadata, ModelOutput, ModelRequest
+from dbgpt.core import (
+    DEFAULT_REASONING_EFFORT,
+    MessageConverter,
+    ModelMetadata,
+    ModelOutput,
+    ModelRequest,
+    resolve_reasoning_effort,
+)
 from dbgpt.core.awel.flow import (
     TAGS_ORDER_HIGH,
     Parameter,
@@ -31,7 +38,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-_QWEN38_DEFAULT_REASONING_EFFORT = "xhigh"
 _QWEN38_REASONING_EFFORTS = {"low", "medium", "xhigh"}
 _QWEN38_REASONING_EFFORT_ALIASES = {
     "low": "low",
@@ -53,8 +59,11 @@ def _is_qwen38_model(model: Optional[str]) -> bool:
 
 
 def _normalize_qwen38_reasoning_effort(value: Any) -> str:
-    if value is None or str(value).strip() == "":
-        return _QWEN38_DEFAULT_REASONING_EFFORT
+    if value is None:
+        return DEFAULT_REASONING_EFFORT
+
+    if str(value).strip() == "":
+        raise ValueError("Qwen3.8 reasoning_effort must not be empty")
 
     raw_effort = str(value).strip().lower()
     effort = _QWEN38_REASONING_EFFORT_ALIASES.get(raw_effort)
@@ -63,12 +72,10 @@ def _normalize_qwen38_reasoning_effort(value: Any) -> str:
     if raw_effort in _QWEN38_REASONING_EFFORTS:
         return raw_effort
 
-    logger.warning(
-        "Unsupported Qwen3.8 reasoning_effort %r; using %s",
-        value,
-        _QWEN38_DEFAULT_REASONING_EFFORT,
+    raise ValueError(
+        f"Unsupported Qwen3.8 reasoning_effort {value!r}; "
+        "supported values are low, medium, and xhigh"
     )
-    return _QWEN38_DEFAULT_REASONING_EFFORT
 
 
 def _normalize_optional_bool(value: Any) -> Optional[bool]:
@@ -366,6 +373,16 @@ class OpenAILLMClient(ProxyLLMClient):
             payload["stop"] = request.stop
         if request.top_p:
             payload["top_p"] = request.top_p
+        if request.reasoning_effort is not None:
+            payload["reasoning_effort"] = request.reasoning_effort
+        request_extra = request.context.extra if request.context else None
+        if isinstance(request_extra, dict):
+            for key in ("enable_thinking", "reasoning_effort", "thinking_budget"):
+                if key in request_extra and not (
+                    key == "reasoning_effort"
+                    and request.reasoning_effort is not None
+                ):
+                    payload[key] = request_extra[key]
         self._apply_qwen38_thinking_config(payload)
         return payload
 
@@ -373,6 +390,13 @@ class OpenAILLMClient(ProxyLLMClient):
         """Normalize Qwen3.8 thinking parameters for OpenAI-compatible APIs."""
         model = payload.get("model") or self.default_model
         if not _is_qwen38_model(model):
+            if (
+                "reasoning_effort" not in payload
+                and self._openai_compatible_reasoning_effort is not None
+            ):
+                payload["reasoning_effort"] = (
+                    self._openai_compatible_reasoning_effort
+                )
             return
 
         raw_extra_body = payload.get("extra_body")
@@ -385,7 +409,9 @@ class OpenAILLMClient(ProxyLLMClient):
             extra_body = {}
 
         for key in ("enable_thinking", "reasoning_effort", "thinking_budget"):
-            if key in payload and key not in extra_body:
+            if key in payload and (
+                key == "reasoning_effort" or key not in extra_body
+            ):
                 extra_body[key] = payload[key]
             payload.pop(key, None)
 
@@ -404,10 +430,15 @@ class OpenAILLMClient(ProxyLLMClient):
         configured_effort = self._openai_compatible_reasoning_effort
         configured_budget = self._openai_compatible_thinking_budget
 
-        if "reasoning_effort" not in extra_body and configured_effort is not None:
-            extra_body["reasoning_effort"] = configured_effort
         if "thinking_budget" not in extra_body and configured_budget is not None:
             extra_body["thinking_budget"] = configured_budget
+        if "reasoning_effort" not in extra_body and (
+            configured_effort is not None or "thinking_budget" not in extra_body
+        ):
+            extra_body["reasoning_effort"] = resolve_reasoning_effort(
+                requested=None,
+                configured=configured_effort,
+            )
 
         if "reasoning_effort" in extra_body:
             extra_body["reasoning_effort"] = _normalize_qwen38_reasoning_effort(
@@ -420,9 +451,6 @@ class OpenAILLMClient(ProxyLLMClient):
                     model,
                 )
                 extra_body.pop("thinking_budget", None)
-        elif "thinking_budget" not in extra_body:
-            extra_body["reasoning_effort"] = _QWEN38_DEFAULT_REASONING_EFFORT
-
         payload["extra_body"] = extra_body
 
     async def generate(

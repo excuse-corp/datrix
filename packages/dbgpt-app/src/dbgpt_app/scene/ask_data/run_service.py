@@ -40,6 +40,7 @@ class RunExecutionService:
         max_agents: int | None = None,
         entry_type: str = "main_agent",
         sql_by_task: dict[str, str] | None = None,
+        on_task_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> tuple[QueryRun, QueryRunResult]:
         if idempotency_key:
             existing = self.repository.find_by_idempotency(user_id, idempotency_key)
@@ -129,6 +130,8 @@ class RunExecutionService:
                 execute_kwargs["max_agents"] = max_agents
             if sql_by_task is not None:
                 execute_kwargs["sql_by_task"] = sql_by_task
+            if on_task_event is not None:
+                execute_kwargs["on_task_event"] = on_task_event
             result = await self.orchestrator.execute(**execute_kwargs)
         except Exception as exc:
             result = QueryRunResult(

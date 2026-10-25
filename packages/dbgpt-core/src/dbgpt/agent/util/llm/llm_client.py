@@ -60,6 +60,7 @@ class AIWrapper:
         "sender",
         "stream_out",
         "stream_callback",
+        "reasoning_effort",
     }
 
     def __init__(
@@ -168,6 +169,7 @@ class AIWrapper:
         sender = extra_kwargs.get("sender", None)
         stream_out = extra_kwargs.get("stream_out", True)
         stream_callback = extra_kwargs.get("stream_callback")
+        reasoning_effort = extra_kwargs.get("reasoning_effort")
 
         try:
             response = await self._completions_create(
@@ -179,6 +181,7 @@ class AIWrapper:
                 stream_out,
                 verbose,
                 stream_callback,
+                reasoning_effort,
             )
         except LLMChatError as e:
             logger.debug(f"{llm_model} generate failed!{str(e)}")
@@ -217,6 +220,7 @@ class AIWrapper:
         stream_out: bool = True,
         verbose: bool = False,
         stream_callback: Optional[Callable[[Dict[str, Any]], Any]] = None,
+        reasoning_effort: Optional[str] = None,
     ):
         payload = {
             "model": llm_model,
@@ -225,6 +229,7 @@ class AIWrapper:
             "temperature": float(params.get("temperature")),
             "max_new_tokens": int(params.get("max_new_tokens")),
             "echo": self.llm_echo,
+            "reasoning_effort": reasoning_effort,
         }
         logger.info(f"Request: \n{payload}")
         span = root_tracer.start_span(

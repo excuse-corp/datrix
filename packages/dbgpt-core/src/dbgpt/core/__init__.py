@@ -14,6 +14,7 @@ from dbgpt.core.interface.embeddings import (  # noqa: F401
 )
 from dbgpt.core.interface.knowledge import Chunk, Document  # noqa: F401
 from dbgpt.core.interface.llm import (  # noqa: F401
+    DEFAULT_REASONING_EFFORT,
     DefaultMessageConverter,
     LLMClient,
     MessageConverter,
@@ -23,6 +24,7 @@ from dbgpt.core.interface.llm import (  # noqa: F401
     ModelOutput,
     ModelRequest,
     ModelRequestContext,
+    resolve_reasoning_effort,
 )
 from dbgpt.core.interface.message import (  # noqa: F401
     AIMessage,
@@ -67,6 +69,8 @@ __ALL__ = [
     "ModelInferenceMetrics",
     "ModelRequest",
     "ModelRequestContext",
+    "DEFAULT_REASONING_EFFORT",
+    "resolve_reasoning_effort",
     "ModelOutput",
     "ModelMetadata",
     "ModelMessage",

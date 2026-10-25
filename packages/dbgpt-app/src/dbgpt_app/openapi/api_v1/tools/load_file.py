@@ -9,7 +9,10 @@ from dbgpt.agent.resource.tool.base import tool
 def make_load_file(react_state: Dict[str, Any]):
     @tool(description="Load uploaded file info if provided.")
     def load_file() -> str:
-        if not react_state.get("file_path"):
+        file_paths = react_state.get("file_paths") or (
+            [react_state["file_path"]] if react_state.get("file_path") else []
+        )
+        if not file_paths:
             return json.dumps(
                 {"chunks": [{"output_type": "text", "content": "No file uploaded"}]},
                 ensure_ascii=False,
@@ -17,10 +20,13 @@ def make_load_file(react_state: Dict[str, Any]):
         return json.dumps(
             {
                 "chunks": [
-                    {"output_type": "text", "content": react_state["file_path"]},
+                    {"output_type": "text", "content": path}
+                    for path in file_paths
+                ]
+                + [
                     {
                         "output_type": "text",
-                        "content": "File path provided by user upload",
+                        "content": "File paths provided by user upload",
                     },
                 ]
             },

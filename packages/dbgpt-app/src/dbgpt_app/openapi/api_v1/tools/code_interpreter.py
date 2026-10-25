@@ -103,6 +103,9 @@ def make_code_interpreter(react_state: Dict[str, Any]):
         fp = react_state.get("file_path")
         if fp:
             preamble_lines.append(f'FILE_PATH = r"{fp}"')
+        file_paths = react_state.get("file_paths") or ([fp] if fp else [])
+        if file_paths:
+            preamble_lines.append(f"FILE_PATHS = {json.dumps(file_paths)}")
         preamble = "\n".join(preamble_lines) + "\n"
         full_code = preamble + code
 

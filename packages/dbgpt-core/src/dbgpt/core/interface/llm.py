@@ -28,6 +28,19 @@ from dbgpt.util.model_utils import GPUInfo
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_REASONING_EFFORT = "xhigh"
+
+
+def resolve_reasoning_effort(
+    requested: Optional[str], configured: Optional[str] = None
+) -> str:
+    """Resolve the reasoning effort for one model request."""
+    if requested is not None:
+        return requested
+    if configured is not None:
+        return configured
+    return DEFAULT_REASONING_EFFORT
+
 
 @dataclass
 @PublicAPI(stability="beta")
@@ -470,6 +483,9 @@ class ModelRequest:
         default_factory=lambda: ModelRequestContext()
     )
     """The context of the model inference."""
+
+    reasoning_effort: Optional[str] = None
+    """The requested reasoning effort for this inference, if any."""
 
     @property
     def stream(self) -> bool:

@@ -6,7 +6,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional, Type
 
 from dbgpt._private.pydantic import BaseModel, ConfigDict, Field
-from dbgpt.core import LLMClient, ModelMetadata, ModelRequest
+from dbgpt.core import LLMClient, ModelMetadata, ModelRequest, ModelRequestContext
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +24,7 @@ def _build_model_request(input_value: Dict) -> ModelRequest:
         "model": input_value.get("model"),
         "messages": input_value.get("messages"),
         "temperature": input_value.get("temperature", None),
+        "reasoning_effort": input_value.get("reasoning_effort", None),
         "max_new_tokens": input_value.get("max_new_tokens", None),
         "stop": input_value.get("stop", None),
         "stop_token_ids": input_value.get("stop_token_ids", None),
@@ -31,6 +32,11 @@ def _build_model_request(input_value: Dict) -> ModelRequest:
         "echo": input_value.get("echo", None),
         "span_id": input_value.get("span_id", None),
     }
+    context = input_value.get("context")
+    if isinstance(context, dict):
+        context = ModelRequestContext(**context)
+    if isinstance(context, ModelRequestContext):
+        parm["context"] = context
 
     return ModelRequest(**parm)
 

@@ -51,6 +51,9 @@ import { useRouter } from 'next/router';
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+const MAX_CHAT_UPLOAD_FILES = 5;
+const MAX_CHAT_UPLOAD_FILE_SIZE_BYTES = 30 * 1024 * 1024;
+
 const generateUUID = () => {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
     const r = (Math.random() * 16) | 0;
@@ -162,8 +165,12 @@ const hasAskDataSceneReference = (...values: unknown[]): boolean =>
 const getAskDataStageDisplay = (stage?: unknown, sceneNameById: AskDataSceneNameLookup = {}): string => {
   const stageText = textValue(stage);
   if (!stageText) return '';
+  if (stageText === 'query') return '业务问数';
   if (stageText === 'routing') return '业务场景语义选择';
   if (stageText === 'planning') return '业务场景规划';
+  if (stageText === 'sql_gen') return 'SQL 生成';
+  if (stageText === 'sql_exec') return 'SQL 执行';
+  if (stageText === 'formatting') return '查询结果整理';
   if (stageText === 'querying') return '场景 SQL 执行';
 
   const sceneId = getAskDataStageSceneId(stageText);
@@ -191,6 +198,7 @@ const formatAskDataStageOutput = (
     duration_ms?: number;
     scene?: any;
     resultPayload?: any;
+    error?: any;
   },
   sceneNameById: AskDataSceneNameLookup = {},
 ): string => {
@@ -235,7 +243,12 @@ const formatAskDataStageOutput = (
   if (resultPayload && typeof resultPayload === 'object') {
     if (resultPayload.query_id) lines.push(`- Query ID：\`${resultPayload.query_id}\``);
     if (resultPayload.request_id) lines.push(`- Request ID：\`${resultPayload.request_id}\``);
+    if (resultPayload.status) lines.push(`- 查询状态：\`${resultPayload.status}\``);
+    if (resultPayload.result_count !== undefined) lines.push(`- 成功任务数：${resultPayload.result_count}`);
+    if (resultPayload.error_count !== undefined) lines.push(`- 失败任务数：${resultPayload.error_count}`);
   }
+  const stageError = stage.error?.message || stage.error;
+  if (stageError) lines.push(`- 错误：${stageError}`);
   return lines.join('\n');
 };
 
@@ -248,6 +261,7 @@ const buildAskDataStageOutput = (
     duration_ms?: number;
     scene?: any;
     resultPayload?: any;
+    error?: any;
   },
   sceneNameById: AskDataSceneNameLookup = {},
 ): ExecutionOutput[] => [
@@ -257,16 +271,21 @@ const buildAskDataStageOutput = (
   },
 ];
 
-const formatStageDetailWithDuration = (detail?: string, durationMs?: number): string => {
-  const base = detail || 'AskData';
-  if (typeof durationMs !== 'number') return base;
-  return `${base} · 耗时 ${(durationMs / 1000).toFixed(2)} 秒`;
-};
-
 const getAskDataCallId = (payload: any): string =>
   String(payload?.call_id || payload?.query_id || 'legacy').replace(/[^a-zA-Z0-9_-]/g, '_');
 
 const getAskDataStageId = (callId: string, stage: unknown): string => `ask-data-${callId}-${String(stage || 'query')}`;
+
+const isAskDataFormattingStep = (step: any): boolean =>
+  String(step?.stage || '').toLowerCase() === 'formatting' ||
+  String(step?.id || '')
+    .toLowerCase()
+    .includes('-formatting');
+
+const isAskDataAwaitingFinalAnswer = (step: any): boolean =>
+  step?.stage === 'query' &&
+  step?.status === 'running' &&
+  ['succeeded', 'partial_succeeded'].includes(String(step?.result?.status || '').toLowerCase());
 
 const normalizeAskDataActionInput = (value: unknown): string => {
   if (value && typeof value === 'object') {
@@ -461,6 +480,67 @@ const mergeAskDataFallbackSteps = (
 ): any[] => {
   const safeRawSteps = Array.isArray(rawSteps) ? rawSteps : [];
   const payloadSceneNameById = buildAskDataSceneNameLookup(resultPayload, sceneNameById);
+  const callId = getAskDataCallId(resultPayload);
+  if (
+    safeRawSteps.some(
+      step =>
+        (step.askDataCallId || step.ask_data_call_id) === callId &&
+        typeof step.stage === 'string' &&
+        step.stage.length > 0,
+    )
+  ) {
+    let structuredSteps = safeRawSteps.filter(step => !isAskDataFormattingStep(step));
+    const structuredCallIds = Array.from(
+      new Set(
+        structuredSteps
+          .filter(step => typeof step.stage === 'string' && step.stage.length > 0)
+          .map(step => String(step.askDataCallId || step.ask_data_call_id || ''))
+          .filter(Boolean),
+      ),
+    );
+    structuredCallIds.forEach(structuredCallId => {
+      const operationIndex = structuredSteps.findIndex(
+        step =>
+          String(step.action || '').toLowerCase() === 'ask_data_query' &&
+          String(step.askDataCallId || step.ask_data_call_id || '') === structuredCallId,
+      );
+      const stageNodes = structuredSteps.filter(
+        step =>
+          (step.askDataCallId || step.ask_data_call_id) === structuredCallId &&
+          typeof step.stage === 'string' &&
+          step.stage.length > 0,
+      );
+      if (operationIndex < 0 || !stageNodes.length) return;
+      const firstStageIndex = Math.min(...stageNodes.map(step => structuredSteps.indexOf(step)));
+      if (operationIndex < firstStageIndex) return;
+      const operation = structuredSteps[operationIndex];
+      const groupedSteps = new Set([operation, ...stageNodes]);
+      const insertIndex = structuredSteps.slice(0, firstStageIndex).filter(step => !groupedSteps.has(step)).length;
+      structuredSteps = structuredSteps.filter(step => !groupedSteps.has(step));
+      structuredSteps.splice(insertIndex, 0, operation, ...stageNodes);
+    });
+    const resultScenes = getAskDataSceneResults(resultPayload);
+    const resultRowCount = resultScenes.reduce(
+      (total: number, scene: any) => total + (Number(scene?.row_count) || 0),
+      0,
+    );
+    return structuredSteps.map((step, idx) => {
+      const normalizedStep = normalizeAskDataStepRecord({ ...step, step: idx + 1 }, payloadSceneNameById);
+      if (
+        step.stage === 'query' &&
+        String(step.askDataCallId || step.ask_data_call_id || '') === callId &&
+        ['succeeded', 'partial_succeeded'].includes(String(resultPayload.status || '').toLowerCase())
+      ) {
+        return {
+          ...normalizedStep,
+          title: String(resultPayload.status || '').toLowerCase() === 'partial_succeeded' ? '查询部分成功' : '查询成功',
+          detail: `返回 ${resultScenes.length} 个场景、${resultRowCount} 行结果`,
+          status: 'done',
+        };
+      }
+      return normalizedStep;
+    });
+  }
   const fallbackSteps = buildAskDataFallbackSteps(resultPayload, payloadSceneNameById);
   if (!fallbackSteps.length) {
     return safeRawSteps.map((step, idx) =>
@@ -483,7 +563,6 @@ const mergeAskDataFallbackSteps = (
     );
   });
   const rawWithoutFallback = safeRawSteps.filter(step => !fallbackIds.has(String(step?.id || '')));
-  const callId = getAskDataCallId(resultPayload);
   const askDataStepIndex = rawWithoutFallback.findIndex(
     step =>
       String(step?.action || '').toLowerCase() === 'ask_data_query' &&
@@ -578,6 +657,24 @@ interface FileAttachment {
   name: string;
   size: number;
   type: string;
+  attachment_id?: string;
+  format?: string;
+  parse_status?: string;
+  parse_warnings?: string[];
+  block_count?: number;
+  page_count?: number;
+  slide_count?: number;
+}
+
+interface UploadedAttachment {
+  attachment_id: string;
+  filename: string;
+  size_bytes: number;
+  mime_type?: string | null;
+  sha256?: string;
+  storage_path: string;
+  status?: string;
+  format?: string | null;
 }
 
 // Define message type for chat
@@ -599,6 +696,7 @@ interface ChatMessage {
   order?: number;
   thinking?: boolean;
   attachedFile?: FileAttachment;
+  attachedFiles?: FileAttachment[];
   attachedKnowledge?: {
     id: number;
     name: string;
@@ -710,6 +808,15 @@ interface ExecutionStep {
   askDataCallId?: string;
   askDataReused?: boolean;
   parentId?: string;
+  stage?: string;
+  scope?: string;
+  taskId?: string;
+  startedAt?: string;
+  endedAt?: string;
+  durationMs?: number;
+  result?: Record<string, any> | null;
+  error?: Record<string, any> | null;
+  scene?: Record<string, any> | null;
   todoMeta?: {
     state?: 'init' | 'progress' | 'done';
     done?: number;
@@ -730,6 +837,8 @@ interface ActiveRun {
   runId: string;
   cancelled: boolean;
   pendingQuestionRequestId?: string | null;
+  taskPlanVersion?: { planId: string; revision: number; sequence: number };
+  seenTaskPlanIds: Set<string>;
 }
 
 const CANCELLED_RESPONSE_TEXT = '任务已取消。';
@@ -951,6 +1060,13 @@ const convertToManusFormat = (
   // In a more advanced version, you could group by phase/category
   const steps: ManusExecutionStep[] = execution.steps
     .filter(step => {
+      const action = String(step.action || '').toLowerCase();
+      if (action === 'ask_data_query' && step.askDataCallId) {
+        const hasQueryStage = execution.steps.some(
+          candidate => candidate.stage === 'query' && candidate.askDataCallId === step.askDataCallId,
+        );
+        if (hasQueryStage) return false;
+      }
       const detail = (step.detail || '').toLowerCase();
       return !detail.includes('action: terminate') && !isCompletedThinkingPlaceholder(step);
     })
@@ -965,6 +1081,8 @@ const convertToManusFormat = (
         description: cleanDetail || undefined,
         phase: (displayStep as any).phase,
         status: getStepStatus(step.status),
+        durationMs: step.durationMs,
+        startedAt: step.startedAt,
       };
     });
 
@@ -1062,7 +1180,8 @@ const Playground: NextPage = () => {
   }, [router.query.q]);
 
   // Contexts
-  const [uploadedFile, setUploadedFile] = useState<any | null>(null);
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const uploadedFilesRef = useRef<File[]>([]);
 
   // Chat messages state
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -1155,7 +1274,8 @@ const Playground: NextPage = () => {
     setExecutionMap({});
     setActiveMessageId(null);
     setActiveViewMsgId(null);
-    setUploadedFile(null);
+    uploadedFilesRef.current = [];
+    setUploadedFiles([]);
     setUploadedFilePath(null);
     setFilePreview(null);
     setFilePreviewError(null);
@@ -1440,7 +1560,7 @@ const Playground: NextPage = () => {
             const columns = Object.keys(parsed[0] || {});
             setFilePreview({
               kind: 'table',
-              file_name: uploadedFile?.name,
+              file_name: uploadedFiles[0]?.name,
               file_path: uploadedFilePath,
               columns,
               rows: parsed.slice(0, 50),
@@ -1449,14 +1569,14 @@ const Playground: NextPage = () => {
           } else if (typeof parsed === 'string') {
             setFilePreview({
               kind: 'text',
-              file_name: uploadedFile?.name,
+              file_name: uploadedFiles[0]?.name,
               file_path: uploadedFilePath,
               text: parsed,
             });
           } else {
             setFilePreview({
               kind: 'text',
-              file_name: uploadedFile?.name,
+              file_name: uploadedFiles[0]?.name,
               file_path: uploadedFilePath,
               text: JSON.stringify(parsed, null, 2),
             });
@@ -1471,7 +1591,7 @@ const Playground: NextPage = () => {
       }
     };
     loadPreview();
-  }, [uploadedFilePath, conversationId, uploadedFile]);
+  }, [uploadedFilePath, conversationId, uploadedFiles]);
 
   useEffect(() => {
     if (!filePreview || filePreview.kind !== 'table') {
@@ -2084,59 +2204,103 @@ const Playground: NextPage = () => {
     return deduped;
   };
 
-  const handleStart = async (inputQuery = query, overrideFile?: File | null, overrideSkill?: Skill | null) => {
-    const effectiveFile = overrideFile !== undefined ? overrideFile : uploadedFile;
+  const handleStart = async (inputQuery = query, overrideFiles?: File[] | null, overrideSkill?: Skill | null) => {
+    const effectiveFiles = overrideFiles !== undefined ? overrideFiles || [] : uploadedFiles;
     const effectiveSkill = overrideSkill !== undefined ? overrideSkill : selectedSkill;
     if (loading) {
       handleCancelRun();
       return;
     }
-    if (!inputQuery.trim() && !effectiveFile) return;
+    if (!inputQuery.trim() && effectiveFiles.length === 0) return;
 
     let finalQuery = inputQuery;
     const appCode = 'chat_react_agent';
     const chatMode = 'chat_react_agent';
-    let currentUploadedFilePath = null;
+    let currentUploadedFilePaths: string[] = [];
+    let currentUploadedAttachments: UploadedAttachment[] = [];
 
     // Handle File Upload if present
     if (preloadedFilePathRef.current) {
       // Example file already copied to server - skip upload
-      currentUploadedFilePath = preloadedFilePathRef.current;
-      setUploadedFilePath(currentUploadedFilePath);
+      currentUploadedFilePaths = [preloadedFilePathRef.current];
+      currentUploadedAttachments = [
+        {
+          attachment_id: `att_legacy_${Date.now()}`,
+          filename: preloadedFilePathRef.current.split(/[\\/]/).pop() || 'attachment',
+          size_bytes: 0,
+          storage_path: preloadedFilePathRef.current,
+        },
+      ];
+      setUploadedFilePath(currentUploadedFilePaths[0]);
       preloadedFilePathRef.current = null;
       finalQuery = inputQuery || 'Analyze the uploaded file.';
-    } else if (effectiveFile) {
+    } else if (effectiveFiles.length > 0) {
       const formData = new FormData();
-      formData.append('file', effectiveFile);
+      effectiveFiles.forEach(file => formData.append('files', file));
 
       try {
-        const uploadRes = await axios.post(`${process.env.API_BASE_URL ?? ''}/api/v1/python/file/upload`, formData, {
+        const uploadRes = await axios.post(`${process.env.API_BASE_URL ?? ''}/api/v1/python/files/upload`, formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
         });
 
-        const resData = uploadRes.data;
-        // Handle both wrapped Result {success, data} and raw string path
-        if (resData?.success && resData?.data) {
-          currentUploadedFilePath = resData.data;
-          setUploadedFilePath(currentUploadedFilePath);
-          finalQuery = inputQuery || 'Analyze the uploaded Excel file.';
-        } else if (typeof resData === 'string' && resData.length > 0) {
-          // Backend returned the file path directly as a string
-          currentUploadedFilePath = resData;
-          setUploadedFilePath(currentUploadedFilePath);
-          finalQuery = inputQuery || 'Analyze the uploaded Excel file.';
+        const rawResponse = uploadRes.data;
+        let resData = Array.isArray(rawResponse)
+          ? { success: true, data: rawResponse }
+          : typeof rawResponse === 'string'
+            ? { success: true, data: [rawResponse] }
+            : rawResponse;
+        if (
+          resData?.success === undefined &&
+          resData?.data &&
+          typeof resData.data === 'object' &&
+          !Array.isArray(resData.data)
+        ) {
+          resData = resData.data;
+        }
+        const responseAttachments = Array.isArray(resData?.attachments) ? resData.attachments : [];
+        const responsePaths = Array.isArray(resData?.data)
+          ? resData.data
+          : typeof resData?.data === 'string' && resData.data
+            ? [resData.data]
+            : Array.isArray(resData?.file_paths)
+              ? resData.file_paths
+              : resData?.file_path
+                ? [resData.file_path]
+                : responseAttachments.map((item: UploadedAttachment) => item.storage_path);
+        if (resData?.success !== false && responsePaths.length > 0) {
+          currentUploadedFilePaths = responsePaths;
+          currentUploadedAttachments =
+            responseAttachments.length > 0
+              ? responseAttachments
+              : responsePaths.map((path: string) => ({
+                  attachment_id: `att_legacy_${path}`,
+                  filename: path.split(/[\\/]/).pop() || 'attachment',
+                  size_bytes: 0,
+                  storage_path: path,
+                }));
+          setUploadedFilePath(currentUploadedFilePaths[0]);
+          finalQuery = inputQuery || 'Analyze the uploaded files.';
         } else {
-          const errMsg = resData?.err_msg || resData?.message || 'Unknown error';
+          console.error('[Upload] unexpected response:', uploadRes.status, rawResponse);
+          const responseError = resData?.err_msg || resData?.message || resData?.detail;
+          const errMsg =
+            (responseError && responseError !== 'Unknown error' && responseError) ||
+            `HTTP ${uploadRes.status}: ${JSON.stringify(rawResponse) || 'upload response contained no file path'}`;
           message.error('File upload failed: ' + errMsg);
           return;
         }
       } catch (uploadErr: any) {
         console.error('[Upload] error:', uploadErr);
+        const status = uploadErr?.response?.status;
+        const responseError =
+          uploadErr?.response?.data?.err_msg || uploadErr?.response?.data?.message || uploadErr?.response?.data?.detail;
         const errDetail =
-          uploadErr?.response?.data?.err_msg ||
-          uploadErr?.response?.data?.message ||
-          uploadErr?.message ||
-          'Network error';
+          (responseError && responseError !== 'Unknown error' && responseError) ||
+          (status
+            ? `HTTP ${status}: ${uploadErr?.message || 'upload request failed'}`
+            : uploadErr?.message && uploadErr.message !== 'Unknown error'
+              ? uploadErr.message
+              : 'No upload response received; inspect the browser Network panel.');
         message.error('File upload failed: ' + errDetail);
         return;
       }
@@ -2173,13 +2337,22 @@ const Playground: NextPage = () => {
         role: 'human',
         context: inputQuery,
         order: currentOrder,
-        attachedFile: effectiveFile
+        attachedFile: effectiveFiles[0]
           ? {
-              name: effectiveFile.name,
-              size: effectiveFile.size,
-              type: effectiveFile.type,
+              name: effectiveFiles[0].name,
+              size: effectiveFiles[0].size,
+              type: effectiveFiles[0].type,
+              attachment_id: currentUploadedAttachments[0]?.attachment_id,
+              format: currentUploadedAttachments[0]?.format || undefined,
             }
           : undefined,
+        attachedFiles: effectiveFiles.map((file, index) => ({
+          name: file.name,
+          size: file.size,
+          type: file.type,
+          attachment_id: currentUploadedAttachments[index]?.attachment_id,
+          format: currentUploadedAttachments[index]?.format || undefined,
+        })),
         attachedSkill: effectiveSkill ? { name: effectiveSkill.name, id: effectiveSkill.id } : undefined,
         attachedConnectors:
           selectedConnectors.length > 0
@@ -2213,6 +2386,7 @@ const Playground: NextPage = () => {
       responseId,
       runId,
       cancelled: false,
+      seenTaskPlanIds: new Set(),
     };
     activeRunRef.current = activeRun;
 
@@ -2274,7 +2448,13 @@ const Playground: NextPage = () => {
     // Build ext_info once so file, skill, and connector context stays stable during this send.
     const extInfo: Record<string, any> = {
       client_run_id: runId,
-      ...(currentUploadedFilePath ? { file_path: currentUploadedFilePath } : {}),
+      ...(currentUploadedFilePaths.length > 0
+        ? {
+            file_path: currentUploadedFilePaths[0],
+            file_paths: currentUploadedFilePaths,
+            attachments: currentUploadedAttachments,
+          }
+        : {}),
       ...(effectiveSkill ? { skill_id: effectiveSkill.id, skill_name: effectiveSkill.name } : {}),
       ...(selectedConnectors.length > 0 ? { connector_ids: selectedConnectors.map(c => c.id) } : {}),
     };
@@ -2342,9 +2522,42 @@ const Playground: NextPage = () => {
           persistContextStatus(nextContextStatus);
           return;
         }
+        if (payload.type === 'attachment.status') {
+          const statuses = Array.isArray(payload.attachments) ? payload.attachments : [];
+          setMessages(prev =>
+            prev.map(msg => {
+              if (msg.id !== humanId || msg.role !== 'human' || !msg.attachedFiles) return msg;
+              const nextFiles = msg.attachedFiles.map(file => {
+                const status = statuses.find(
+                  (item: any) => item.attachment_id && item.attachment_id === file.attachment_id,
+                );
+                return status
+                  ? {
+                      ...file,
+                      format: status.format || file.format,
+                      parse_status: status.status,
+                      parse_warnings: status.warnings || [],
+                      block_count: status.block_count,
+                      page_count: status.page_count,
+                      slide_count: status.slide_count,
+                    }
+                  : file;
+              });
+              return {
+                ...msg,
+                attachedFiles: nextFiles,
+                attachedFile: nextFiles[0],
+              };
+            }),
+          );
+          return;
+        }
         if (payload.type === 'ask_data.stage') {
           const callId = getAskDataCallId(payload);
-          const id = getAskDataStageId(callId, payload.stage);
+          const isQueryLifecycleStage = ['query', 'formatting'].includes(String(payload.stage || ''));
+          const id = isQueryLifecycleStage
+            ? getAskDataStageId(callId, 'query')
+            : textValue(payload.node_id) || getAskDataStageId(callId, payload.stage);
           const eventSceneId = textValue(payload.scene_id);
           const eventSceneName = textValue(payload.scene_name || payload.name || payload.display_name);
           const sceneNameLookup =
@@ -2361,18 +2574,51 @@ const Playground: NextPage = () => {
           const stageStatus: ExecutionStep['status'] =
             payload.status === 'failed' || payload.status === 'error'
               ? 'failed'
-              : payload.status === 'done' || payload.status === 'succeeded'
-                ? 'done'
-                : 'running';
-          const stageDetail = formatStageDetailWithDuration(stageDetailText, payload.duration_ms);
+              : payload.status === 'cancelled'
+                ? 'cancelled'
+                : payload.status === 'done' || payload.status === 'succeeded' || payload.status === 'skipped'
+                  ? 'done'
+                  : payload.status && payload.status !== 'running'
+                    ? 'failed'
+                    : 'running';
+          const stageResultStatus = String(payload.result?.status || '').toLowerCase();
+          const waitingForFinalAnswer =
+            isQueryLifecycleStage &&
+            stageStatus === 'done' &&
+            (payload.stage === 'formatting' || ['succeeded', 'partial_succeeded'].includes(stageResultStatus));
+          const visibleStageStatus: ExecutionStep['status'] = waitingForFinalAnswer ? 'running' : stageStatus;
+          const visibleStageTitle = waitingForFinalAnswer
+            ? '查询成功，结果整理中'
+            : payload.stage === 'query' && stageStatus === 'running'
+              ? '正在查询业务数据'
+              : payload.stage === 'formatting' && stageStatus === 'running'
+                ? '查询成功，结果整理中'
+                : stageTitle;
+          const visibleStageDetail = waitingForFinalAnswer
+            ? payload.stage === 'formatting'
+              ? '查询结果已整理，正在组织最终答复'
+              : '查询完成，正在整理最终答复'
+            : payload.stage === 'formatting' && stageStatus === 'running'
+              ? '正在整理查询结果'
+              : stageDetailText;
+          const stageDetail = visibleStageDetail || 'AskData';
           const stageOutputs = buildAskDataStageOutput(
             {
               stage: payload.stage,
-              title: stageTitle,
-              detail: stageDetailText,
-              status: payload.status || stageStatus,
+              title: visibleStageTitle,
+              detail: visibleStageDetail,
+              status: visibleStageStatus,
               duration_ms: payload.duration_ms,
-              scene: eventSceneId ? { scene_id: eventSceneId, name: eventSceneName } : undefined,
+              scene: eventSceneId
+                ? {
+                    scene_id: eventSceneId,
+                    name: eventSceneName,
+                    ...(payload.result || {}),
+                    error: payload.error?.message,
+                  }
+                : undefined,
+              resultPayload: payload.result,
+              error: payload.error,
             },
             sceneNameLookup,
           );
@@ -2387,24 +2633,45 @@ const Playground: NextPage = () => {
             const steps = current.steps.some(step => step.id === id)
               ? current.steps.map(step =>
                   step.id === id
-                    ? { ...step, title: stageTitle, detail: stageDetail, status: stageStatus }
-                    : step.status === 'running'
-                      ? { ...step, status: 'done' as const }
-                      : step,
+                    ? {
+                        ...step,
+                        title: visibleStageTitle,
+                        detail: stageDetail,
+                        status: visibleStageStatus,
+                        stage: isQueryLifecycleStage ? 'query' : payload.stage,
+                        scope: payload.scope,
+                        taskId: payload.task_id,
+                        startedAt:
+                          isQueryLifecycleStage && payload.stage === 'formatting' ? step.startedAt : payload.started_at,
+                        endedAt: payload.ended_at,
+                        durationMs: typeof payload.duration_ms === 'number' ? payload.duration_ms : step.durationMs,
+                        result: payload.result || step.result,
+                        error: payload.error || step.error,
+                        scene: eventSceneId ? { scene_id: eventSceneId, name: eventSceneName } : step.scene,
+                      }
+                    : step,
                 )
               : [
-                  ...current.steps.map(step =>
-                    step.status === 'running' ? { ...step, status: 'done' as const } : step,
-                  ),
+                  ...current.steps,
                   {
                     id,
                     step: current.steps.length + 1,
-                    title: stageTitle || '正在查询业务数据',
+                    title: visibleStageTitle || '正在查询业务数据',
                     detail: stageDetail,
-                    status: stageStatus,
+                    status: visibleStageStatus,
                     action: getAskDataStageAction(),
                     askDataCallId: callId,
-                    parentId: `ask-data-${callId}`,
+                    parentId:
+                      payload.parent_node_id || (payload.stage !== 'query' ? `ask-data-${callId}-query` : undefined),
+                    stage: isQueryLifecycleStage ? 'query' : payload.stage,
+                    scope: payload.scope,
+                    taskId: payload.task_id,
+                    startedAt: payload.started_at,
+                    endedAt: payload.ended_at,
+                    durationMs: typeof payload.duration_ms === 'number' ? payload.duration_ms : undefined,
+                    result: payload.result,
+                    error: payload.error,
+                    scene: eventSceneId ? { scene_id: eventSceneId, name: eventSceneName } : undefined,
                   },
                 ];
             return {
@@ -2412,6 +2679,7 @@ const Playground: NextPage = () => {
               [responseId]: {
                 ...current,
                 steps,
+                activeStepId: isQueryLifecycleStage ? id : current.activeStepId,
                 outputs: {
                   ...current.outputs,
                   [id]: stageOutputs,
@@ -2426,6 +2694,13 @@ const Playground: NextPage = () => {
           const resultSceneNameById = buildAskDataSceneNameLookup(askDataResult, askDataSceneNameByIdRef.current);
           askDataSceneNameByIdRef.current = { ...askDataSceneNameByIdRef.current, ...resultSceneNameById };
           setAskDataSceneNameById(prev => ({ ...prev, ...resultSceneNameById }));
+          const resultScenes = getAskDataSceneResults(askDataResult);
+          const resultRowCount = resultScenes.reduce(
+            (total: number, scene: any) => total + (Number(scene?.row_count) || 0),
+            0,
+          );
+          const resultStatus = String(askDataResult.status || '').toLowerCase();
+          const queryNodeId = getAskDataStageId(getAskDataCallId(askDataResult), 'query');
           setExecutionMap(prev => {
             const current = prev[responseId];
             if (!current) return prev;
@@ -2443,23 +2718,57 @@ const Playground: NextPage = () => {
               },
               { ...current.outputs },
             );
+            if (['succeeded', 'partial_succeeded'].includes(resultStatus)) {
+              outputsWithAskDataStages[queryNodeId] = [
+                {
+                  output_type: 'markdown',
+                  content: '查询结果已返回，正在整理最终答复。',
+                },
+              ];
+            }
             return {
               ...prev,
               [responseId]: {
                 ...current,
-                steps: stepsWithAskDataStages.map(step =>
-                  step.action === 'ask_data_query' && step.status === 'running' ? { ...step, status: 'done' } : step,
-                ),
+                steps: stepsWithAskDataStages.map(step => {
+                  if (step.id === queryNodeId) {
+                    if (['succeeded', 'partial_succeeded'].includes(resultStatus)) {
+                      return {
+                        ...step,
+                        title:
+                          resultStatus === 'partial_succeeded' ? '查询部分成功，结果整理中' : '查询成功，结果整理中',
+                        detail: `已获取 ${resultScenes.length} 个场景、${resultRowCount} 行结果`,
+                        status: 'running',
+                        result: askDataResult,
+                      };
+                    }
+                    if (resultStatus === 'clarification_required') {
+                      return {
+                        ...step,
+                        title: '需要补充查询条件',
+                        detail: askDataResult.clarification?.question || '请补充查询条件',
+                        status: 'done',
+                        result: askDataResult,
+                      };
+                    }
+                    return {
+                      ...step,
+                      title: resultStatus === 'cancelled' ? '查询已取消' : '查询未完成',
+                      detail: askDataResult.errors?.[0]?.message || '请查看查询错误',
+                      status: resultStatus === 'cancelled' ? 'cancelled' : 'failed',
+                      result: askDataResult,
+                    };
+                  }
+                  return step.action === 'ask_data_query' && step.status === 'running'
+                    ? { ...step, status: 'done' }
+                    : step;
+                }),
                 outputs: outputsWithAskDataStages,
               },
             };
           });
           setMessages(prev =>
-            prev.map(msg =>
-              msg.id === responseId && msg.role === 'view'
-                ? { ...msg, askDataResult, context: askDataResult.answer || msg.context }
-                : msg,
-            ),
+            prev.map(msg => (msg.id === responseId && msg.role === 'view' ? { ...msg, askDataResult } : msg)),
           );
           return;
         }
@@ -2475,6 +2784,30 @@ const Playground: NextPage = () => {
         }
         if (payload.type === 'plan.update') {
           if (Array.isArray(payload.tasks)) {
+            const planId = typeof payload.plan_id === 'string' ? payload.plan_id : '';
+            const revision = Number(payload.revision);
+            const sequence = Number(payload.sequence);
+            const previousVersion = activeRun.taskPlanVersion;
+            if (planId && activeRun.seenTaskPlanIds.has(planId) && previousVersion?.planId !== planId) {
+              return;
+            }
+            if (
+              planId &&
+              previousVersion?.planId === planId &&
+              Number.isFinite(sequence) &&
+              (sequence <= previousVersion.sequence || revision < previousVersion.revision)
+            ) {
+              return;
+            }
+            if (planId) {
+              if (previousVersion?.planId && previousVersion.planId !== planId) {
+                activeRun.seenTaskPlanIds.add(previousVersion.planId);
+              }
+              activeRun.seenTaskPlanIds.add(planId);
+              if (Number.isFinite(revision) && Number.isFinite(sequence)) {
+                activeRun.taskPlanVersion = { planId, revision, sequence };
+              }
+            }
             const nextTasks = payload.tasks as TaskItem[];
             setTaskPlan(nextTasks);
             setMessages(prev =>
@@ -2525,14 +2858,18 @@ const Playground: NextPage = () => {
                       todoMeta: payload.todo_meta || step.todoMeta,
                       status: 'running' as const,
                     }
-                  : step.status === 'running'
+                  : step.status === 'running' && !isAskDataAwaitingFinalAnswer(step)
                     ? { ...step, status: 'done' as const }
                     : step,
               );
             } else {
               // New step - mark running steps as done and add new step
               nextSteps = [
-                ...current.steps.map(item => (item.status === 'running' ? { ...item, status: 'done' as const } : item)),
+                ...current.steps.map(item =>
+                  item.status === 'running' && !isAskDataAwaitingFinalAnswer(item)
+                    ? { ...item, status: 'done' as const }
+                    : item,
+                ),
                 {
                   id,
                   step: payload.step,
@@ -2607,6 +2944,7 @@ const Playground: NextPage = () => {
                 actionInput: payload.action_input || item.actionInput,
                 askDataCallId: payload.ask_data_call_id || item.askDataCallId,
                 askDataReused: Boolean(payload.ask_data_reused || item.askDataReused),
+                durationMs: typeof payload.duration_ms === 'number' ? payload.duration_ms : item.durationMs,
                 todoMeta: payload.todo_meta || item.todoMeta,
               };
             });
@@ -2745,13 +3083,74 @@ const Playground: NextPage = () => {
           }
         } else if (payload.type === 'final') {
           applyRunOutcome(payload);
-          const finalStepStatus =
+          const finalStepStatus: ExecutionStep['status'] =
             payload.status === 'failed' || payload.status === 'incomplete'
               ? 'failed'
               : payload.status === 'cancelled'
                 ? 'cancelled'
                 : 'done';
           settleResponseState(finalStepStatus);
+          setExecutionMap(prev => {
+            const current = prev[responseId];
+            if (!current) return prev;
+            const endedAt = new Date().toISOString();
+            const steps = current.steps.map(step => {
+              if (step.stage !== 'query' || !step.result) return step;
+              const result = step.result as AskDataQueryResponse;
+              const resultStatus = String(result.status || '').toLowerCase();
+              if (!['succeeded', 'partial_succeeded'].includes(resultStatus)) return step;
+              const resultScenes = getAskDataSceneResults(result);
+              const resultRowCount = resultScenes.reduce(
+                (total: number, scene: any) => total + (Number(scene?.row_count) || 0),
+                0,
+              );
+              const title =
+                finalStepStatus === 'done'
+                  ? resultStatus === 'partial_succeeded'
+                    ? '查询部分成功'
+                    : '查询成功'
+                  : finalStepStatus === 'cancelled'
+                    ? '查询已完成，答复已取消'
+                    : '查询成功，答复生成失败';
+              const startedAt = step.startedAt ? Date.parse(step.startedAt) : Number.NaN;
+              return {
+                ...step,
+                title,
+                detail: `返回 ${resultScenes.length} 个场景、${resultRowCount} 行结果`,
+                status: finalStepStatus,
+                endedAt,
+                durationMs: Number.isFinite(startedAt) ? Math.max(0, Date.parse(endedAt) - startedAt) : step.durationMs,
+              };
+            });
+            const completedQuerySteps = steps.filter(
+              step =>
+                step.stage === 'query' &&
+                ['succeeded', 'partial_succeeded'].includes(String(step.result?.status || '').toLowerCase()),
+            );
+            if (!completedQuerySteps.length) return prev;
+            const outputs = { ...current.outputs };
+            completedQuerySteps.forEach(step => {
+              outputs[step.id] = [
+                {
+                  output_type: 'markdown',
+                  content:
+                    finalStepStatus === 'done'
+                      ? '最终答复已生成。'
+                      : finalStepStatus === 'cancelled'
+                        ? '最终答复已取消。'
+                        : '最终答复未能完成。',
+                },
+              ];
+            });
+            return {
+              ...prev,
+              [responseId]: {
+                ...current,
+                steps,
+                outputs,
+              },
+            };
+          });
           notifyChatDialogueRefresh();
           setMessages(prev =>
             prev.map(msg => {
@@ -2928,7 +3327,7 @@ const Playground: NextPage = () => {
           /* ignore parse failure */
         }
 
-        if (payload && payload.version === 1 && payload.type === 'react-agent') {
+        if (payload && (payload.version === 1 || payload.version === 2) && payload.type === 'react-agent') {
           const historyPayloadSteps = expandAskDataHistorySteps(payload.steps || [], askDataSceneNameByIdRef.current);
           const steps: ExecutionStep[] = historyPayloadSteps.map((s: any, idx: number) => {
             const historyStatus: ExecutionStep['status'] =
@@ -2942,7 +3341,7 @@ const Playground: NextPage = () => {
               step: idx + 1,
               title: s.title || s.action || `Step ${idx + 1}`,
               detail: s.detail || '',
-              status: historyStatus,
+              status: s.status === 'running' && s.action === 'ask_data_stage' ? 'failed' : historyStatus,
               action: s.action,
               actionInput: s.action_input || undefined,
               errorType: s.error_type || undefined,
@@ -2950,6 +3349,15 @@ const Playground: NextPage = () => {
               askDataCallId: s.ask_data_call_id || undefined,
               askDataReused: Boolean(s.ask_data_reused),
               parentId: s.parent_id || undefined,
+              stage: s.stage || undefined,
+              scope: s.scope || undefined,
+              taskId: s.task_id || undefined,
+              startedAt: s.started_at || undefined,
+              endedAt: s.ended_at || undefined,
+              durationMs: typeof s.duration_ms === 'number' ? s.duration_ms : undefined,
+              result: s.result || undefined,
+              error: s.error || undefined,
+              scene: s.scene || undefined,
               todoMeta: s.todo_meta || undefined,
             };
           });
@@ -3174,14 +3582,30 @@ const Playground: NextPage = () => {
     </div>
   );
 
-  // Upload Props
+  const removeUploadedFile = (file: File) => {
+    const nextFiles = uploadedFilesRef.current.filter(item => item !== file);
+    uploadedFilesRef.current = nextFiles;
+    setUploadedFiles(nextFiles);
+    setUploadedFilePath(null);
+    setFilePreview(null);
+  };
+
   const uploadProps: any = {
     name: 'file',
-    multiple: false,
+    multiple: true,
     showUploadList: false,
     beforeUpload: (file: any) => {
-      setUploadedFile(file);
-      parseLocalFilePreview(file as File);
+      if (file.size > MAX_CHAT_UPLOAD_FILE_SIZE_BYTES) {
+        message.error('单个文件不能超过 30 MB');
+        return Upload.LIST_IGNORE;
+      }
+      if (uploadedFilesRef.current.length >= MAX_CHAT_UPLOAD_FILES) {
+        message.error('每条消息最多上传 5 个文件');
+        return Upload.LIST_IGNORE;
+      }
+      const nextFiles = [...uploadedFilesRef.current, file as File];
+      uploadedFilesRef.current = nextFiles;
+      setUploadedFiles(nextFiles);
       message.success(`${file.name} attached successfully`);
       return false; // Prevent auto upload, we just want to select it
     },
@@ -3255,6 +3679,7 @@ const Playground: NextPage = () => {
                           isWorking={isWorking}
                           userQuery={round.humanMsg?.context}
                           attachedFile={round.humanMsg?.attachedFile}
+                          attachedFiles={round.humanMsg?.attachedFiles}
                           attachedKnowledge={round.humanMsg?.attachedKnowledge}
                           attachedSkill={round.humanMsg?.attachedSkill}
                           attachedDb={round.humanMsg?.attachedDb}
@@ -3366,15 +3791,18 @@ const Playground: NextPage = () => {
                   <div className='chat-composer-region bg-white dark:bg-[#111217] p-4 md:p-6'>
                     <div className='max-w-[720px] mx-auto'>
                       {/* Uploaded File Tags */}
-                      {uploadedFile && (
+                      {uploadedFiles.length > 0 && (
                         <div className='flex flex-wrap gap-2 mb-2'>
-                          <Tag
-                            closable
-                            onClose={() => setUploadedFile(null)}
-                            className='flex items-center gap-1 bg-green-50 border-green-200 text-green-700 px-3 py-1 rounded-full'
-                          >
-                            <FileExcelOutlined /> <span className='font-medium ml-1'>{uploadedFile.name}</span>
-                          </Tag>
+                          {uploadedFiles.map((file, index) => (
+                            <Tag
+                              key={`${file.name}-${file.size}-${index}`}
+                              closable
+                              onClose={() => removeUploadedFile(file)}
+                              className='flex items-center gap-1 bg-green-50 border-green-200 text-green-700 px-3 py-1 rounded-full'
+                            >
+                              <FileExcelOutlined /> <span className='font-medium ml-1'>{file.name}</span>
+                            </Tag>
+                          ))}
                         </div>
                       )}
 
@@ -3628,23 +4056,23 @@ const Playground: NextPage = () => {
                                 shape='circle'
                                 icon={loading ? <StopOutlined /> : <ArrowUpOutlined />}
                                 onClick={() => (loading ? handleCancelRun() : handleStart())}
-                                disabled={!loading && !query.trim() && !uploadedFile}
+                                disabled={!loading && !query.trim() && uploadedFiles.length === 0}
                                 className={`dashboard-chat-send-button group/send relative overflow-hidden border-none shadow-lg flex-shrink-0 h-9 w-9 transition-all duration-200 ${
                                   loading
                                     ? 'bg-gradient-to-br from-[#ef4444] to-[#dc2626] hover:shadow-red-300/40 hover:shadow-xl hover:scale-105'
-                                    : query.trim() || uploadedFile
+                                    : query.trim() || uploadedFiles.length > 0
                                       ? 'bg-gradient-to-br from-[#3b82f6] to-[#2563eb] hover:shadow-blue-300/40 hover:shadow-xl hover:scale-105'
                                       : 'bg-gray-200 text-gray-400'
                                 }`}
                                 style={
                                   loading
                                     ? { background: 'linear-gradient(135deg, #ef4444, #dc2626)' }
-                                    : query.trim() || uploadedFile
+                                    : query.trim() || uploadedFiles.length > 0
                                       ? { background: 'linear-gradient(135deg, #3b82f6, #2563eb)' }
                                       : undefined
                                 }
                               >
-                                {(loading || query.trim() || uploadedFile) && (
+                                {(loading || query.trim() || uploadedFiles.length > 0) && (
                                   <span
                                     className='absolute inset-0 opacity-0 group-hover/send:opacity-100 transition-opacity duration-300 pointer-events-none'
                                     style={{
@@ -3794,15 +4222,18 @@ const Playground: NextPage = () => {
                         <span>datrix@workspace</span>:~$ <span className='terminal-prompt-action'>ask</span>
                       </div>
                       {/* Uploaded File Tags */}
-                      {uploadedFile && (
+                      {uploadedFiles.length > 0 && (
                         <div className='flex flex-wrap gap-2 mb-2'>
-                          <Tag
-                            closable
-                            onClose={() => setUploadedFile(null)}
-                            className='flex items-center gap-1 bg-green-50 border-green-200 text-green-700 px-3 py-1 rounded-full'
-                          >
-                            <FileExcelOutlined /> <span className='font-medium ml-1'>{uploadedFile.name}</span>
-                          </Tag>
+                          {uploadedFiles.map((file, index) => (
+                            <Tag
+                              key={`${file.name}-${file.size}-${index}`}
+                              closable
+                              onClose={() => removeUploadedFile(file)}
+                              className='flex items-center gap-1 bg-green-50 border-green-200 text-green-700 px-3 py-1 rounded-full'
+                            >
+                              <FileExcelOutlined /> <span className='font-medium ml-1'>{file.name}</span>
+                            </Tag>
+                          ))}
                         </div>
                       )}
 
@@ -4016,23 +4447,23 @@ const Playground: NextPage = () => {
                             size='large'
                             icon={loading ? <StopOutlined /> : <ArrowUpOutlined />}
                             onClick={() => (loading ? handleCancelRun() : handleStart())}
-                            disabled={!loading && !query.trim() && !uploadedFile}
+                            disabled={!loading && !query.trim() && uploadedFiles.length === 0}
                             className={`dashboard-chat-send-button group/send relative overflow-hidden border-none shadow-lg transition-all duration-200 ${
                               loading
                                 ? 'bg-gradient-to-br from-[#ef4444] to-[#dc2626] hover:shadow-red-300/40 hover:shadow-xl hover:scale-105'
-                                : query.trim() || uploadedFile
+                                : query.trim() || uploadedFiles.length > 0
                                   ? 'bg-gradient-to-br from-[#3b82f6] to-[#2563eb] hover:shadow-blue-300/40 hover:shadow-xl hover:scale-105'
                                   : 'bg-gray-200 text-gray-400'
                             }`}
                             style={
                               loading
                                 ? { background: 'linear-gradient(135deg, #ef4444, #dc2626)' }
-                                : query.trim() || uploadedFile
+                                : query.trim() || uploadedFiles.length > 0
                                   ? { background: 'linear-gradient(135deg, #3b82f6, #2563eb)' }
                                   : undefined
                             }
                           >
-                            {(loading || query.trim() || uploadedFile) && (
+                            {(loading || query.trim() || uploadedFiles.length > 0) && (
                               <span
                                 className='absolute inset-0 opacity-0 group-hover/send:opacity-100 transition-opacity duration-300 pointer-events-none'
                                 style={{

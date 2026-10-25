@@ -66,6 +66,8 @@ export interface ExecutionStep {
   phase?: string;
   status: StepStatus;
   output?: any;
+  durationMs?: number;
+  startedAt?: string;
   todoMeta?: {
     state?: 'init' | 'progress' | 'done';
     done?: number;
@@ -112,7 +114,26 @@ export interface ManusLeftPanelProps {
     name: string;
     size: number;
     type: string;
+    attachment_id?: string;
+    format?: string;
+    parse_status?: string;
+    parse_warnings?: string[];
+    block_count?: number;
+    page_count?: number;
+    slide_count?: number;
   };
+  attachedFiles?: Array<{
+    name: string;
+    size: number;
+    type: string;
+    attachment_id?: string;
+    format?: string;
+    parse_status?: string;
+    parse_warnings?: string[];
+    block_count?: number;
+    page_count?: number;
+    slide_count?: number;
+  }>;
   attachedKnowledge?: {
     id: number;
     name: string;
@@ -508,6 +529,12 @@ const StepCard: React.FC<{
   const { t } = useTranslation();
   const [isVisible, setIsVisible] = useState(false);
   const detailLine = step.description ? step.description.split('\n')[0] : '';
+  const durationLabel =
+    step.status === 'running'
+      ? '运行中'
+      : typeof step.durationMs === 'number'
+        ? `耗时 ${(step.durationMs / 1000).toFixed(2)} 秒`
+        : '';
   const isTodoStep = detailLine.toLowerCase() === 'todowrite' || step.title.startsWith('TODO::') || !!step.todoMeta;
 
   React.useEffect(() => {
@@ -718,6 +745,9 @@ const StepCard: React.FC<{
         <span className='text-sm font-medium text-gray-800 dark:text-gray-200 truncate'>{step.title}</span>
         {detailLine && <span className='text-[11px] text-gray-500 dark:text-gray-400 truncate'>{detailLine}</span>}
       </div>
+      {durationLabel && (
+        <span className='flex-shrink-0 text-[10px] text-gray-500 dark:text-gray-400'>{durationLabel}</span>
+      )}
       <div className='flex-shrink-0'>
         {step.status === 'pending' && <ClockCircleOutlined className='text-xs text-gray-400' />}
         {step.status === 'running' && <LoadingOutlined spin className='text-xs text-blue-500' />}
@@ -950,6 +980,7 @@ const ManusLeftPanel: React.FC<ManusLeftPanelProps> = ({
   isCollapsed: _isCollapsed,
   onExpand: _onExpand,
   attachedFile,
+  attachedFiles,
   attachedKnowledge,
   attachedSkill,
   attachedDb,
@@ -968,6 +999,7 @@ const ManusLeftPanel: React.FC<ManusLeftPanelProps> = ({
     [sections],
   );
   const terminalRunStatus = runStatus && runStatus !== 'running' ? runStatus : undefined;
+  const filesToShow = attachedFiles?.length ? attachedFiles : attachedFile ? [attachedFile] : [];
   const runStatusMeta = useMemo(() => {
     if (!terminalRunStatus) return null;
     if (terminalRunStatus === 'completed') {
@@ -1011,21 +1043,35 @@ const ManusLeftPanel: React.FC<ManusLeftPanelProps> = ({
         {userQuery && (
           <div className='flex justify-end'>
             <div className='max-w-[85%] space-y-2'>
-              {attachedFile && (
-                <div className='flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700/60 bg-white dark:bg-[#1a1b1e] shadow-sm'>
+              {filesToShow.map((file, index) => (
+                <div
+                  key={`${file.name}-${file.size}-${index}`}
+                  className='flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700/60 bg-white dark:bg-[#1a1b1e] shadow-sm'
+                >
                   <div className='w-8 h-8 rounded-lg bg-green-50 dark:bg-green-900/30 flex items-center justify-center flex-shrink-0'>
-                    {getFileIconElement(attachedFile.name, attachedFile.type)}
+                    {getFileIconElement(file.name, file.type)}
                   </div>
                   <div className='min-w-0 flex-1'>
-                    <div className='text-sm font-medium text-gray-800 dark:text-gray-200 truncate'>
-                      {attachedFile.name}
-                    </div>
+                    <div className='text-sm font-medium text-gray-800 dark:text-gray-200 truncate'>{file.name}</div>
                     <div className='text-[11px] text-gray-400 dark:text-gray-500'>
-                      {getFileTypeLabel(attachedFile.name, t, attachedFile.type)} · {formatFileSize(attachedFile.size)}
+                      {getFileTypeLabel(file.name, t, file.type)} · {formatFileSize(file.size)}
                     </div>
+                    {file.parse_status && (
+                      <div
+                        className={`text-[11px] ${file.parse_status === 'failed' ? 'text-red-500' : file.parse_status === 'completed' ? 'text-green-600' : 'text-amber-500'}`}
+                      >
+                        {file.parse_status === 'completed'
+                          ? `解析完成${file.page_count ? ` · ${file.page_count} 页` : file.slide_count ? ` · ${file.slide_count} 张幻灯片` : ''}`
+                          : file.parse_status === 'needs_ocr'
+                            ? '需要 OCR'
+                            : file.parse_status === 'failed'
+                              ? '解析失败'
+                              : '解析中'}
+                      </div>
+                    )}
                   </div>
                 </div>
-              )}
+              ))}
               {attachedKnowledge && (
                 <div className='flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700/60 bg-white dark:bg-[#1a1b1e] shadow-sm'>
                   <div className='w-8 h-8 rounded-lg bg-orange-50 dark:bg-orange-900/30 flex items-center justify-center flex-shrink-0'>

@@ -46,6 +46,10 @@ from dbgpt_serve.file.serve import Serve as FileServe
 from dbgpt_serve.prompt.service.service import Service as PromptService
 
 from .exceptions import BaseAppException, ContextAppException
+from .conversation_context import (
+    DEFAULT_CONTEXT_TOKEN_BUDGET,
+    build_conversation_context,
+)
 
 logger = logging.getLogger(__name__)
 CFG = Config()
@@ -349,8 +353,20 @@ class BaseChat(ABC):
 
     async def _build_model_request(self) -> ModelRequest:
         input_values = await self.prepare_input_values()
-        # Load history
-        self.history_messages = self.current_message.get_history_message()
+        memory_config = self.memory_config()
+        configured_history_tokens = getattr(memory_config, "max_token_limit", None)
+        context_token_budget = DEFAULT_CONTEXT_TOKEN_BUDGET
+        if isinstance(configured_history_tokens, int) and configured_history_tokens > 0:
+            context_token_budget = min(
+                context_token_budget, max(1024, configured_history_tokens // 2)
+            )
+        conversation_context = await build_conversation_context(
+            self.current_message.messages,
+            llm_client=self.llm_client,
+            model_name=self.llm_model,
+            max_tokens=context_token_budget,
+        )
+        self.history_messages = conversation_context.as_chat_history()
         self.current_message.start_new_round()
         self.current_message.add_user_message(self.current_user_input.content)
         self.current_message.start_date = datetime.datetime.now().strftime(
@@ -371,7 +387,7 @@ class BaseChat(ABC):
             max_new_tokens=self.llm_max_new_tokens(),
             prompt=self.prompt_template.prompt,
             llm_client=self.llm_client,
-            memory=self.memory_config(),
+            memory=memory_config,
             message_version=self._message_version,
             echo=self.llm_echo,
             streaming=self.prompt_template.stream_out,

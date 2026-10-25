@@ -3,6 +3,8 @@
 import asyncio
 from types import SimpleNamespace
 
+import pytest
+
 from dbgpt.core import ModelMessage, ModelRequest
 from dbgpt.core.interface.message import ModelMessageRoleType
 from dbgpt.model.proxy.llms.chatgpt import OpenAILLMClient
@@ -105,6 +107,70 @@ def test_qwen38_defaults_to_xhigh_reasoning_effort():
         "enable_thinking": True,
         "reasoning_effort": "xhigh",
     }
+
+
+def test_qwen38_request_context_overrides_reasoning_effort():
+    client = OpenAILLMClient(
+        openai_client=_FakeClient(None), model="Qwen3.8-flash-next-fp8"
+    )
+
+    request = ModelRequest.build_request(
+        "Qwen3.8-flash-next-fp8",
+        messages=[ModelMessage(role=ModelMessageRoleType.HUMAN, content="hi")],
+        context={"extra": {"reasoning_effort": "medium"}},
+    )
+
+    payload = client._build_request(request)
+
+    assert payload["extra_body"] == {
+        "enable_thinking": True,
+        "reasoning_effort": "medium",
+    }
+
+
+def test_qwen38_typed_request_effort_overrides_legacy_and_deployment_values():
+    client = OpenAILLMClient(
+        openai_client=_FakeClient(None),
+        model="Qwen3.8-flash-next-fp8",
+        reasoning_effort="low",
+    )
+
+    request = ModelRequest.build_request(
+        "Qwen3.8-flash-next-fp8",
+        messages=[ModelMessage(role=ModelMessageRoleType.HUMAN, content="hi")],
+        reasoning_effort="xhigh",
+        context={"extra": {"reasoning_effort": "medium"}},
+    )
+
+    payload = client._build_request(request)
+
+    assert payload["extra_body"]["reasoning_effort"] == "xhigh"
+
+
+def test_qwen38_uses_deployment_effort_before_platform_default():
+    client = OpenAILLMClient(
+        openai_client=_FakeClient(None),
+        model="Qwen3.8-flash-next-fp8",
+        reasoning_effort="medium",
+    )
+
+    payload = client._build_request(_request("Qwen3.8-flash-next-fp8"))
+
+    assert payload["extra_body"]["reasoning_effort"] == "medium"
+
+
+def test_qwen38_rejects_unknown_reasoning_effort():
+    client = OpenAILLMClient(
+        openai_client=_FakeClient(None), model="Qwen3.8-flash-next-fp8"
+    )
+    request = ModelRequest.build_request(
+        "Qwen3.8-flash-next-fp8",
+        messages=[ModelMessage(role=ModelMessageRoleType.HUMAN, content="hi")],
+        reasoning_effort="ultra",
+    )
+
+    with pytest.raises(ValueError, match="Unsupported Qwen3.8 reasoning_effort"):
+        client._build_request(request)
 
 
 def test_qwen38_normalizes_unsupported_reasoning_effort_to_xhigh():

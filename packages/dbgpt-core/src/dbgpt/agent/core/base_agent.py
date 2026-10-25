@@ -834,6 +834,7 @@ class ConversableAgent(Role, Agent):
         sender: Optional[Agent] = None,
         prompt: Optional[str] = None,
         stream_callback: Optional[Callable[[Dict[str, Any]], Any]] = None,
+        reasoning_effort: Optional[str] = None,
     ) -> Tuple[Optional[str], Optional[str]]:
         """Think and reason about the current task goal.
 
@@ -863,6 +864,11 @@ class ConversableAgent(Role, Agent):
                     llm_model=llm_model,
                     max_new_tokens=self.not_null_agent_context.max_new_tokens,
                     temperature=self.not_null_agent_context.temperature,
+                    reasoning_effort=(
+                        reasoning_effort
+                        if reasoning_effort is not None
+                        else self.not_null_agent_context.reasoning_effort
+                    ),
                     verbose=self.not_null_agent_context.verbose,
                     memory=self.memory.gpts_memory,
                     conv_id=self.not_null_agent_context.conv_id,

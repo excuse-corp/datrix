@@ -5,6 +5,7 @@ from .ask_data import (
     make_ask_data_tools,
     reply_to_ask_data_query,
 )
+from .attachment_tools import make_attachment_tools
 from .code_interpreter import make_code_interpreter
 from .execute_analysis import make_execute_analysis
 from .execute_tool import make_execute_tool
@@ -19,6 +20,7 @@ from .todowrite import make_todowrite
 
 __all__ = [
     "make_code_interpreter",
+    "make_attachment_tools",
     "ask_data_capability_summary",
     "make_ask_data_tools",
     "reply_to_ask_data_query",

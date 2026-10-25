@@ -29,6 +29,7 @@ class PendingQuestion:
     request_id: str
     conv_id: str
     questions: List[dict]  # raw dicts from LLM JSON for easy serialization
+    user_id: Optional[str] = None
     event: asyncio.Event = field(default_factory=asyncio.Event)
     answers: Optional[List[List[str]]] = None
     rejected: bool = False
@@ -64,30 +65,41 @@ class QuestionManager:
         conv_id: str,
         questions: List[dict],
         request_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> PendingQuestion:
         rid = request_id or self._new_id()
-        pq = PendingQuestion(request_id=rid, conv_id=conv_id, questions=questions)
+        pq = PendingQuestion(
+            request_id=rid,
+            conv_id=conv_id,
+            questions=questions,
+            user_id=user_id,
+        )
         self._pending[rid] = pq
         logger.info("QuestionManager.create: request_id=%s, n=%d", rid, len(questions))
         return pq
 
-    def reply(self, request_id: str, answers: List[List[str]]) -> None:
+    def reply(
+        self,
+        request_id: str,
+        answers: List[List[str]],
+        user_id: Optional[str] = None,
+    ) -> None:
         pq = self._pending.get(request_id)
-        if not pq:
+        if not pq or (user_id is not None and pq.user_id != user_id):
             raise KeyError(f"No pending question: {request_id}")
         pq.answers = answers
         pq.event.set()
         logger.info("QuestionManager.reply: request_id=%s answered", request_id)
 
-    def reject(self, request_id: str) -> None:
+    def reject(self, request_id: str, user_id: Optional[str] = None) -> None:
         pq = self._pending.get(request_id)
-        if not pq:
+        if not pq or (user_id is not None and pq.user_id != user_id):
             raise KeyError(f"No pending question: {request_id}")
         pq.rejected = True
         pq.event.set()
         logger.info("QuestionManager.reject: request_id=%s rejected", request_id)
 
-    def reject_by_conv(self, conv_id: str) -> int:
+    def reject_by_conv(self, conv_id: str, user_id: Optional[str] = None) -> int:
         """Reject all pending questions for a conversation.
 
         Used by run cancellation so a blocked question tool can exit promptly.
@@ -96,6 +108,7 @@ class QuestionManager:
             request_id
             for request_id, pending in self._pending.items()
             if pending.conv_id == conv_id
+            and (user_id is None or pending.user_id == user_id)
         ]
         for request_id in request_ids:
             pending = self._pending.get(request_id)

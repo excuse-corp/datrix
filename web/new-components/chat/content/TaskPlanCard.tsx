@@ -10,6 +10,7 @@ import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 export interface TaskItem {
+  id?: string;
   content: string;
   status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
   priority: 'high' | 'medium' | 'low';
@@ -104,7 +105,7 @@ const TaskPlanCard: React.FC<TaskPlanCardProps> = ({ tasks, defaultCollapsed = t
         <ul className='max-h-[220px] space-y-1 overflow-y-auto overscroll-contain px-3.5 py-2.5'>
           {tasks.map((task, i) => (
             <li
-              key={i}
+              key={task.id || `${task.content}-${i}`}
               className={`flex items-start gap-2.5 rounded-md px-1.5 py-1 leading-5 ${
                 task.status === 'completed'
                   ? 'text-slate-400 dark:text-slate-500'

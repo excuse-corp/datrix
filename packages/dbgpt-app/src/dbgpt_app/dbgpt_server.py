@@ -106,6 +106,7 @@ def mount_routers(app: FastAPI):
     from dbgpt_app.knowledge.api import router as knowledge_router
     from dbgpt_app.openapi.api_v1.agentic_data_api import router as agentic_data_api
     from dbgpt_app.openapi.api_v1.api_v1 import router as api_v1
+    from dbgpt_app.openapi.api_v1.attachment_api import router as attachment_router
     from dbgpt_app.openapi.api_v1.editor.api_editor_v1 import (
         router as api_editor_route_v1,
     )
@@ -129,6 +130,7 @@ def mount_routers(app: FastAPI):
     app.include_router(python_upload_router, prefix="/api", tags=["PythonUpload"])
     app.include_router(examples_router, prefix="/api", tags=["Examples"])
     app.include_router(agentic_data_api, prefix="/api", tags=["AgenticData"])
+    app.include_router(attachment_router, prefix="/api", tags=["Attachments"])
     app.include_router(ask_data_router)
     app.include_router(ontology_router)
 

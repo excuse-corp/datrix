@@ -393,7 +393,28 @@ def _default_scene_query_agent(model_name: str | None = None):
             raise RuntimeError("SceneQueryAgent model generation failed")
         return response.text
 
-    return SceneQueryAgent(generate)
+    async def generate_sql(prompt: str) -> str:
+        models = await llm_client.models()
+        selected_model = model_name or (models[0].model if models else None)
+        if not selected_model:
+            raise RuntimeError("No models available for SceneQueryAgent")
+        request = ModelRequest.build_request(
+            selected_model,
+            messages=[
+                ModelMessage(
+                    role=ModelMessageRoleType.HUMAN,
+                    content=prompt,
+                )
+            ],
+            temperature=0,
+            reasoning_effort="medium",
+        )
+        response = await llm_client.generate(request)
+        if not response.success or not response.has_text:
+            raise RuntimeError("SceneQueryAgent SQL generation failed")
+        return response.text
+
+    return SceneQueryAgent(generate, generate_sql=generate_sql)
 
 
 async def _build_sql_agent_plan(

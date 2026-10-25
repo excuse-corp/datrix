@@ -119,10 +119,12 @@ class SceneQueryAgent:
         self,
         generate: Callable[[str], Awaitable[str]],
         *,
+        generate_sql: Callable[[str], Awaitable[str]] | None = None,
         validator: QuerySpecValidator | None = None,
         ast_validator: QueryAstValidator | None = None,
     ):
         self._generate = generate
+        self._generate_sql = generate_sql or generate
         self._validator = validator or QuerySpecValidator()
         self._ast_validator = ast_validator or QueryAstValidator()
 
@@ -186,7 +188,7 @@ class SceneQueryAgent:
         self, prompt: str, snapshot: Snapshot, *, dialect: str | None = None
     ) -> str:
         try:
-            response = await self._generate(prompt)
+            response = await self._generate_sql(prompt)
         except Exception as exc:
             raise SceneQueryAgentError(
                 "SCENE_SQL_AGENT_UNAVAILABLE",

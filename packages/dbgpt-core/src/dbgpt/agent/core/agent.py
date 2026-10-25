@@ -221,6 +221,7 @@ class AgentContext:
     max_context_tokens: int = 120000
     context_warning_threshold: float = 0.70
     context_error_threshold: float = 0.90
+    reasoning_effort: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Return a dictionary representation of the AgentContext."""

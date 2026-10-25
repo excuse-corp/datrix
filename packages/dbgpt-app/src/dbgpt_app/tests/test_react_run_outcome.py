@@ -51,6 +51,12 @@ def test_react_max_steps_defaults_to_100(monkeypatch):
     assert api._react_max_steps_for("优化 data-report 技能", None) == 100
 
 
+def test_react_stream_idle_timeout_is_configurable(monkeypatch):
+    monkeypatch.setenv("DATAMAN_REACT_STREAM_IDLE_TIMEOUT", "17")
+
+    assert api._react_stream_idle_timeout() == 17
+
+
 def test_open_plan_at_max_steps_preserves_max_steps_reason():
     outcome = api._compute_react_run_outcome(
         _reply(action_report=_action_report()),
@@ -111,16 +117,68 @@ def test_terminate_with_complete_plan_is_completed():
     assert outcome["termination_reason"] == api.REACT_REASON_TERMINATE
 
 
-def test_terminate_with_open_plan_is_incomplete():
+def test_terminate_with_open_plan_is_completed():
     outcome = api._compute_react_run_outcome(
         _reply(action_report=_action_report(terminate=True)),
+        history_steps=[{"status": "done"}],
+        todo_list=[
+            {"status": "completed"},
+            {"status": "completed"},
+            {"status": "completed"},
+            {"status": "completed"},
+            {"status": "completed"},
+            {"status": "in_progress"},
+        ],
+        max_steps=12,
+    )
+
+    assert outcome["status"] == api.REACT_STATUS_COMPLETED
+    assert outcome["termination_reason"] == api.REACT_REASON_TERMINATE
+
+
+def test_stopped_without_terminate_is_incomplete_with_open_plan():
+    outcome = api._compute_react_run_outcome(
+        _reply(action_report=_action_report(terminate=False)),
         history_steps=[{"status": "done"}],
         todo_list=[{"status": "in_progress"}],
         max_steps=12,
     )
 
     assert outcome["status"] == api.REACT_STATUS_INCOMPLETE
-    assert outcome["termination_reason"] == api.REACT_REASON_TASK_PLAN_INCOMPLETE
+    assert outcome["termination_reason"] == api.REACT_REASON_STOPPED_WITHOUT_TERMINATE
+
+
+def test_task_plan_incomplete_keeps_partial_result_for_user():
+    partial_result = "已整理丁宇龙的 3 个项目，另一人的项目尚未比较。"
+    outcome = {
+        "status": api.REACT_STATUS_INCOMPLETE,
+        "termination_reason": api.REACT_REASON_TASK_PLAN_INCOMPLETE,
+    }
+
+    assert api._final_content_for_outcome(partial_result, outcome) == partial_result
+
+
+def test_pending_ask_data_does_not_consume_active_task_continuation():
+    pending = {"query_id": "query-1", "user_id": "user-1"}
+
+    assert not api._should_handle_pending_ask_data(
+        pending,
+        "user-1",
+        is_continuation=True,
+        active_task={"task_id": "task-1"},
+    )
+    assert api._should_handle_pending_ask_data(
+        pending,
+        "user-1",
+        is_continuation=False,
+        active_task={"task_id": "task-1"},
+    )
+    assert not api._should_handle_pending_ask_data(
+        pending,
+        "another-user",
+        is_continuation=False,
+        active_task=None,
+    )
 
 
 def test_repeated_action_is_incomplete():

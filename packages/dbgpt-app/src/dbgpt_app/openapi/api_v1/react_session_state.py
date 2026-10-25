@@ -17,10 +17,12 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from dbgpt.configs.model_config import ROOT_PATH, SKILLS_DIR, resolve_root_path
+from dbgpt_app.openapi.api_v1.upload_limits import MAX_CHAT_UPLOAD_FILES
+from dbgpt_app.scene.conversation_context import ConversationContext
 
 STATE_VERSION = 1
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
-MAX_ATTACHMENTS = 20
+MAX_ATTACHMENTS = MAX_CHAT_UPLOAD_FILES
 MAX_ARTIFACTS = 60
 MAX_RECENT_MESSAGES = 8
 
@@ -56,6 +58,8 @@ def _default_state(conv_id: str) -> Dict[str, Any]:
         "workflow_state": {},
         "pending_user_input": None,
         "checkpoint": {},
+        "active_task": None,
+        "last_task": None,
         "created_at": now,
         "updated_at": now,
     }
@@ -74,6 +78,9 @@ def _normalize_state(conv_id: str, state: Dict[str, Any]) -> Dict[str, Any]:
         normalized["workflow_state"] = {}
     if not isinstance(normalized.get("checkpoint"), dict):
         normalized["checkpoint"] = {}
+    for key in ("active_task", "last_task"):
+        if not isinstance(normalized.get(key), dict):
+            normalized[key] = None
     return normalized
 
 
@@ -202,10 +209,32 @@ def build_attachment_metadata(file_path: str) -> Dict[str, Any]:
     return metadata
 
 
-def record_uploaded_attachment(state: Dict[str, Any], file_path: Optional[str]) -> None:
+def record_uploaded_attachment(
+    state: Dict[str, Any],
+    file_path: Optional[str],
+    upload_metadata: Optional[Dict[str, Any]] = None,
+) -> None:
     if not file_path:
         return
     attachment = build_attachment_metadata(file_path)
+    if upload_metadata:
+        attachment.update(
+            {
+                key: value
+                for key, value in upload_metadata.items()
+                if key in {
+                    "attachment_id",
+                    "filename",
+                    "size_bytes",
+                    "mime_type",
+                    "sha256",
+                    "storage_path",
+                    "status",
+                    "format",
+                }
+                and value is not None
+            }
+        )
     attachment["first_seen_at"] = _now_iso()
     attachments = [a for a in state.get("attachments", []) if isinstance(a, dict)]
     key = attachment.get("absolute_path") or attachment.get("path")
@@ -216,6 +245,49 @@ def record_uploaded_attachment(state: Dict[str, Any], file_path: Optional[str]) 
     ]
     filtered.append(attachment)
     state["attachments"] = filtered[-MAX_ATTACHMENTS:]
+
+
+def update_attachment_parse_metadata(
+    state: Dict[str, Any], file_path: str, parse_result: Any
+) -> None:
+    """Store a compact parse summary without copying parsed document text."""
+
+    resolved = str(_resolve_local_path(file_path))
+    attachments = [a for a in state.get("attachments", []) if isinstance(a, dict)]
+    target = next(
+        (
+            item
+            for item in attachments
+            if item.get("absolute_path") == resolved
+            or item.get("path") == _display_path(file_path)
+        ),
+        None,
+    )
+    if target is None:
+        record_uploaded_attachment(state, file_path)
+        attachments = [a for a in state.get("attachments", []) if isinstance(a, dict)]
+        target = next(
+            (
+                item
+                for item in attachments
+                if item.get("absolute_path") == resolved
+            ),
+            None,
+        )
+    if target is None:
+        return
+    target.update(
+        {
+            "attachment_id": getattr(parse_result, "attachment_id", None),
+            "format": getattr(parse_result, "format", None),
+            "parse_status": getattr(parse_result, "status", "failed"),
+            "parser": getattr(parse_result, "parser", None),
+            "block_count": len(getattr(parse_result, "blocks", []) or []),
+            "text_chars": len(getattr(parse_result, "plain_text", "") or ""),
+            "warnings": list(getattr(parse_result, "warnings", []) or [])[:10],
+            "parse_error_code": getattr(parse_result, "error_code", None),
+        }
+    )
 
 
 def _skill_candidates(skills_dir: str = SKILLS_DIR) -> Dict[str, str]:
@@ -434,30 +506,398 @@ def _truncate(text: str, max_chars: int) -> str:
     return text[: max_chars - 20].rstrip() + "\n...[truncated]"
 
 
-def _recent_conversation_lines(messages: Iterable[Any]) -> List[str]:
-    rows = _messages_to_recent_text(messages)
-    lines = []
-    for role, text in rows[-MAX_RECENT_MESSAGES:]:
-        normalized = re.sub(r"\s+", " ", text).strip()
-        if not normalized:
-            continue
-        label = (
-            "User"
-            if role == "human"
-            else "Assistant"
-            if role in {"ai", "view"}
-            else role
+def is_react_continuation_request(text: str) -> bool:
+    normalized = re.sub(r"[\s，。！？,.!?；;：:、]+", "", (text or "").lower())
+    if not normalized or normalized.startswith(("不继续", "不用继续", "不要继续", "先不", "stop")):
+        return False
+    return normalized.startswith(
+        (
+            "继续",
+            "接着",
+            "请继续",
+            "请接着",
+            "按刚才继续",
+            "按上次继续",
+            "继续刚才",
+            "继续之前",
+            "继续上次",
+            "完成刚才的任务",
+            "把刚才的任务完成",
+            "continue",
+            "resume",
         )
-        lines.append(f"- {label}: {_truncate(normalized, 600)}")
-    return lines
+    )
+
+
+def is_react_plan_revision_request(text: str) -> bool:
+    text = (text or "").lower()
+    compact = re.sub(r"\s+", "", text)
+    if re.search(r"(?:不要|不需要|无需|不用|别|不).{0,8}(?:修改|调整|更改|变更|重做|重排|重新安排|重写).{0,6}(?:计划|方案|步骤|任务列表)", compact):
+        return False
+    if re.search(r"\b(?:don't|do not|does not|no need to)\s+(?:change|revise|modify|reorder|replan|rewrite|update)", text):
+        return False
+    chinese_patterns = (
+        r"(?:修改|调整|更改|变更|重做|重写|重排|重新安排|重新制定|重新规划|增删|改动|更换)(?:一下|下|当前|原有|整个|这份|这个|执行|任务|步骤|工作)*(?:的)?(?:执行)?(?:计划|方案|步骤|任务列表)",
+        r"(?:计划|方案|步骤|任务列表)(?:需要|要|请|为|改为|改成)?(?:修改|调整|更改|变更|重排|增删|改为|改成|改一下)",
+        r"(?:计划|方案|步骤|任务列表).{0,6}(?:修改|调整|更改|变更|重做|重写|重排|增删|增加|删除|新增|移除|改成|改为|改一下|换一下)",
+        r"(?:把|将).{0,16}(?:计划|方案|步骤|任务列表).{0,8}(?:改为|改成|调整|修改|重排)",
+    )
+    if any(re.search(pattern, compact) for pattern in chinese_patterns):
+        return True
+    english_patterns = (
+        r"\b(?:change|revise|modify|reorder|rework|replan|rewrite|update)\s+(?:the\s+)?(?:task\s+)?(?:plan|steps|task list)\b",
+        r"\b(?:plan|steps|task list)\s+(?:should be\s+)?(?:changed|revised|modified|reordered|updated)\b",
+    )
+    return any(re.search(pattern, text) for pattern in english_patterns)
+
+
+def _normalize_task_plan(task_plan: Any) -> List[Dict[str, Any]]:
+    if not isinstance(task_plan, list):
+        return []
+    normalized = []
+    for item in task_plan[:30]:
+        if not isinstance(item, dict):
+            continue
+        content = str(item.get("content") or "").strip()
+        if not content:
+            continue
+        task = {
+            "content": _truncate(content, 500),
+            "status": str(item.get("status") or "pending"),
+            "priority": str(item.get("priority") or "medium"),
+        }
+        if item.get("id"):
+            task["id"] = _truncate(str(item["id"]), 100)
+        normalized.append(task)
+    return normalized
+
+
+def restore_react_task_plan(
+    active_task: Any, *, resume_cancelled: bool = False
+) -> List[Dict[str, Any]]:
+    if not isinstance(active_task, dict):
+        return []
+    task_plan = _normalize_task_plan(active_task.get("task_plan"))
+    in_progress = False
+    task_id = str(active_task.get("task_id") or "legacy")
+    for index, item in enumerate(task_plan):
+        item.setdefault("id", f"task-{task_id}-{index + 1}")
+        if item["status"] == "failed" or (
+            resume_cancelled and item["status"] == "cancelled"
+        ):
+            item["status"] = "pending"
+        if item["status"] == "in_progress":
+            if in_progress:
+                item["status"] = "pending"
+            else:
+                in_progress = True
+    if not in_progress:
+        next_item = next(
+            (item for item in task_plan if item["status"] == "pending"), None
+        )
+        if next_item:
+            next_item["status"] = "in_progress"
+    return task_plan
+
+
+def start_react_task_checkpoint(
+    state: Dict[str, Any],
+    *,
+    task_id: str,
+    user_input: str,
+    round_index: int,
+    resume_task: bool = False,
+) -> Optional[Dict[str, Any]]:
+    existing = state.get("active_task") if resume_task else None
+    task_plan = restore_react_task_plan(existing, resume_cancelled=resume_task)
+    return update_react_task_checkpoint(
+        state,
+        task_id=task_id,
+        original_request=user_input,
+        task_plan=task_plan,
+        history_steps=[],
+        status="in_progress",
+        plan_id=existing.get("plan_id") if isinstance(existing, dict) else None,
+        plan_revision=existing.get("plan_revision", 0)
+        if isinstance(existing, dict)
+        else 0,
+        plan_sequence=existing.get("plan_sequence", 0)
+        if isinstance(existing, dict)
+        else 0,
+        round_index=round_index,
+        force=True,
+    )
+
+
+def build_react_task_continuation_prompt(
+    active_task: Any, latest_user_input: str
+) -> str:
+    if not isinstance(active_task, dict):
+        return latest_user_input
+    lines = [
+        "继续完成下面的未完成任务。当前消息不是一个新的独立问题。",
+        f"原始任务：{_truncate(str(active_task.get('original_request') or ''), 2000)}",
+    ]
+    task_plan = _normalize_task_plan(active_task.get("task_plan"))
+    if task_plan:
+        lines.append("当前计划（已完成项只复用结果，不要重复执行）：")
+        lines.extend(
+            f"- [{item['status']}] {item['content']}" for item in task_plan
+        )
+    completed_steps = [
+        item
+        for item in active_task.get("completed_steps", [])
+        if isinstance(item, dict)
+    ]
+    if completed_steps:
+        lines.append("已完成工作及证据：")
+        for item in completed_steps[-8:]:
+            summary = _truncate(str(item.get("summary") or ""), 700)
+            detail = f"：{summary}" if summary else ""
+            lines.append(
+                f"- {item.get('title') or item.get('action') or '已完成步骤'}{detail}"
+            )
+    if active_task.get("last_result"):
+        lines.append(
+            "上次阶段性结果："
+            + _truncate(str(active_task["last_result"]), 1500)
+        )
+    if latest_user_input:
+        lines.append(f"用户本轮消息：{_truncate(latest_user_input, 1000)}")
+    lines.append(
+        "执行要求：从第一个未完成计划项继续，完成原始任务及其报告要求；"
+        "不要只重复上次结果，也不要把未完成任务当作已完成。"
+    )
+    return "\n".join(line for line in lines if line.strip())
+
+
+def _task_step_summaries(
+    history_steps: Iterable[Any], turn_id: str
+) -> List[Dict[str, str]]:
+    summaries = []
+    for index, step in enumerate(history_steps or []):
+        if not isinstance(step, dict) or step.get("status") not in {"done", "completed"}:
+            continue
+        action = str(step.get("action") or "")
+        if action.lower() in {"todowrite", "terminate"}:
+            continue
+        output_parts = []
+        for output in step.get("outputs") or []:
+            if not isinstance(output, dict):
+                continue
+            content = output.get("content")
+            if isinstance(content, (dict, list)):
+                content = json.dumps(content, ensure_ascii=False, default=str)
+            if content:
+                output_parts.append(str(content))
+        summary = "\n".join(output_parts).strip()
+        summaries.append(
+            {
+                "id": f"{turn_id}:{step.get('id') or index}",
+                "title": _truncate(str(step.get("title") or action or "执行步骤"), 160),
+                "action": action,
+                "summary": _truncate(summary, 900),
+            }
+        )
+    return summaries
+
+
+def update_react_task_checkpoint(
+    state: Dict[str, Any],
+    *,
+    task_id: str,
+    original_request: str,
+    task_plan: Any,
+    history_steps: Iterable[Any],
+    status: str,
+    plan_id: Optional[str] = None,
+    plan_revision: int = 0,
+    plan_sequence: int = 0,
+    final_content: Optional[str] = None,
+    error_message: Optional[str] = None,
+    round_index: Optional[int] = None,
+    force: bool = False,
+) -> Optional[Dict[str, Any]]:
+    normalized_plan = _normalize_task_plan(task_plan)
+    existing = state.get("active_task")
+    same_task = isinstance(existing, dict) and existing.get("task_id") == task_id
+    if not normalized_plan and not same_task and not force and not original_request:
+        return None
+    if not normalized_plan and same_task:
+        normalized_plan = _normalize_task_plan(existing.get("task_plan"))
+
+    completed_steps = list(existing.get("completed_steps", [])) if same_task else []
+    existing_ids = {
+        item.get("id") for item in completed_steps if isinstance(item, dict)
+    }
+    for item in _task_step_summaries(history_steps, task_id):
+        if item["id"] not in existing_ids:
+            completed_steps.append(item)
+            existing_ids.add(item["id"])
+
+    preserved_request = (
+        str(existing.get("original_request") or "").strip()
+        if same_task
+        else ""
+    )
+    checkpoint = {
+        "task_id": task_id,
+        "round_index": round_index
+        if round_index is not None
+        else (existing or {}).get("round_index"),
+        "original_request": _truncate(
+            preserved_request or str(original_request or ""),
+            2000,
+        ),
+        "status": status,
+        "task_plan": normalized_plan,
+        "plan_id": plan_id or (existing if same_task else {}).get("plan_id"),
+        "plan_revision": plan_revision
+        or (existing if same_task else {}).get("plan_revision", 0),
+        "plan_sequence": plan_sequence
+        or (existing if same_task else {}).get("plan_sequence", 0),
+        "completed_steps": completed_steps[-12:],
+        "last_result": _truncate(
+            str(final_content or (existing or {}).get("last_result") or ""), 2000
+        ),
+        "error_message": _truncate(str(error_message or ""), 1000)
+        if error_message
+        else None,
+        "updated_at": _now_iso(),
+    }
+    if (
+        isinstance(existing, dict)
+        and existing.get("task_id")
+        and existing.get("task_id") != task_id
+        and existing.get("status") != "completed"
+    ):
+        state["last_task"] = existing
+    if status == "completed":
+        state["last_task"] = checkpoint
+        state["active_task"] = None
+    else:
+        state["active_task"] = checkpoint
+    state["updated_at"] = checkpoint["updated_at"]
+    return checkpoint
+
+
+def recover_react_task_checkpoint_from_messages(
+    state: Dict[str, Any], messages: Iterable[Any]
+) -> Optional[Dict[str, Any]]:
+    message_list = list(messages or [])
+    active_task = state.get("active_task")
+    user_messages = [
+        message
+        for message in message_list
+        if getattr(message, "type", None) == "human"
+    ]
+    latest_human = user_messages[-1] if user_messages else None
+    latest_human_round = getattr(latest_human, "round_index", 0)
+    latest_human_text = str(getattr(latest_human, "content", "") or "")
+    latest_payload = None
+    latest_round = 0
+    for message in reversed(message_list):
+        if getattr(message, "type", None) != "view":
+            continue
+        content = getattr(message, "content", "")
+        try:
+            payload = json.loads(content) if isinstance(content, str) else content
+        except (TypeError, ValueError):
+            continue
+        if isinstance(payload, dict) and payload.get("type") == "react-agent":
+            latest_payload = payload
+            latest_round = int(
+                payload.get("round_index")
+                or getattr(message, "round_index", 0)
+                or 0
+            )
+            break
+
+    active_round = (
+        active_task.get("round_index", 0) if isinstance(active_task, dict) else 0
+    )
+    if (
+        latest_human is not None
+        and latest_human_round > latest_round
+        and not is_react_continuation_request(latest_human_text)
+        and latest_human_round > active_round
+    ):
+        return update_react_task_checkpoint(
+            state,
+            task_id=f"orphan-{latest_human_round}",
+            original_request=latest_human_text,
+            task_plan=[],
+            history_steps=[],
+            status="incomplete",
+            round_index=latest_human_round,
+            force=True,
+        )
+
+    if isinstance(active_task, dict):
+        if latest_payload and latest_payload.get("status") == "completed":
+            if latest_round >= active_round:
+                state["active_task"] = None
+                return None
+            return active_task
+        latest_task_id = (latest_payload or {}).get("task_id")
+        latest_is_newer = latest_round > active_round
+        same_round_task_mismatch = (
+            latest_round == active_round
+            and latest_task_id
+            and latest_task_id != active_task.get("task_id")
+        )
+        if latest_payload and (latest_is_newer or same_round_task_mismatch):
+            active_task = None
+        else:
+            return active_task
+
+    if not latest_payload or latest_payload.get("status") == "completed":
+        return None
+
+    user_by_round = {
+        getattr(message, "round_index", 0): str(getattr(message, "content", "") or "")
+        for message in message_list
+        if getattr(message, "type", None) == "human"
+    }
+    task_plan = _normalize_task_plan(latest_payload.get("task_plan"))
+    status = str(latest_payload.get("status") or "incomplete")
+    has_resumable_item = any(
+        item.get("status") in {"pending", "in_progress", "failed"}
+        for item in task_plan
+    )
+    if not has_resumable_item and status not in {
+        "cancelled",
+        "incomplete",
+        "failed",
+    }:
+        return None
+    task_id = str(
+        latest_payload.get("task_id")
+        or latest_payload.get("turn_id")
+        or f"legacy-{latest_round}"
+    )
+    return update_react_task_checkpoint(
+        state,
+        task_id=task_id,
+        original_request=user_by_round.get(latest_round, ""),
+        task_plan=task_plan,
+        history_steps=latest_payload.get("steps") or [],
+        status=status,
+        plan_id=latest_payload.get("plan_id"),
+        plan_revision=int(latest_payload.get("plan_revision") or 0),
+        plan_sequence=int(latest_payload.get("plan_sequence") or 0),
+        final_content=latest_payload.get("final_content"),
+        error_message=latest_payload.get("error_message"),
+        round_index=latest_round,
+        force=True,
+    )
 
 
 def render_react_session_context(
     state: Dict[str, Any],
-    messages: Iterable[Any],
+    conversation_context: ConversationContext,
     *,
     current_user_input: str = "",
-    max_chars: int = 16000,
 ) -> str:
     lines: List[str] = ["## Session Context"]
     active_skill = state.get("active_skill") if isinstance(state, dict) else None
@@ -476,6 +916,14 @@ def render_react_session_context(
                 f"- {item.get('kind')}: {item.get('path')}"
                 f" ({item.get('mime_type') or 'unknown'}, exists={item.get('exists')})"
             )
+            if item.get("parse_status"):
+                lines.append(
+                    f"  Parse: {item.get('parse_status')}, format={item.get('format') or 'unknown'}, "
+                    f"blocks={item.get('block_count', 0)}, text_chars={item.get('text_chars', 0)}"
+                )
+            warnings = item.get("warnings") or []
+            if warnings:
+                lines.append(f"  Parse warnings: {_truncate('; '.join(map(str, warnings)), 500)}")
             image = item.get("image")
             if isinstance(image, dict):
                 colors = image.get("dominant_colors") or []
@@ -497,10 +945,58 @@ def render_react_session_context(
             if target:
                 lines.append(f"- {item.get('type') or 'file'}: {target}")
 
-    recent_lines = _recent_conversation_lines(messages)
-    if recent_lines:
+    active_task = state.get("active_task") if isinstance(state, dict) else None
+    if (
+        (
+            is_react_continuation_request(current_user_input)
+            or is_react_plan_revision_request(current_user_input)
+        )
+        and isinstance(active_task, dict)
+        and active_task.get("status") != "completed"
+    ):
+        lines.append("### Active Task Checkpoint")
+        lines.append(f"- Status: {active_task.get('status') or 'incomplete'}")
+        original_request = active_task.get("original_request")
+        if original_request:
+            lines.append(f"- Original goal: {_truncate(str(original_request), 2000)}")
+        task_plan = _normalize_task_plan(active_task.get("task_plan"))
+        if task_plan:
+            lines.append("- Plan:")
+            for item in task_plan:
+                lines.append(
+                    f"  - [{item['status']}] {item['content']}"
+                )
+        completed_steps = [
+            item
+            for item in active_task.get("completed_steps", [])
+            if isinstance(item, dict)
+        ]
+        if completed_steps:
+            lines.append("- Completed work and evidence:")
+            for item in completed_steps[-8:]:
+                summary = _truncate(str(item.get("summary") or ""), 900)
+                detail = f": {summary}" if summary else ""
+                lines.append(
+                    f"  - {item.get('title') or item.get('action') or 'Completed step'}{detail}"
+                )
+        if active_task.get("last_result"):
+            lines.append(
+                f"- Last result: {_truncate(str(active_task['last_result']), 2000)}"
+            )
+        if active_task.get("error_message"):
+            lines.append(
+                f"- Last blocker: {_truncate(str(active_task['error_message']), 1000)}"
+            )
+        lines.append(
+            "- Continuation: Resume this task when the latest user message asks to continue "
+            "or clearly refers to it. Reuse completed results, finish the open plan items, "
+            "and do not treat a partial response as task completion. For an unrelated new "
+            "request, answer that request without executing this plan."
+        )
+
+    if conversation_context.recent_history_text:
         lines.append("### Recent Conversation")
-        lines.extend(recent_lines)
+        lines.extend(conversation_context.recent_history_text.splitlines())
 
     lines.append("### Continuity Rules")
     lines.append(
@@ -533,7 +1029,7 @@ def render_react_session_context(
             "is not sufficient."
         )
 
-    return _truncate("\n".join(lines), max_chars)
+    return "\n".join(lines)
 
 
 def update_react_session_after_turn(

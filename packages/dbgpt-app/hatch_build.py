@@ -30,6 +30,7 @@ _SKILLS_MAP = {
     f"{_SKILL_SRC}/{name}": f"{_SKILL_DST}/{name}"
     for name in [
         "csv-data-analysis",
+        "document-data-filler",
         "skill-creator",
     ]
 }

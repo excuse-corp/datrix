@@ -6,7 +6,8 @@ from __future__ import annotations
 
 import json
 import uuid
-from asyncio import Semaphore, gather
+from asyncio import CancelledError, Semaphore, gather
+from datetime import datetime, timezone
 from time import monotonic
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
@@ -72,6 +73,17 @@ def _duration_ms(started: float) -> int:
     return max(0, int((monotonic() - started) * 1000))
 
 
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _stage_node_id(call_id: str, stage: str, task_id: str | None = None) -> str:
+    parts = ["ask-data", call_id, stage]
+    if task_id:
+        parts.append(task_id)
+    return "-".join("".join(char if char.isalnum() or char in "-_" else "_" for char in part) for part in parts)
+
+
 def _scene_display_name(scene_id: str, snapshot: Any | None = None) -> str:
     """Return the user-facing scene name for progress events."""
     if snapshot is not None:
@@ -93,12 +105,8 @@ def _scene_display_name(scene_id: str, snapshot: Any | None = None) -> str:
     return scene_id
 
 
-def _scene_id_from_task_id(task_id: str) -> str:
-    if task_id.startswith("route_scene_"):
-        return task_id.removeprefix("route_")
-    if task_id.startswith("route_"):
-        return task_id.removeprefix("route_")
-    return task_id
+def _task_id(task: Any) -> str:
+    return str(getattr(task, "task_id", None) or getattr(task, "scene_id", "unknown"))
 
 
 def _normalize_ask_data_question(question: str) -> str:
@@ -238,6 +246,52 @@ def make_ask_data_tools(
         ) -> None:
             await stream_callback(event_type, {"call_id": call_id, **payload})
 
+        query_started = monotonic()
+        query_started_at = _utc_now()
+
+        async def emit_stage(
+            stage: str,
+            *,
+            status: str,
+            title: str,
+            detail: str = "",
+            started_at: str,
+            started_monotonic: float,
+            scope: str = "query",
+            task_id: str | None = None,
+            scene_id: str | None = None,
+            scene_name: str | None = None,
+            result: dict[str, Any] | None = None,
+            error: dict[str, Any] | None = None,
+            duration_ms: int | None = None,
+        ) -> None:
+            terminal = status != "running"
+            event = {
+                "schema_version": 2,
+                "node_id": _stage_node_id(call_id, stage, task_id),
+                "parent_node_id": _stage_node_id(call_id, "query")
+                if stage != "query"
+                else None,
+                "stage": stage,
+                "scope": scope,
+                "task_id": task_id,
+                "scene_id": scene_id,
+                "scene_name": scene_name,
+                "status": status,
+                "title": title,
+                "detail": detail,
+                "started_at": started_at,
+                "ended_at": _utc_now() if terminal else None,
+                "duration_ms": (
+                    duration_ms
+                    if duration_ms is not None
+                    else (_duration_ms(started_monotonic) if terminal else None)
+                ),
+                "result": result,
+                "error": error,
+            }
+            await call_stream_callback("ask_data.stage", event)
+
         await call_stream_callback(
             "ask_data.started",
             {
@@ -247,15 +301,27 @@ def make_ask_data_tools(
                 "detail": normalized_question,
             },
         )
-        routing_started = monotonic()
-        await call_stream_callback(
-            "ask_data.stage",
-            {
-                "stage": "routing",
-                "title": "正在语义选择业务场景",
-                "detail": "基于用户问题和场景 Snapshot 进行判断",
-            },
+        await emit_stage(
+            "query",
+            status="running",
+            title="业务问数",
+            detail=normalized_question,
+            started_at=query_started_at,
+            started_monotonic=query_started,
         )
+        routing_started = monotonic()
+        routing_started_at = _utc_now()
+        await emit_stage(
+            "routing",
+            status="running",
+            title="正在语义选择业务场景",
+            detail="基于用户问题和场景 Snapshot 进行判断",
+            started_at=routing_started_at,
+            started_monotonic=routing_started,
+        )
+        plan = None
+        formatting_started: float | None = None
+        formatting_started_at: str | None = None
         try:
             plan = await _route_ask_data_plan(
                 normalized_question,
@@ -264,32 +330,15 @@ def make_ask_data_tools(
                 max_scenes=10,
             )
             scenes._require_plan_scene_access(principal, plan)
-            routing_duration_ms = _duration_ms(routing_started)
-            await call_stream_callback(
-                "ask_data.stage",
-                {
-                    "stage": "routing",
-                    "title": "业务场景语义选择完成",
-                    "detail": "基于用户问题和场景 Snapshot 完成判断",
-                    "status": "done",
-                    "duration_ms": routing_duration_ms,
-                },
+            await emit_stage(
+                "routing",
+                status="done",
+                title="业务场景语义选择完成",
+                detail="基于用户问题和场景 Snapshot 完成判断",
+                started_at=routing_started_at,
+                started_monotonic=routing_started,
+                result={"action": plan.action, "task_count": len(plan.tasks)},
             )
-            if plan.action == "execute":
-                planning_started = monotonic()
-                planning_detail = "、".join(
-                    _scene_display_name(task.scene_id) for task in plan.tasks
-                )
-                await call_stream_callback(
-                    "ask_data.stage",
-                    {
-                        "stage": "planning",
-                        "title": "已选中业务场景",
-                        "detail": planning_detail,
-                        "status": "done",
-                        "duration_ms": _duration_ms(planning_started),
-                    },
-                )
             sql_by_task = await _build_scene_sqls(
                 plan,
                 scene_query_agent,
@@ -297,16 +346,47 @@ def make_ask_data_tools(
                 max_parallel_scene_agents=_scene_agent_parallelism(
                     scenes, max_parallel_scene_agents
                 ),
+                call_id=call_id,
             )
-            await call_stream_callback(
-                "ask_data.stage",
-                {
-                    "stage": "querying",
-                    "title": "正在执行场景 SQL",
-                    "detail": f"并发执行 {len(sql_by_task)} 个场景",
-                },
-            )
-            query_started = monotonic()
+
+            async def on_sql_task_event(event: dict[str, Any]) -> None:
+                scene_id = str(event.get("scene_id") or "unknown")
+                scene_name = _scene_display_name(scene_id)
+                status = str(event.get("status") or "running")
+                result = event.get("result") or {}
+                error = event.get("error")
+                if status == "running":
+                    title = f"正在执行 SQL：{scene_name}"
+                    detail = "正在查询业务数据"
+                elif status == "done":
+                    title = f"SQL 执行成功：{scene_name}"
+                    detail = f"{result.get('row_count', 0)} 行"
+                elif status == "cancelled":
+                    title = f"SQL 执行已取消：{scene_name}"
+                    detail = "查询已取消"
+                else:
+                    title = f"SQL 执行失败：{scene_name}"
+                    detail = str((error or {}).get("message") or "查询失败")
+                await emit_stage(
+                    "sql_exec",
+                    status=status,
+                    title=title,
+                    detail=detail,
+                    started_at=str(event.get("started_at") or _utc_now()),
+                    started_monotonic=query_started,
+                    scope="task",
+                    task_id=str(event.get("task_id") or "unknown"),
+                    scene_id=scene_id,
+                    scene_name=scene_name,
+                    result=result or None,
+                    error=error,
+                    duration_ms=(
+                        int(event["duration_ms"])
+                        if isinstance(event.get("duration_ms"), (int, float))
+                        else None
+                    ),
+                )
+
             query, result = await scenes.get_run_service().execute(
                 question=normalized_question,
                 plan=plan,
@@ -320,18 +400,74 @@ def make_ask_data_tools(
                 max_agents=10,
                 entry_type="main_agent",
                 sql_by_task=sql_by_task,
+                on_task_event=on_sql_task_event,
+            )
+            formatting_started = monotonic()
+            formatting_started_at = _utc_now()
+            await emit_stage(
+                "formatting",
+                status="running",
+                title="正在整理查询结果",
+                detail="正在构造查询响应",
+                started_at=formatting_started_at,
+                started_monotonic=formatting_started,
             )
             payload = scenes._query_response(query, result, plan)
-            payload["querying_duration_ms"] = _duration_ms(query_started)
+        except CancelledError:
+            if plan is None:
+                await emit_stage(
+                    "routing",
+                    status="cancelled",
+                    title="业务场景语义选择已取消",
+                    detail="查询已取消",
+                    started_at=routing_started_at,
+                    started_monotonic=routing_started,
+                )
+            if formatting_started is not None and formatting_started_at is not None:
+                await emit_stage(
+                    "formatting",
+                    status="cancelled",
+                    title="查询结果整理已取消",
+                    detail="查询已取消",
+                    started_at=formatting_started_at,
+                    started_monotonic=formatting_started,
+                )
+            await emit_stage(
+                "query",
+                status="cancelled",
+                title="业务问数已取消",
+                detail="查询已取消",
+                started_at=query_started_at,
+                started_monotonic=query_started,
+            )
+            raise
         except Exception as exc:
+            if formatting_started is not None and formatting_started_at is not None:
+                await emit_stage(
+                    "formatting",
+                    status="failed",
+                    title="查询结果整理失败",
+                    detail=str(exc),
+                    started_at=formatting_started_at,
+                    started_monotonic=formatting_started,
+                    error={"code": type(exc).__name__, "message": str(exc)},
+                )
+            if plan is None:
+                await emit_stage(
+                    "routing",
+                    status="failed",
+                    title="业务场景语义选择失败",
+                    detail=str(exc),
+                    started_at=routing_started_at,
+                    started_monotonic=routing_started,
+                    error={"code": type(exc).__name__, "message": str(exc)},
+                )
             payload = {
                 "status": "failed",
                 "errors": [{"code": "ASK_DATA_EXECUTION_FAILED", "message": str(exc)}],
             }
 
         payload["call_id"] = call_id
-        await _emit_query_outcome_stages(payload, call_stream_callback)
-        await call_stream_callback("ask_data.result", payload)
         clarification = payload.get("clarification")
         if payload.get("status") == "clarification_required" and clarification:
             react_state["ask_data_pending_query_id"] = payload.get("query_id")
@@ -341,12 +477,43 @@ def make_ask_data_tools(
             )
             content = clarification.get("question") or "需要补充业务查询条件。"
         elif payload.get("status") in {"succeeded", "partial_succeeded"}:
-            content = _main_agent_result_content(
-                payload, max_result_tokens, normalized_question
-            )
+            try:
+                content = _main_agent_result_content(
+                    payload, max_result_tokens, normalized_question
+                )
+            except Exception as exc:
+                payload["status"] = "failed"
+                payload.setdefault("errors", []).append(
+                    {"code": type(exc).__name__, "message": str(exc)}
+                )
+                content = str(exc) or "查询结果整理失败。"
+                if formatting_started is not None and formatting_started_at is not None:
+                    await emit_stage(
+                        "formatting",
+                        status="failed",
+                        title="查询结果整理失败",
+                        detail=content,
+                        started_at=formatting_started_at,
+                        started_monotonic=formatting_started,
+                        error={"code": type(exc).__name__, "message": content},
+                    )
         else:
             error = (payload.get("errors") or [{}])[0]
             content = error.get("message") or "业务查询未能完成。"
+
+        if formatting_started is not None and formatting_started_at is not None and payload.get("status") != "failed":
+            await emit_stage(
+                "formatting",
+                status="done",
+                title="查询结果整理完成",
+                detail="已构造查询响应和业务答复内容",
+                started_at=formatting_started_at,
+                started_monotonic=formatting_started,
+                result={
+                    "result_count": len(payload.get("results") or []),
+                    "error_count": len(payload.get("errors") or []),
+                },
+            )
 
         if payload.get("status") == "succeeded":
             try:
@@ -359,6 +526,36 @@ def make_ask_data_tools(
                     "query_id": payload.get("query_id"),
                     "content": cached_content,
                 }
+        query_status = (
+            "done"
+            if payload.get("status")
+            in {"succeeded", "partial_succeeded", "clarification_required"}
+            else "failed"
+        )
+        await emit_stage(
+            "query",
+            status=query_status,
+            title=(
+                "业务问数失败"
+                if query_status == "failed"
+                else "需要补充查询条件"
+                if payload.get("status") == "clarification_required"
+                else "业务问数完成"
+            ),
+            detail=str(payload.get("status") or "completed"),
+            started_at=query_started_at,
+            started_monotonic=query_started,
+            result={
+                "query_id": payload.get("query_id"),
+                "status": payload.get("status"),
+                "result_count": len(payload.get("results") or []),
+                "error_count": len(payload.get("errors") or []),
+            },
+            error=(payload.get("errors") or [None])[0]
+            if query_status == "failed"
+            else None,
+        )
+        await call_stream_callback("ask_data.result", payload)
         return json.dumps(
             {"chunks": [{"output_type": "text", "content": content}]},
             ensure_ascii=False,
@@ -481,6 +678,7 @@ async def _build_scene_sqls(
     scene_query_agent: "SceneQueryAgent | None",
     *,
     stream_callback: Callable[[str, dict[str, Any]], Awaitable[None]],
+    call_id: str | None = None,
     max_parallel_scene_agents: int = 5,
 ) -> dict[str, str]:
     if scene_query_agent is None or plan.action != "execute":
@@ -494,95 +692,85 @@ async def _build_scene_sqls(
 
     async def build_task(task):
         task_started = monotonic()
-        snapshot = scenes._snapshot_service.active(task.scene_id)
-        if snapshot is None:
-            raise ValueError("SCENE_NOT_ACTIVE")
-        scene_name = _scene_display_name(task.scene_id, snapshot)
-        await stream_callback(
-            "ask_data.stage",
-            {
-                "stage": f"subagent-{task.scene_id}",
-                "title": f"场景子 Agent：{scene_name}",
-                "detail": "读取数据字典和业务语义文档",
-                "scene_id": task.scene_id,
-                "scene_name": scene_name,
-            },
+        task_started_at = _utc_now()
+        scene_name = _scene_display_name(task.scene_id)
+        task_id = _task_id(task)
+        node_id = _stage_node_id(call_id or "internal", "sql_gen", task_id)
+
+        async def emit(status: str, title: str, detail: str, **extra: Any) -> None:
+            terminal = status != "running"
+            await stream_callback(
+                "ask_data.stage",
+                {
+                    **({"call_id": call_id} if call_id else {}),
+                    "schema_version": 2,
+                    "node_id": node_id,
+                    "parent_node_id": _stage_node_id(call_id or "internal", "query"),
+                    "stage": "sql_gen",
+                    "scope": "task",
+                    "task_id": task_id,
+                    "scene_id": str(task.scene_id),
+                    "scene_name": scene_name,
+                    "status": status,
+                    "title": title,
+                    "detail": detail,
+                    "started_at": task_started_at,
+                    "ended_at": _utc_now() if terminal else None,
+                    "duration_ms": _duration_ms(task_started) if terminal else None,
+                    "result": None,
+                    "error": None,
+                    **extra,
+                },
+            )
+
+        await emit(
+            "running",
+            f"正在生成 SQL：{scene_name}",
+            "读取场景语义并生成查询语句",
         )
         try:
+            snapshot = scenes._snapshot_service.active(task.scene_id)
+            if snapshot is None:
+                raise ValueError("SCENE_NOT_ACTIVE")
+            scene_name = _scene_display_name(task.scene_id, snapshot)
             async with semaphore:
                 schema = snapshot.runtime_config.get("schema", {})
                 dialect = schema.get("dialect") if isinstance(schema, dict) else None
                 sql = await scene_query_agent.build_sql(
                     snapshot, task.question, dialect=dialect
                 )
-            await stream_callback(
-                "ask_data.stage",
-                {
-                    "stage": f"sql-gen-{task.scene_id}",
-                    "title": f"SQL 生成成功：{scene_name}",
-                    "detail": "已通过绑定表/视图校验",
-                    "status": "done",
-                    "duration_ms": _duration_ms(task_started),
-                    "scene_id": task.scene_id,
-                    "scene_name": scene_name,
-                },
+            await emit(
+                "done",
+                f"SQL 生成成功：{scene_name}",
+                "已通过绑定表/视图校验",
+                scene_name=scene_name,
+                result={"generated": True, "validated": True},
             )
-            return task.task_id, sql
+            return task_id, sql
         except Exception as exc:
-            await stream_callback(
-                "ask_data.stage",
-                {
-                    "stage": f"sql-gen-{task.scene_id}",
-                    "title": f"SQL 生成失败：{scene_name}",
-                    "detail": str(exc),
-                    "status": "failed",
-                    "duration_ms": _duration_ms(task_started),
-                    "scene_id": task.scene_id,
-                    "scene_name": scene_name,
-                },
+            await emit(
+                "failed",
+                f"SQL 生成失败：{scene_name}",
+                str(exc),
+                scene_name=scene_name,
+                error={"code": type(exc).__name__, "message": str(exc)},
+            )
+            raise
+        except CancelledError:
+            await emit(
+                "cancelled",
+                f"SQL 生成已取消：{scene_name}",
+                "查询已取消",
             )
             raise
 
-    pairs = await gather(*(build_task(task) for task in plan.tasks))
-    return dict(pairs)
-
-
-async def _emit_query_outcome_stages(
-    payload: dict[str, Any],
-    stream_callback: Callable[[str, dict[str, Any]], Awaitable[None]],
-) -> None:
-    for result in payload.get("results") or []:
-        scene_id = result.get("scene_id") or result.get("task_id") or "unknown"
-        scene_name = _scene_display_name(str(scene_id))
-        await stream_callback(
-            "ask_data.stage",
-            {
-                "stage": f"sql-exec-{scene_id}",
-                "title": f"SQL 执行成功：{scene_name}",
-                "detail": f"{result.get('row_count', 0)} 行",
-                "status": "done",
-                "duration_ms": result.get("duration_ms"),
-                "scene_id": scene_id,
-                "scene_name": scene_name,
-            },
-        )
-    for error in payload.get("errors") or []:
-        task_id = error.get("task_id") or "unknown"
-        scene_id = error.get("scene_id") or _scene_id_from_task_id(str(task_id))
-        scene_name = _scene_display_name(str(scene_id))
-        await stream_callback(
-            "ask_data.stage",
-            {
-                "stage": f"sql-exec-{task_id}",
-                "title": f"SQL 执行失败：{scene_name}",
-                "detail": error.get("message") or error.get("code") or "查询失败",
-                "status": "failed",
-                "duration_ms": error.get("duration_ms")
-                or payload.get("querying_duration_ms"),
-                "scene_id": scene_id,
-                "scene_name": scene_name,
-            },
-        )
+    outcomes = await gather(
+        *(build_task(task) for task in plan.tasks), return_exceptions=True
+    )
+    errors = [outcome for outcome in outcomes if isinstance(outcome, BaseException)]
+    if errors:
+        raise errors[0]
+    return dict(outcomes)
 
 
 def _main_agent_result_content(

@@ -234,3 +234,6 @@ test_docs
 .qoder/
 .qwencode/
 .sisyphus/
+
+# Local reference files
+/ref/

@@ -101,11 +101,56 @@ async def test_ask_data_route_rejects_when_llm_selector_is_unavailable():
 
 
 @pytest.mark.asyncio
+async def test_build_scene_sqls_emits_a_failed_terminal_for_the_started_node(monkeypatch):
+    snapshot_service = InMemorySnapshotService()
+    snapshot = build_test_snapshot("contracts", "r1")
+    snapshot_service.save_ready(snapshot)
+    snapshot_service.activate(snapshot.snapshot_id)
+    monkeypatch.setattr(scenes, "_snapshot_service", snapshot_service)
+
+    class FakeSceneQueryAgent:
+        async def build_sql(self, *_args, **_kwargs):
+            raise ValueError("SQL generation failed")
+
+    events = []
+
+    async def stream_callback(event_type, payload):
+        events.append((event_type, payload))
+
+    plan = SimpleNamespace(
+        action="execute",
+        tasks=[
+            SimpleNamespace(
+                task_id="task-contracts",
+                scene_id="contracts",
+                question="show contracts",
+            )
+        ],
+    )
+
+    with pytest.raises(ValueError, match="SQL generation failed"):
+        await ask_data_tools._build_scene_sqls(
+            plan,
+            FakeSceneQueryAgent(),
+            stream_callback=stream_callback,
+            call_id="call-test",
+        )
+
+    stage_events = [payload for event_type, payload in events if event_type == "ask_data.stage"]
+    assert [event["status"] for event in stage_events] == ["running", "failed"]
+    assert stage_events[0]["node_id"] == stage_events[1]["node_id"]
+    assert stage_events[1]["stage"] == "sql_gen"
+    assert stage_events[1]["error"]["message"] == "SQL generation failed"
+    assert isinstance(stage_events[1]["duration_ms"], int)
+
+
+@pytest.mark.asyncio
 async def test_ask_data_query_reuses_success_in_same_turn_before_sql(monkeypatch):
     calls = {"route": 0, "build_sql": 0, "execute": 0}
     events = []
     plan = SimpleNamespace(
-        action="execute", tasks=[SimpleNamespace(scene_id="projects")]
+        action="execute",
+        tasks=[SimpleNamespace(task_id="task-projects", scene_id="projects")],
     )
 
     async def stream_callback(event_type, payload):
@@ -123,7 +168,40 @@ async def test_ask_data_query_reuses_success_in_same_turn_before_sql(monkeypatch
         async def execute(self, **kwargs):
             calls["execute"] += 1
             calls["idempotency_key"] = kwargs["idempotency_key"]
-            return object(), object()
+            task_callback = kwargs.get("on_task_event")
+            if task_callback:
+                await task_callback(
+                    {
+                        "task_id": "task-projects",
+                        "scene_id": "projects",
+                        "status": "running",
+                        "started_at": "2026-10-21T08:30:00Z",
+                        "ended_at": None,
+                        "duration_ms": None,
+                    }
+                )
+                await task_callback(
+                    {
+                        "task_id": "task-projects",
+                        "scene_id": "projects",
+                        "status": "done",
+                        "started_at": "2026-10-21T08:30:00Z",
+                        "ended_at": "2026-10-21T08:30:00.042Z",
+                        "duration_ms": 42,
+                        "result": {"row_count": 1, "truncated": False},
+                    }
+                )
+            return object(), SimpleNamespace(
+                results=[
+                    {
+                        "task_id": "task-projects",
+                        "scene_id": "projects",
+                        "row_count": 1,
+                        "duration_ms": 42,
+                    }
+                ],
+                errors=[],
+            )
 
     monkeypatch.setattr(ask_data_tools, "_route_ask_data_plan", fake_route)
     monkeypatch.setattr(ask_data_tools, "_build_scene_sqls", fake_build_sqls)
@@ -143,9 +221,11 @@ async def test_ask_data_query_reuses_success_in_same_turn_before_sql(monkeypatch
             "answer": "查询完成",
             "results": [
                 {
+                    "task_id": "task-projects",
                     "scene_id": "projects",
                     "status": "succeeded",
                     "row_count": 1,
+                    "duration_ms": 42,
                     "columns": [{"key": "project_name"}],
                     "rows": [{"project_name": "项目A"}],
                     "sql_explanation": {
@@ -190,6 +270,19 @@ async def test_ask_data_query_reuses_success_in_same_turn_before_sql(monkeypatch
     }
     assert stage_call_ids == {first_payload["call_id"]}
     assert [event_type for event_type, _ in events].count("ask_data.reused") == 1
+    stage_events = [
+        payload
+        for event_type, payload in events
+        if event_type == "ask_data.stage"
+    ]
+    for stage in ("query", "routing", "sql_exec", "formatting"):
+        stage_pair = [event for event in stage_events if event["stage"] == stage]
+        assert [event["status"] for event in stage_pair] == ["running", "done"]
+        assert len({event["node_id"] for event in stage_pair}) == 1
+        assert isinstance(stage_pair[-1]["duration_ms"], int)
+    sql_exec = next(event for event in stage_events if event["stage"] == "sql_exec" and event["status"] == "done")
+    assert sql_exec["duration_ms"] == 42
+    assert not any(event["stage"] == "planning" for event in stage_events)
 
 
 @pytest.mark.asyncio

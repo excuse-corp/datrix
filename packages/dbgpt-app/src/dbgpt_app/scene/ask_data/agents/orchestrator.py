@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from time import monotonic
 from typing import Any, Awaitable, Callable
 
@@ -63,6 +64,7 @@ class AskDataOrchestrator:
         engine_resolver: Callable[[str], Any | Awaitable[Any]],
         max_agents: int | None = None,
         sql_by_task: dict[str, str] | None = None,
+        on_task_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> QueryRunResult:
         acquired = False
         try:
@@ -87,6 +89,7 @@ class AskDataOrchestrator:
                 engine_resolver=engine_resolver,
                 max_agents=max_agents,
                 sql_by_task=sql_by_task,
+                on_task_event=on_task_event,
             )
         finally:
             if acquired:
@@ -99,6 +102,7 @@ class AskDataOrchestrator:
         engine_resolver: Callable[[str], Any | Awaitable[Any]],
         max_agents: int | None = None,
         sql_by_task: dict[str, str] | None = None,
+        on_task_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> QueryRunResult:
         started = monotonic()
         if plan.action == "clarify":
@@ -152,11 +156,46 @@ class AskDataOrchestrator:
             datasource_semaphore = datasource_semaphores.setdefault(
                 data_source, asyncio.Semaphore(self.max_parallel_per_datasource)
             )
+            task_started: float | None = None
+            task_started_at: str | None = None
+
+            async def report_task_event(
+                status: str,
+                *,
+                duration_ms: int | None = None,
+                result: Any | None = None,
+                error: dict[str, str] | None = None,
+            ) -> None:
+                if on_task_event is None or task_started is None or task_started_at is None:
+                    return
+                ended_at = (
+                    datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                    if status != "running"
+                    else None
+                )
+                await on_task_event(
+                    {
+                        "task_id": task.task_id,
+                        "scene_id": task.scene_id,
+                        "status": status,
+                        "started_at": task_started_at,
+                        "ended_at": ended_at,
+                        "duration_ms": duration_ms,
+                        "result": result,
+                        "error": error,
+                    }
+                )
+
             try:
                 async with task_semaphore, datasource_semaphore:
                     engine = engine_resolver(data_source)
                     if asyncio.iscoroutine(engine):
                         engine = await engine
+                    task_started = monotonic()
+                    task_started_at = (
+                        datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                    )
+                    await report_task_event("running")
                     sql = sql_by_task.get(task.task_id)
                     if sql:
                         result = await asyncio.wait_for(
@@ -169,6 +208,14 @@ class AskDataOrchestrator:
                                 rag={"question": task.question},
                             ),
                             timeout=self.task_timeout_seconds,
+                        )
+                        await report_task_event(
+                            "done",
+                            duration_ms=result.duration_ms,
+                            result={
+                                "row_count": result.row_count,
+                                "truncated": result.truncated,
+                            },
                         )
                         results.append(result)
                         return
@@ -193,8 +240,26 @@ class AskDataOrchestrator:
                         ),
                         timeout=self.task_timeout_seconds,
                     )
+                    await report_task_event(
+                        "done",
+                        duration_ms=result.duration_ms,
+                        result={
+                            "row_count": result.row_count,
+                            "truncated": result.truncated,
+                        },
+                    )
                     results.append(result)
             except asyncio.TimeoutError:
+                duration_ms = (
+                    max(0, int((monotonic() - task_started) * 1000))
+                    if task_started is not None
+                    else None
+                )
+                await report_task_event(
+                    "failed",
+                    duration_ms=duration_ms,
+                    error={"code": "AGENT_TIMEOUT", "message": "Task timed out"},
+                )
                 errors.append(
                     {
                         "task_id": task.task_id,
@@ -202,7 +267,25 @@ class AskDataOrchestrator:
                         "message": "Task timed out",
                     }
                 )
+            except asyncio.CancelledError:
+                duration_ms = (
+                    max(0, int((monotonic() - task_started) * 1000))
+                    if task_started is not None
+                    else None
+                )
+                await report_task_event("cancelled", duration_ms=duration_ms)
+                raise
             except Exception as exc:
+                duration_ms = (
+                    max(0, int((monotonic() - task_started) * 1000))
+                    if task_started is not None
+                    else None
+                )
+                await report_task_event(
+                    "failed",
+                    duration_ms=duration_ms,
+                    error={"code": type(exc).__name__, "message": str(exc)},
+                )
                 errors.append(
                     {
                         "task_id": task.task_id,

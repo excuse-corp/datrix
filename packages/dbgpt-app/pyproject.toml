@@ -71,6 +71,8 @@ exclude = [
 [tool.hatch.build.targets.sdist.force-include]
 # Builtin skills
 "../../skills/csv-data-analysis" = "skills/csv-data-analysis"
+"../../skills/document-analysis" = "skills/document-analysis"
+"../../skills/document-data-filler" = "skills/document-data-filler"
 "../../skills/skill-creator" = "skills/skill-creator"
 # Builtin example files
 "../../docker/examples/excel/Walmart_Sales.csv" = "examples/excel/Walmart_Sales.csv"

@@ -9,7 +9,9 @@ import shutil
 import tempfile
 import uuid
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
+from time import monotonic
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
@@ -31,13 +33,25 @@ from dbgpt_app.openapi.api_view_model import (
 )
 from dbgpt_app.openapi.api_v1.react_session_state import (
     infer_active_skill_from_messages,
+    build_react_task_continuation_prompt,
+    is_react_continuation_request,
+    is_react_plan_revision_request,
     is_skill_maintenance_request,
     load_react_session_state,
     record_active_skill,
     record_uploaded_attachment,
+    recover_react_task_checkpoint_from_messages,
     render_react_session_context,
+    restore_react_task_plan,
     save_react_session_state,
+    start_react_task_checkpoint,
+    update_react_task_checkpoint,
+    update_attachment_parse_metadata,
     update_react_session_after_turn,
+)
+from dbgpt_app.scene.conversation_context import (
+    DEFAULT_CONTEXT_TOKEN_BUDGET,
+    build_conversation_context,
 )
 from dbgpt_app.openapi.api_v1.skill_state import (
     normalize_skill_path,
@@ -45,6 +59,7 @@ from dbgpt_app.openapi.api_v1.skill_state import (
     set_skill_enabled,
     skill_enabled,
 )
+from dbgpt_app.openapi.api_v1.upload_limits import MAX_CHAT_UPLOAD_FILES
 from dbgpt_serve.utils.auth import UserRequest, get_user_from_headers
 
 router = APIRouter()
@@ -61,7 +76,11 @@ REACT_ASK_DATA_PENDING: Dict[str, Dict[str, str]] = {}
 REACT_AGENT_RUNS: Dict[str, Dict[str, Any]] = {}
 
 DEFAULT_SKILLS_DIR = SKILLS_DIR
-PROTECTED_SKILL_NAMES = {"csv-data-analysis", "skill-creator"}
+PROTECTED_SKILL_NAMES = {
+    "csv-data-analysis",
+    "document-data-filler",
+    "skill-creator",
+}
 AUTO_DATA_MARKER_PATTERN = re.compile(
     r"###([A-Z0-9_]+)_START###\s*(.*?)\s*###\1_END###", re.DOTALL
 )
@@ -81,6 +100,7 @@ REACT_REASON_REPEATED_ACTION = "repeated_action"
 REACT_REASON_CANCELLED = "cancelled"
 REACT_REASON_EXCEPTION = "exception"
 REACT_REASON_STOPPED_WITHOUT_TERMINATE = "stopped_without_terminate"
+REACT_REASON_STREAM_IDLE_TIMEOUT = "stream_idle_timeout"
 
 _LLM_ERROR_TEXT_MARKERS = (
     "LLMServer Generate Error",
@@ -165,6 +185,10 @@ def _react_parse_error_limit() -> int:
 
 def _react_same_action_repeat_limit() -> int:
     return _env_int("DATAMAN_REACT_SAME_ACTION_REPEAT_LIMIT", 3, min_value=1)
+
+
+def _react_stream_idle_timeout() -> int:
+    return _env_int("DATAMAN_REACT_STREAM_IDLE_TIMEOUT", 300, min_value=0)
 
 
 def _react_step_counts(history_steps: List[Dict[str, Any]]) -> Dict[str, int]:
@@ -260,7 +284,9 @@ def _compute_react_run_outcome(
         ):
             reason = REACT_REASON_LLM_ERROR
         else:
-            reason = _last_failed_step_error_type(history_steps) or REACT_REASON_EXCEPTION
+            reason = (
+                _last_failed_step_error_type(history_steps) or REACT_REASON_EXCEPTION
+            )
         return _react_outcome_payload(
             status=REACT_STATUS_FAILED,
             termination_reason=reason,
@@ -270,13 +296,6 @@ def _compute_react_run_outcome(
         )
 
     if action_report and getattr(action_report, "terminate", False):
-        if _has_open_task_plan(todo_list):
-            return _react_outcome_payload(
-                status=REACT_STATUS_INCOMPLETE,
-                termination_reason=REACT_REASON_TASK_PLAN_INCOMPLETE,
-                history_steps=history_steps,
-                max_steps=max_steps,
-            )
         return _react_outcome_payload(
             status=REACT_STATUS_COMPLETED,
             termination_reason=REACT_REASON_TERMINATE,
@@ -316,8 +335,6 @@ def _compute_react_run_outcome(
         if len(history_steps) >= max_steps
         else REACT_REASON_STOPPED_WITHOUT_TERMINATE
     )
-    if reason != REACT_REASON_MAX_STEPS and _has_open_task_plan(todo_list):
-        reason = REACT_REASON_TASK_PLAN_INCOMPLETE
     return _react_outcome_payload(
         status=REACT_STATUS_INCOMPLETE,
         termination_reason=reason,
@@ -343,10 +360,22 @@ def _final_content_for_outcome(final_content: str, outcome: Dict[str, Any]) -> s
     if reason == REACT_REASON_MAX_STEPS:
         return "任务未完成：已达到最大执行轮数，未收到 terminate。"
     if reason == REACT_REASON_TASK_PLAN_INCOMPLETE:
-        return "任务未完成：执行流结束时仍有计划项未完成。"
+        return final_content or "任务未完成：执行流结束时仍有计划项未完成。"
     if reason == REACT_REASON_REPEATED_ACTION:
         return "任务未完成：检测到连续重复动作且没有新的有效产出。"
     return final_content or "任务未完成：执行流结束但未收到 terminate。"
+
+
+def _should_handle_pending_ask_data(
+    pending_ask_data: Optional[Dict[str, Any]],
+    user_id: str,
+    *,
+    is_continuation: bool,
+    active_task: Any,
+) -> bool:
+    if not pending_ask_data or pending_ask_data.get("user_id") != user_id:
+        return False
+    return not (is_continuation and isinstance(active_task, dict))
 
 
 def _skill_root_name(file_path: str) -> str:
@@ -420,7 +449,9 @@ def _skill_unavailable_message(skill_name: str, skill_manager: Any) -> Optional[
     if not skill_path or not Path(skill_path).expanduser().exists():
         return f"Skill '{skill_name}' no longer exists"
     try:
-        if not skill_enabled(_skill_file_for_state(skill_path), skills_dir=DEFAULT_SKILLS_DIR):
+        if not skill_enabled(
+            _skill_file_for_state(skill_path), skills_dir=DEFAULT_SKILLS_DIR
+        ):
             return f"Skill '{skill_name}' is disabled"
     except Exception:
         return None
@@ -532,7 +563,9 @@ def _json_load_object(value: str) -> Any:
             return None
 
 
-def _extract_ask_data_payload(value: Any, *, depth: int = 0) -> Optional[Dict[str, Any]]:
+def _extract_ask_data_payload(
+    value: Any, *, depth: int = 0
+) -> Optional[Dict[str, Any]]:
     if depth > 5 or value is None:
         return None
     if isinstance(value, str):
@@ -542,20 +575,19 @@ def _extract_ask_data_payload(value: Any, *, depth: int = 0) -> Optional[Dict[st
         return _extract_ask_data_payload(parsed, depth=depth + 1)
     if not isinstance(value, dict):
         return None
-    if (
-        value.get("status")
-        and (
-            isinstance(value.get("scenes"), list)
-            or isinstance(value.get("results"), list)
-            or isinstance(value.get("scene_summaries"), list)
-        )
+    if value.get("status") and (
+        isinstance(value.get("scenes"), list)
+        or isinstance(value.get("results"), list)
+        or isinstance(value.get("scene_summaries"), list)
     ):
         return value
     chunks = value.get("chunks")
     if isinstance(chunks, list):
         for chunk in reversed(chunks):
             if isinstance(chunk, dict):
-                nested = _extract_ask_data_payload(chunk.get("content"), depth=depth + 1)
+                nested = _extract_ask_data_payload(
+                    chunk.get("content"), depth=depth + 1
+                )
                 if nested:
                     return nested
     for key in ("content", "data", "payload", "result"):
@@ -563,81 +595,6 @@ def _extract_ask_data_payload(value: Any, *, depth: int = 0) -> Optional[Dict[st
         if nested:
             return nested
     return None
-
-
-def _compact_recent_ask_data_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
-    try:
-        compact = json.loads(json.dumps(payload, ensure_ascii=False, default=str))
-    except Exception:
-        return payload
-    for key in ("scenes", "results"):
-        items = compact.get(key)
-        if not isinstance(items, list):
-            continue
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            rows = item.get("rows")
-            if isinstance(rows, list) and len(rows) > 80:
-                item["rows"] = rows[:80]
-                item["truncated_for_recent_context"] = True
-                item["original_row_count"] = len(rows)
-    return compact
-
-
-def _render_recent_ask_data_context(messages: List[Any], *, max_chars: int = 24000) -> str:
-    """Render the latest AskData result from stored view history for reuse."""
-
-    for message in reversed(messages or []):
-        if getattr(message, "type", None) != "view":
-            continue
-        content = getattr(message, "content", "")
-        content_text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False, default=str)
-        payload = _json_load_object(content_text)
-        if not isinstance(payload, dict):
-            continue
-
-        candidates: List[Any] = []
-        if payload.get("type") == "react-agent":
-            steps = payload.get("steps") or []
-            if isinstance(steps, list):
-                for step in reversed(steps):
-                    if not isinstance(step, dict):
-                        continue
-                    action = str(step.get("action") or "")
-                    step_id = str(step.get("id") or "")
-                    title = str(step.get("title") or "")
-                    if action != "ask_data_query" and "ask-data" not in step_id and "AskData" not in title:
-                        continue
-                    outputs = step.get("outputs") or []
-                    if isinstance(outputs, list):
-                        for output in reversed(outputs):
-                            if isinstance(output, dict):
-                                candidates.append(output.get("content"))
-            candidates.append(payload.get("final_content"))
-        else:
-            candidates.append(payload)
-
-        for candidate in candidates:
-            ask_payload = _extract_ask_data_payload(candidate)
-            if not ask_payload:
-                continue
-            compact = _compact_recent_ask_data_payload(ask_payload)
-            data = json.dumps(compact, ensure_ascii=False, default=str)
-            if len(data) > max_chars:
-                data = data[:max_chars] + "\n...<truncated recent AskData context>"
-            return f"""
-## Recent AskData Result From This Session
-The following data was produced by a previous `ask_data_query` in this same conversation.
-- This block has higher priority than the general business-data query rule for report/visualization/formatting follow-ups.
-- If the latest user request asks to create an HTML report, visualization, summary, or formatted deliverable based on already queried data, use this data directly.
-- Do not call `ask_data_query` again unless the user asks for refreshed data, changes filters/scope, or this data is insufficient.
-
-```json
-{data}
-```
-""".strip()
-    return ""
 
 
 def _extract_auto_data_markers(text: str) -> tuple[str, Dict[str, str]]:
@@ -745,9 +702,7 @@ def _render_tool_parameters(tool_resource: "BaseTool") -> str:
         arg_type = getattr(meta, "type", None) or "any"
         required = "required" if getattr(meta, "required", True) else "optional"
         description = (
-            getattr(meta, "description", None)
-            or getattr(meta, "title", None)
-            or name
+            getattr(meta, "description", None) or getattr(meta, "title", None) or name
         )
         if len(description) > 120:
             description = description[:117] + "..."
@@ -925,7 +880,9 @@ async def list_skills(
             enabled = True
             if file_path:
                 try:
-                    enabled = skill_enabled(file_path, skills_dir=str(skills_dir_resolved))
+                    enabled = skill_enabled(
+                        file_path, skills_dir=str(skills_dir_resolved)
+                    )
                 except Exception:
                     enabled = True
 
@@ -1140,7 +1097,9 @@ async def delete_skill(
         return Result.failed(code="E4002", msg=str(exc))
 
     if _is_protected_skill_path(rel_path, skill_name or None):
-        return Result.failed(code="E4030", msg="Official built-in skills cannot be deleted")
+        return Result.failed(
+            code="E4030", msg="Official built-in skills cannot be deleted"
+        )
 
     try:
         target, normalized = _resolve_skill_delete_target(rel_path)
@@ -1638,6 +1597,29 @@ async def _react_agent_stream(
     dialogue: ConversationVo,
     user_token: UserRequest | None = None,
 ) -> AsyncGenerator[str, None]:
+    ext_info = dialogue.ext_info if isinstance(dialogue.ext_info, dict) else {}
+    run_id = str(
+        ext_info.get("client_run_id") or ext_info.get("run_id") or uuid.uuid4().hex
+    )
+    dialogue.ext_info = {**ext_info, "client_run_id": run_id}
+    try:
+        async for event in _react_agent_stream_impl(dialogue, user_token):
+            yield event
+    finally:
+        run_state = REACT_AGENT_RUNS.pop(run_id, None)
+        if run_state:
+            cancel_event = run_state.get("cancel_event")
+            if cancel_event is not None:
+                cancel_event.set()
+            attachment_service = run_state.get("attachment_service")
+            if attachment_service is not None:
+                attachment_service.cancel_active_parsers()
+
+
+async def _react_agent_stream_impl(
+    dialogue: ConversationVo,
+    user_token: UserRequest | None = None,
+) -> AsyncGenerator[str, None]:
     import asyncio
 
     from dbgpt.agent import AgentContext, AgentMemory, AgentMessage
@@ -1668,25 +1650,121 @@ async def _react_agent_stream(
         user_input = str(user_input or "")
 
     file_path = None
+    file_paths: List[str] = []
+    attachment_metadata: List[Dict[str, Any]] = []
     skill_name = None
     run_id = None
     if dialogue.ext_info and isinstance(dialogue.ext_info, dict):
-        file_path = dialogue.ext_info.get("file_path")
+        raw_file_paths = dialogue.ext_info.get("file_paths")
+        if isinstance(raw_file_paths, list):
+            file_paths = [str(path) for path in raw_file_paths if path]
+        if not file_paths and dialogue.ext_info.get("file_path"):
+            file_paths = [str(dialogue.ext_info["file_path"])]
+        raw_attachments = dialogue.ext_info.get("attachments")
+        if isinstance(raw_attachments, list):
+            attachment_metadata = [
+                item for item in raw_attachments if isinstance(item, dict)
+            ][:5]
+        file_path = file_paths[0] if file_paths else None
         skill_name = dialogue.ext_info.get("skill_name")
         run_id = dialogue.ext_info.get("client_run_id") or dialogue.ext_info.get(
             "run_id"
         )
     run_id = str(run_id or uuid.uuid4().hex)
     conv_id = dialogue.conv_uid or str(uuid.uuid4())
+    user_id = getattr(user_token, "user_id", None) or dialogue.user_name or "default"
+    cancel_event = asyncio.Event()
+    REACT_AGENT_RUNS[run_id] = {
+        "conv_uid": conv_id,
+        "user_id": str(user_id),
+        "cancel_event": cancel_event,
+        "attachment_service": None,
+    }
     skill_maintenance = is_skill_maintenance_request(user_input)
     session_state = load_react_session_state(conv_id)
-    if file_path:
-        record_uploaded_attachment(session_state, file_path)
-    cancel_event = asyncio.Event()
+    attachment_ids = []
+    for index, uploaded_path in enumerate(file_paths):
+        metadata = attachment_metadata[index] if index < len(attachment_metadata) else None
+        record_uploaded_attachment(session_state, uploaded_path, metadata)
+        attachment_ids.append(
+            str(metadata.get("attachment_id"))
+            if metadata and metadata.get("attachment_id")
+            else None
+        )
+
+    if file_paths:
+        try:
+            from starlette.concurrency import run_in_threadpool
+            from dbgpt_app.attachment import AttachmentParseService
+            from dbgpt_app.openapi.api_v1.python_upload_api import _user_upload_dir
+
+            attachment_service = AttachmentParseService(cache_namespace=str(user_id))
+            REACT_AGENT_RUNS[run_id]["attachment_service"] = attachment_service
+            upload_root = _user_upload_dir(str(user_id))
+            parse_results = await run_in_threadpool(
+                attachment_service.parse_files,
+                file_paths,
+                attachment_ids=attachment_ids,
+                allowed_roots=[upload_root],
+            )
+            if cancel_event.is_set():
+                REACT_AGENT_RUNS.pop(run_id, None)
+                yield _sse_event(
+                    {
+                        "type": "run.cancelled",
+                        "run_id": run_id,
+                        "status": REACT_STATUS_CANCELLED,
+                        "termination_reason": REACT_REASON_CANCELLED,
+                    }
+                )
+                yield _sse_event({"type": "done"})
+                return
+            for uploaded_path, parse_result in zip(file_paths, parse_results):
+                update_attachment_parse_metadata(
+                    session_state,
+                    uploaded_path,
+                    parse_result,
+                )
+            save_react_session_state(session_state)
+            yield _sse_event(
+                {
+                    "type": "attachment.status",
+                    "attachments": [
+                        {
+                            "attachment_id": result.attachment_id,
+                            "filename": result.filename,
+                            "format": result.format,
+                            "status": result.status,
+                            "block_count": len(result.blocks),
+                            "text_chars": len(result.plain_text),
+                            "page_count": result.metadata.get("page_count"),
+                            "slide_count": result.metadata.get("slide_count"),
+                            "warnings": result.warnings[:3],
+                        }
+                        for result in parse_results
+                    ],
+                }
+            )
+        except Exception as exc:
+            logger.warning("Attachment auto-parse failed without blocking chat: %s", exc)
+            if cancel_event.is_set():
+                REACT_AGENT_RUNS.pop(run_id, None)
+                yield _sse_event(
+                    {
+                        "type": "run.cancelled",
+                        "run_id": run_id,
+                        "status": REACT_STATUS_CANCELLED,
+                        "termination_reason": REACT_REASON_CANCELLED,
+                    }
+                )
+                yield _sse_event({"type": "done"})
+                return
 
     # Connector selection (Task C): only inject user-selected connectors.
     connector_ids: List[str] = _parse_connector_ids(dialogue.ext_info)
-    ask_data_enabled = os.getenv("DBGPT_REACT_ASK_DATA_TOOL_ENABLED", "true").lower() in {
+    ask_data_enabled = os.getenv(
+        "DBGPT_REACT_ASK_DATA_TOOL_ENABLED", "true"
+    ).lower() in {
         "1",
         "true",
         "yes",
@@ -1745,6 +1823,7 @@ async def _react_agent_stream(
         todo_meta: Optional[Dict[str, Any]] = None,
         ask_data_call_id: Optional[str] = None,
         ask_data_reused: bool = False,
+        duration_ms: Optional[int] = None,
     ):
         payload = {
             "type": "step.meta",
@@ -1760,6 +1839,8 @@ async def _react_agent_stream(
             payload["todo_meta"] = todo_meta
         if ask_data_call_id:
             payload["ask_data_call_id"] = ask_data_call_id
+        if duration_ms is not None:
+            payload["duration_ms"] = duration_ms
         if ask_data_reused:
             payload["ask_data_reused"] = True
         return _sse_event(payload)
@@ -1888,13 +1969,18 @@ async def _react_agent_stream(
 
     # Step 1: Pre-load skills
     load_skills_from_dir(skills_dir, recursive=True)
+
     def _skill_meta_path(meta: Any) -> str:
-        return getattr(meta, "file_path", None) or f"{getattr(meta, 'name', '')}/SKILL.md"
+        return (
+            getattr(meta, "file_path", None) or f"{getattr(meta, 'name', '')}/SKILL.md"
+        )
 
     def _skill_meta_enabled(meta: Any) -> bool:
         try:
             file_path_value = _skill_meta_path(meta)
-            resolved = (Path(skills_dir).expanduser().resolve() / file_path_value).resolve()
+            resolved = (
+                Path(skills_dir).expanduser().resolve() / file_path_value
+            ).resolve()
             if not resolved.is_file():
                 return False
             return skill_enabled(file_path_value, skills_dir=skills_dir)
@@ -1920,6 +2006,9 @@ async def _react_agent_stream(
         "matched": None,
         "skill_prompt": None,
         "file_path": file_path,
+        "file_paths": file_paths,
+        "attachments": attachment_metadata,
+        "user_id": str(user_id),
         "conv_id": conv_id,
         "run_id": run_id,
         "session_state": session_state,
@@ -1927,6 +2016,37 @@ async def _react_agent_stream(
         "cancel_event": cancel_event,
         "turn_id": uuid.uuid4().hex,
     }
+
+    conv_serve = ConversationServe.get_instance(CFG.SYSTEM_APP)
+    storage_conv = StorageConversation(
+        conv_uid=conv_id,
+        chat_mode=dialogue.chat_mode or "chat_react_agent",
+        user_name=dialogue.user_name,
+        sys_code=dialogue.sys_code,
+        summary=dialogue.user_input,
+        app_code=dialogue.app_code,
+        conv_storage=conv_serve.conv_storage,
+        message_storage=conv_serve.message_storage,
+    )
+    recovered_task = recover_react_task_checkpoint_from_messages(
+        session_state, storage_conv.messages
+    )
+    if recovered_task:
+        save_react_session_state(session_state)
+    plan_revision_requested = is_react_plan_revision_request(user_input)
+    is_continuation = is_react_continuation_request(user_input) or (
+        plan_revision_requested and isinstance(session_state.get("active_task"), dict)
+    )
+    active_task = session_state.get("active_task")
+    task_id = (
+        str(active_task.get("task_id"))
+        if is_continuation
+        and isinstance(active_task, dict)
+        and active_task.get("task_id")
+        else str(react_state.get("turn_id"))
+    )
+    react_state["task_id"] = task_id
+    react_state["is_continuation"] = is_continuation
 
     # Pre-select skill if skill_name provided in ext_info
     pre_matched_skill = None
@@ -2393,6 +2513,7 @@ print(json.dumps(summary, ensure_ascii=False))
     # ── Import built-in tools from tools/ directory ──
     from dbgpt_app.openapi.api_v1.tools import (
         ask_data_capability_summary,
+        make_attachment_tools,
         make_ask_data_tools,
         make_code_interpreter,
         make_execute_analysis,
@@ -2417,8 +2538,33 @@ print(json.dumps(summary, ensure_ascii=False))
         await stream_queue.put({"type": event_type, **payload})
 
     # ── Build tool instances from tools/ directory ───────────────────────
-    _todo_list: List[Dict[str, str]] = []
+    restored_task_plan = (
+        restore_react_task_plan(
+            session_state.get("active_task"),
+            resume_cancelled=bool(react_state.get("is_continuation")),
+        )
+        if react_state.get("is_continuation")
+        else []
+    )
+    if not any(
+        item.get("status") in {"pending", "in_progress", "failed"}
+        for item in restored_task_plan
+    ):
+        restored_task_plan = []
+    _todo_list: List[Dict[str, Any]] = restored_task_plan
+    restored_plan_state = (
+        session_state.get("active_task")
+        if is_continuation and isinstance(session_state.get("active_task"), dict)
+        else {}
+    )
+    todo_plan_state: Dict[str, Any] = {
+        "plan_id": restored_plan_state.get("plan_id"),
+        "revision": restored_plan_state.get("plan_revision", 0),
+        "sequence": restored_plan_state.get("plan_sequence", 0),
+        "locked": bool(_todo_list),
+    }
     load_skill_tool = make_load_skill(react_state)
+    attachment_tools = make_attachment_tools(react_state)
     load_file_tool = make_load_file(react_state)
     execute_analysis_tool = make_execute_analysis(react_state)
     load_tools_tool = make_load_tools(react_state)
@@ -2426,7 +2572,12 @@ print(json.dumps(summary, ensure_ascii=False))
     code_interpreter_tool = make_code_interpreter(react_state)
     shell_interpreter_tool = make_shell_interpreter(react_state)
     html_interpreter_tool = make_html_interpreter(react_state, DEFAULT_SKILLS_DIR)
-    todowrite_tool = make_todowrite(_todo_list, stream_callback)
+    todowrite_tool = make_todowrite(
+        _todo_list,
+        stream_callback,
+        todo_plan_state,
+        allow_revision=plan_revision_requested,
+    )
     question_tool = make_question(react_state, stream_callback)
     ask_data_tools = []
     ask_data_prompt_context = ""
@@ -2462,7 +2613,31 @@ print(json.dumps(summary, ensure_ascii=False))
                 raise RuntimeError("SceneQueryAgent model generation failed")
             return response.text
 
-        scene_query_agent = SceneQueryAgent(generate_scene_query_spec)
+        async def generate_scene_sql(prompt: str) -> str:
+            models = await llm_client.models()
+            model_name = dialogue.model_name or (models[0].model if models else None)
+            if not model_name:
+                raise RuntimeError("No models available for SceneQueryAgent")
+            request = ModelRequest.build_request(
+                model_name,
+                messages=[
+                    ModelMessage(
+                        role=ModelMessageRoleType.HUMAN,
+                        content=prompt,
+                    )
+                ],
+                temperature=0,
+                reasoning_effort="medium",
+            )
+            response = await llm_client.generate(request)
+            if not response.success or not response.has_text:
+                raise RuntimeError("SceneQueryAgent SQL generation failed")
+            return response.text
+
+        scene_query_agent = SceneQueryAgent(
+            generate_scene_query_spec,
+            generate_sql=generate_scene_sql,
+        )
         ask_data_context_budget = await _load_context_budget_config(
             llm_client, dialogue.model_name
         )
@@ -2472,7 +2647,11 @@ print(json.dumps(summary, ensure_ascii=False))
 
         role = getattr(user_token, "role", None)
         ask_data_principal = AskDataPrincipal(
-            user_id=(getattr(user_token, "user_id", None) or dialogue.user_name or "anonymous"),
+            user_id=(
+                getattr(user_token, "user_id", None)
+                or dialogue.user_name
+                or "anonymous"
+            ),
             roles=frozenset({str(role)}) if role else frozenset(),
         )
         ask_data_query_tool, ask_data_capabilities_tool = make_ask_data_tools(
@@ -2488,18 +2667,18 @@ print(json.dumps(summary, ensure_ascii=False))
             "AskData Direct Tool Schema",
             ask_data_tools,
             extra_rules=[
-                "- `ask_data_query` Action Input MUST be `{\"question\": \"<natural-language business question>\"}`.",
-                "- Never call `ask_data_query` with `{\"query\": ...}`; `query` is not a valid parameter name.",
+                '- `ask_data_query` Action Input MUST be `{"question": "<natural-language business question>"}`.',
+                '- Never call `ask_data_query` with `{"query": ...}`; `query` is not a valid parameter name.',
                 "- Do not pass SQL, table names, field names, data-source names, or Snapshot IDs to `ask_data_query`.",
-                "- After `ask_data_query` returns `query_complete: true`, if no extra tool is explicitly needed, call `terminate` immediately with `Action Input: {\"result\": \"final answer\"}`. Do not answer in plain text and do not call `ask_data_query` again with the same question.",
+                '- After `ask_data_query` returns `query_complete: true`, if no extra tool is explicitly needed, call `terminate` immediately with `Action Input: {"result": "final answer"}`. Do not answer in plain text and do not call `ask_data_query` again with the same question.',
                 "- A broader follow-up query is allowed only when the user's explicit request cannot be answered by the returned columns.",
-                "- If a Recent AskData Result block is available and the latest request only asks to report, visualize, summarize, or format already queried data, do not call `ask_data_query` again.",
+                "- Reuse matching completed results from this session for reports or comparisons; rerun a query only when the user requests refresh, changes scope, or required evidence is absent.",
             ],
         )
         ask_data_prompt_context = f"""
 ## Trusted Business Data Query
 {capability_summary}
-- For covered business metrics, statistics, contracts, projects, departments, or time-based aggregation, you MUST call `ask_data_query` unless a Recent AskData Result block already answers the data scope and the latest request only asks for reporting, visualization, summarization, or formatting.
+- For covered business metrics, statistics, contracts, projects, departments, or time-based aggregation, call `ask_data_query` when the current session context does not contain results that answer the requested scope.
 - `ask_data_query` accepts only a natural-language question. Never pass SQL, table names, fields, views, data-source names, or Snapshot IDs.
 - Before calling `ask_data_query`, rewrite the user's latest request into a self-contained natural-language business question if chat history is needed for pronouns, ellipses, or follow-up references.
 - When AskData returns data JSON, use it as the evidence for your final answer. You may call other built-in tools afterwards when the user asked for formatting or visualization.
@@ -2507,7 +2686,7 @@ print(json.dumps(summary, ensure_ascii=False))
 - Write for users who do not know databases: do not repeat SQL, table names, field names, aggregation, grain, or other database terms. If an item is missing, say it was not identified.
 - When an AskData Observation contains `query_complete: true`, the query requirement is satisfied. If no extra tool is explicitly needed, the next response MUST be `Action: terminate` with the full answer inside `Action Input: {{"result": "final answer"}}`. Do not output the final answer as plain Markdown, and never call `ask_data_query` again with the same question in this turn.
 - Do not broaden a successful query merely to add fields, rankings, or analysis that the user did not request.
-- If a "Recent AskData Result From This Session" block is provided and the latest user request asks for a report, visualization, summary, or formatting based on already queried data, this rule overrides the general `ask_data_query` rule: reuse that block directly and do NOT call `ask_data_query` again unless the user requests refreshed data, changes filters/scope, or the provided data is insufficient.
+- For reports, visualizations, comparisons, summaries, or formatting, reuse all matching completed results from prior rounds in the current session. Do not query again merely because another tool or query ran more recently. Query only if the requested scope or freshness requires data that is not present.
 
 {ask_data_tool_schema_context}
 """
@@ -2643,7 +2822,10 @@ print(json.dumps(summary, ensure_ascii=False))
                     changed = True
                     break
 
-        return list(_todo_list) if changed else None
+        if changed:
+            todo_plan_state["sequence"] = int(todo_plan_state.get("sequence") or 0) + 1
+            return list(_todo_list)
+        return None
 
     if not ask_data_enabled:
         llm_client = DefaultLLMClient(
@@ -2666,13 +2848,18 @@ print(json.dumps(summary, ensure_ascii=False))
     react_parse_error_limit = _react_parse_error_limit()
     react_same_action_repeat_limit = _react_same_action_repeat_limit()
 
-    REACT_AGENT_RUNS[run_id] = {
-        "conv_uid": conv_id,
-        "cancel_event": cancel_event,
-        "max_steps": react_max_steps,
-    }
+    REACT_AGENT_RUNS.setdefault(
+        run_id,
+        {"conv_uid": conv_id, "user_id": str(user_id), "cancel_event": cancel_event},
+    ).update({"max_steps": react_max_steps, "user_id": str(user_id)})
+
     pending_ask_data = REACT_ASK_DATA_PENDING.get(conv_id)
-    if pending_ask_data and pending_ask_data.get("user_id") == (dialogue.user_name or "anonymous"):
+    if _should_handle_pending_ask_data(
+        pending_ask_data,
+        dialogue.user_name or "anonymous",
+        is_continuation=is_continuation,
+        active_task=active_task,
+    ):
         from dbgpt_app.openapi.api_v1.tools import reply_to_ask_data_query
         from dbgpt_app.scene.ask_data.security import AskDataPrincipal
 
@@ -2698,7 +2885,9 @@ print(json.dumps(summary, ensure_ascii=False))
         )
         if payload.get("status") == "clarification_required":
             REACT_ASK_DATA_PENDING[conv_id] = {
-                "query_id": str(payload.get("query_id") or pending_ask_data["query_id"]),
+                "query_id": str(
+                    payload.get("query_id") or pending_ask_data["query_id"]
+                ),
                 "user_id": principal.user_id,
             }
             yield _sse_event(
@@ -2711,7 +2900,9 @@ print(json.dumps(summary, ensure_ascii=False))
         else:
             REACT_ASK_DATA_PENDING.pop(conv_id, None)
         yield _sse_event({"type": "ask_data.result", **payload})
-        yield _sse_event({"type": "final", "content": payload.get("answer") or "业务查询已处理。"})
+        yield _sse_event(
+            {"type": "final", "content": payload.get("answer") or "业务查询已处理。"}
+        )
         yield _sse_event({"type": "done"})
         REACT_AGENT_RUNS.pop(run_id, None)
         return
@@ -2725,18 +2916,6 @@ print(json.dumps(summary, ensure_ascii=False))
         gpt_memory.init(conv_id, enable_vis_message=False)
         REACT_AGENT_MEMORY_CACHE[conv_id] = gpt_memory
     agent_memory = AgentMemory(gpts_memory=gpt_memory)
-
-    conv_serve = ConversationServe.get_instance(CFG.SYSTEM_APP)
-    storage_conv = StorageConversation(
-        conv_uid=conv_id,
-        chat_mode=dialogue.chat_mode or "chat_react_agent",
-        user_name=dialogue.user_name,
-        sys_code=dialogue.sys_code,
-        summary=dialogue.user_input,
-        app_code=dialogue.app_code,
-        conv_storage=conv_serve.conv_storage,
-        message_storage=conv_serve.message_storage,
-    )
 
     if pre_matched_skill:
         record_active_skill(
@@ -2758,11 +2937,18 @@ print(json.dumps(summary, ensure_ascii=False))
                 source=inferred_skill.get("source") or "history_inference",
             )
 
-    recent_ask_data_context = _render_recent_ask_data_context(storage_conv.messages)
-    session_context = render_react_session_context(
-        session_state,
+    context_budget_config = await _load_context_budget_config(
+        llm_client=llm_client,
+        model_name=dialogue.model_name,
+    )
+    conversation_context = await build_conversation_context(
         storage_conv.messages,
-        current_user_input=user_input,
+        llm_client=llm_client,
+        model_name=dialogue.model_name,
+        max_tokens=min(
+            DEFAULT_CONTEXT_TOKEN_BUDGET,
+            max(1024, context_budget_config.effective_budget // 4),
+        ),
     )
     storage_conv.save_to_storage()
     storage_conv.start_new_round()
@@ -2772,21 +2958,58 @@ print(json.dumps(summary, ensure_ascii=False))
     # reload or route change can now restore the latest user input instead of
     # falling back to the previous completed round.
     storage_conv.save_to_storage()
+    start_react_task_checkpoint(
+        session_state,
+        task_id=str(react_state.get("task_id") or react_state["turn_id"]),
+        user_input=user_input,
+        round_index=storage_conv.chat_order,
+        resume_task=is_continuation,
+    )
+    save_react_session_state(session_state)
+    active_task = session_state.get("active_task")
+    session_context = render_react_session_context(
+        session_state,
+        conversation_context,
+        current_user_input=user_input,
+    )
+    received_content = (
+        build_react_task_continuation_prompt(active_task, user_input)
+        if is_continuation and isinstance(active_task, dict)
+        else user_input
+    )
     context = AgentContext(
         conv_id=conv_id,
         gpts_app_code="react_agent",
         gpts_app_name="ReAct",
         language="zh",
+        max_new_tokens=8000,
         temperature=dialogue.temperature or 0.2,
         enable_context_management=True,
     )
 
     file_context = ""
-    if file_path:
+    if file_paths:
+        state_attachments = [
+            item
+            for item in session_state.get("attachments", [])
+            if isinstance(item, dict)
+        ]
+        uploaded_file_lines = "\n".join(
+            "- "
+            + str(item.get("filename") or Path(file_paths[index]).name)
+            + f" (attachment_id={item.get('attachment_id') or 'available via list_attachments'}, "
+            + f"format={item.get('format') or 'unknown'}, status={item.get('parse_status') or 'uploaded'})"
+            for index, item in enumerate(state_attachments[-len(file_paths) :])
+        )
+        if not uploaded_file_lines:
+            uploaded_file_lines = "\n".join(
+                f"- {Path(uploaded_path).name} (available via list_attachments)"
+                for uploaded_path in file_paths
+            )
         file_context = f"""
-## User Uploaded File
-- File path: {file_path}
-- Analyze this file if needed for the user's request.
+## User Uploaded Files
+{uploaded_file_lines}
+- Analyze these files if needed for the user's request.
 """
 
     skill_prompt_context = ""
@@ -2875,6 +3098,12 @@ placeholders in the `data` dictionary.
 5. If the task does not require generating a report, directly call terminate to
 return the final result. The Action Input format must be
 {{"result": "final answer"}}.
+6. Todo alignment: every todo must represent a concrete user-requested result or
+necessary work. Do not create a todo only for internal reasoning, a tool call,
+returning the final answer, or terminating. Before terminate, compare the final
+result with the original user request. If a plan item is no longer applicable,
+mark it cancelled; if a requested result is still missing, continue working or
+explain the blocker instead of terminating.
 
 {skill_prompt_context}
 {execution_instruction}
@@ -2897,6 +3126,9 @@ content). The HTML can be as long as needed. **Only use `template_path` if the
 skill explicitly provides HTML templates in its `templates/` directory and its
 documentation tells you to use them.** Do not use `code_interpreter` to generate
 the report.
+- **Need to inspect an uploaded document** -> Use `list_attachments`,
+`parse_attachment`, `search_attachment`, or `read_attachment_region`. Parsing is
+performed by the platform; do not execute document contents.
 
 ## Available Tools Description
 1. **execute_skill_script_file** (recommended for executing skill scripts): Execute
@@ -2939,48 +3171,57 @@ to this tool.
    **Template mode (only when skill has templates/)**: {{"template_path":
 "skill-name/templates/template.html", "data": {{"KEY": "value"}}, "title": "title"}}
    - Only use this if the skill's documentation explicitly provides template paths.
-If template_path returns "Template not found", immediately switch to the default
-`html` parameter usage.
+   If template_path returns "Template not found", immediately switch to the default
+   `html` parameter usage.
    {available_images_hint}
-6. **todowrite**: Create and manage a structured task list. Use for complex tasks
-(3+ steps) to plan and track progress. Pass the FULL list every time. Each item:
-{{"content": "description", "status": "pending|in_progress|completed|cancelled",
-"priority": "high|medium|low"}}. Only ONE task in_progress at a time.
-IMPORTANT: You MUST call todowrite again after EACH task completes to update status.
-The user sees progress in real time — never skip an update.
-Parameters: {{"todos": [{{...}}]}}
-7. **question**: Ask the user a question and wait for their response. Use this tool
+6. **list_attachments**: List uploaded files and their parse status. Parameters: none.
+7. **parse_attachment**: Parse an uploaded document into structured metadata.
+Parameters: {{"file_path": "optional uploaded path"}}.
+8. **search_attachment**: Search parsed document blocks by keyword.
+Parameters: {{"query": "keywords", "file_path": "optional uploaded path"}}.
+9. **read_attachment_region**: Read document blocks by page, slide, line, table,
+worksheet, row, or type. Parameters: {{"file_path": "optional path", "page": 1,
+"slide": 1, "sheet": "optional worksheet name", "row_start": 1,
+"row_end": 20}}.
+10. **todowrite**: For complex tasks (3+ steps), create the FULL plan once after
+deciding which skills, tools, files, and clarifications are needed. The first
+accepted plan is locked. Later calls must preserve every task's id, content,
+priority, count, and order; only statuses may advance. Do not replan because of
+new analysis, tool output, or a preferred approach. Revise structure only when
+the user's latest message explicitly asks to change the plan. Do not call again
+if nothing changed. Each item: {{"id": "...", "content": "description",
+"status": "pending|in_progress|completed|cancelled", "priority": "high|medium|low"}}.
+Only ONE task may be in_progress at a time. Parameters: {{"todos": [{{...}}]}}
+11. **question**: Ask the user a question and wait for their response. Use this tool
    when you need user input, clarification, or a decision to proceed. The tool blocks
    until the user answers.
    Parameters: {{"questions": [{{"question": "...", "header": "...", "options": [
    {{"label": "...", "description": "..."}}, ...]}}]}}. Set multiple=true to allow
    multiple selections. The tool returns the user's selected answers.
-8. **terminate**: Return the final answer when the task is completed. Action Input
+12. **terminate**: Return the final answer when the task is completed. Action Input
 must be {{"result": "your final answer content"}}.
 
 ## Task Management
-For complex tasks that require 3 or more steps, use the `todowrite` tool to create
-a structured task plan BEFORE starting work. This helps users track your progress.
-- Call `todowrite` with the FULL todo list (all items) each time you update.
-- Mark exactly ONE task as `in_progress` at a time.
-- Mark tasks `completed` immediately after finishing each one.
-- Do NOT use todowrite for simple single-step tasks.
-
-CRITICAL: You MUST call `todowrite` to update the task list at EVERY transition:
-1. BEFORE starting a task: mark it `in_progress` (call todowrite)
-2. AFTER finishing a task: mark it `completed` AND mark the next one
-   `in_progress` (call todowrite)
-3. Never skip updating — the user sees this progress in real time.
-Example flow for 3 tasks:
-- Create plan: [task1=in_progress, task2=pending, task3=pending] → call todowrite
-- Finish task1: [task1=completed, task2=in_progress, task3=pending] → call todowrite
-- Finish task2: [task1=completed, task2=completed, task3=in_progress] → call todowrite
-- Finish task3: [task1=completed, task2=completed, task3=completed] → call todowrite
+For complex tasks that require 3 or more steps, first decide the necessary
+skills, tools, resources, files, and user clarifications, then submit one complete
+plan BEFORE execution. That accepted plan is the source of truth for this task.
+Keep its task IDs, wording, priority, count, and order unchanged. During execution,
+only update statuses: mark the current task completed and the next task
+in_progress when the work actually transitions. Never submit a replacement plan
+because analysis or tool results suggest a different approach. If a task cannot
+be completed as written, preserve the plan and explain the blocker to the user.
+Only an explicit request in the user's latest message to change the plan permits
+a structural revision; ordinary follow-up questions or new findings do not.
+Do not call `todowrite` when neither the plan nor its statuses changed. Do NOT
+use it for simple single-step tasks.
+Todo status is advisory progress metadata and must not override a valid answer
+to the user's request. Judge completion against the original request, not only
+whether every planned item was mechanically marked completed.
 
 {file_context}
 {session_context}
+{{{{ task_progress }}}}
 {ask_data_prompt_context}
-{recent_ask_data_context}
 ## ReAct Output Format
 Must output for each interaction round:
 Thought: Analyze current task status and think about what to do next
@@ -3001,6 +3242,7 @@ only inside `Action Input.result`.
                 execute_skill_script,
                 get_skill_resource,
                 execute_skill_script_file_tool,
+                *attachment_tools,
                 shell_interpreter_tool,
                 html_interpreter_tool,
                 todowrite_tool,
@@ -3033,25 +3275,27 @@ HTML report, or interactive report, the final presentation step must call
 `html_interpreter` to render it. It is forbidden to output HTML using only
 `code_interpreter` and then directly terminate. Correct process: code_interpreter
 writes to .html file -> html_interpreter(file_path=...) renders -> terminate.**
+7. Todo alignment: every todo must represent a concrete user-requested result or
+necessary work. Do not create a todo only for internal reasoning, a tool call,
+returning the final answer, or terminating. Before terminate, compare the final
+result with the original user request. If a plan item is no longer applicable,
+mark it cancelled; if a requested result is still missing, continue working or
+explain the blocker instead of terminating.
 
 ## Task Management
-For complex tasks that require 3 or more steps, use the `todowrite` tool to create
-a structured task plan BEFORE starting work. This helps users track your progress.
-- Call `todowrite` with the FULL todo list (all items) each time you update.
-- Mark exactly ONE task as `in_progress` at a time.
-- Mark tasks `completed` immediately after finishing each one.
-- Do NOT use todowrite for simple single-step tasks.
-
-CRITICAL: You MUST call `todowrite` to update the task list at EVERY transition:
-1. BEFORE starting a task: mark it `in_progress` (call todowrite)
-2. AFTER finishing a task: mark it `completed` AND mark the next one
-   `in_progress` (call todowrite)
-3. Never skip updating — the user sees this progress in real time.
-Example flow for 3 tasks:
-- Create plan: [task1=in_progress, task2=pending, task3=pending] → call todowrite
-- Finish task1: [task1=completed, task2=in_progress, task3=pending] → call todowrite
-- Finish task2: [task1=completed, task2=completed, task3=in_progress] → call todowrite
-- Finish task3: [task1=completed, task2=completed, task3=completed] → call todowrite
+For complex tasks that require 3 or more steps, decide which skills, tools,
+resources, files, and clarifications are needed before submitting one complete
+plan BEFORE execution. The accepted plan is the source of truth. Keep task IDs,
+wording, priorities, count, and order unchanged. During execution, update only
+statuses as work actually transitions. Never replace the plan because analysis or
+tool results suggest a different approach. If a step is blocked, preserve the plan
+and explain the blocker. Revise structure only when the user's latest message
+explicitly asks to change the plan; ordinary follow-up questions or new findings
+do not authorize it. Do not call `todowrite` when nothing changed. Do NOT use it
+for simple single-step tasks.
+Todo status is advisory progress metadata and must not override a valid answer
+to the user's request. Judge completion against the original request, not only
+whether every planned item was mechanically marked completed.
 
 ## Available Skills List (Pre-loaded)
 {skills_context}
@@ -3102,21 +3346,27 @@ Parameters: {{"code": "shell command"}}
 Parameters: {{"code": "python code string"}}
 7. **load_file**: Load uploaded file info. Parameters: none.
 8. **execute_analysis**: Execute quick analysis on uploaded Excel/CSV file.
-Parameters: none.
-9. **load_tools**: Resolve required tools for the selected skill. Parameters: none.
-10. **execute_tool**: Execute a tool by name with JSON args.
+9. **list_attachments**: List uploaded files and parse status. Parameters: none.
+10. **parse_attachment**: Parse uploaded documents into structured blocks.
+Parameters: {{"file_path": "optional uploaded path"}}.
+11. **search_attachment**: Search parsed document blocks by keyword.
+Parameters: {{"query": "keywords", "file_path": "optional uploaded path"}}.
+12. **read_attachment_region**: Read blocks filtered by page, slide, line, table,
+worksheet, row, or type. Parameters include `sheet`, `row_start`, and `row_end`.
+13. **load_tools**: Resolve required tools for the selected skill. Parameters: none.
+14. **execute_tool**: Execute a tool by name with JSON args.
 Parameters: {{"tool_name": "tool name", "args": {{parameters}}}}
 11. **html_interpreter**: Render HTML as an interactive web report (the ONLY way
 to display reports on the right panel). Default usage:
 {{"html": "<html>complete HTML code</html>", "title": "title"}}. Template mode:
 {{"template_path": "skill/templates/xxx.html", "data": {{...}}, "title": "title"}}.
 File mode: {{"file_path": "/path/to/report.html"}}
-12. **todowrite**: Create and manage a structured task list. Use for complex tasks
-(3+ steps) to plan and track progress. Pass the FULL list every time. Each item:
-{{"content": "description", "status": "pending|in_progress|completed|cancelled",
-"priority": "high|medium|low"}}. Only ONE task in_progress at a time.
-IMPORTANT: You MUST call todowrite again after EACH task completes to update status.
-The user sees progress in real time — never skip an update.
+12. **todowrite**: Create a full plan once for complex tasks, after deciding the
+needed skills/tools/resources. The first accepted plan locks task IDs, wording,
+priority, count, and order. Subsequent calls may only update statuses; do not
+replan unless the user's latest message explicitly requests a plan change. Do not
+call again when unchanged. Each item has id, content, status (pending | in_progress
+| completed | cancelled), and priority.
 Parameters: {{"todos": [{{...}}]}}
 13. **question**: Ask the user a question and wait for their response. Use this tool
    when you need user input, clarification, or a decision to proceed. The tool blocks
@@ -3128,8 +3378,8 @@ Parameters: {{"todos": [{{...}}]}}
 
 {file_context}
 {session_context}
+{{{{ task_progress }}}}
 {ask_data_prompt_context}
-{recent_ask_data_context}
 
 ## ReAct Output Format
 Must output for each interaction round:
@@ -3156,6 +3406,7 @@ only inside `Action Input.result`.
                 code_interpreter_tool,
                 load_file_tool,
                 execute_analysis_tool,
+                *attachment_tools,
                 shell_interpreter_tool,
                 html_interpreter_tool,
                 todowrite_tool,
@@ -3279,7 +3530,7 @@ only inside `Action Input.result`.
     agent = await agent_builder.build()
 
     parser = ReActOutputParser()
-    received = AgentMessage(content=user_input)
+    received = AgentMessage(content=received_content)
     # stream_queue and stream_callback were created earlier (before ToolPack)
     # so that the question tool can use them.
 
@@ -3288,10 +3539,7 @@ only inside `Action Input.result`.
         await stream_queue.put({"type": "context.status", **status})
 
     agent.init_context_management(
-        config=await _load_context_budget_config(
-            llm_client=llm_client,
-            model_name=dialogue.model_name,
-        ),
+        config=context_budget_config,
         model_name=dialogue.model_name,
         on_status_event=_context_status_callback,
     )
@@ -3313,6 +3561,82 @@ only inside `Action Input.result`.
     # --- History persistence: collect step data during streaming ---
     history_steps: List[Dict[str, Any]] = []
     current_history_step: Optional[Dict[str, Any]] = None
+    ask_data_stage_started: Dict[str, float] = {}
+    ask_data_call_duration_ms: Dict[str, int] = {}
+
+    def persist_task_checkpoint(
+        status: str,
+        final_content: Optional[str] = None,
+        error_message: Optional[str] = None,
+    ) -> None:
+        try:
+            checkpoint = update_react_task_checkpoint(
+                session_state,
+                task_id=str(react_state.get("task_id") or react_state["turn_id"]),
+                original_request=user_input,
+                task_plan=list(_todo_list),
+                history_steps=history_steps,
+                status=status,
+                plan_id=todo_plan_state.get("plan_id"),
+                plan_revision=todo_plan_state.get("revision", 0),
+                plan_sequence=todo_plan_state.get("sequence", 0),
+                final_content=final_content,
+                error_message=error_message,
+                round_index=storage_conv.chat_order,
+            )
+            if checkpoint:
+                save_react_session_state(session_state)
+        except Exception:
+            logger.debug("Failed to persist ReAct task checkpoint", exc_info=True)
+
+    def render_ask_data_stage_output(item: Dict[str, Any]) -> str:
+        lines = [
+            f"### {item.get('title') or 'AskData'}",
+            f"- 阶段：`{item.get('stage') or 'query'}`",
+            f"- 状态：`{item.get('status') or 'running'}`",
+        ]
+        duration_ms = item.get("duration_ms")
+        if isinstance(duration_ms, (int, float)):
+            lines.append(f"- 耗时：{duration_ms / 1000:.2f} 秒")
+        detail = item.get("detail")
+        if detail:
+            lines.append(f"- 说明：{detail}")
+        scene = item.get("scene")
+        if isinstance(scene, dict):
+            if scene.get("name"):
+                lines.append(f"- 场景：`{scene['name']}`")
+            if scene.get("scene_id"):
+                lines.append(f"- 场景 ID：`{scene['scene_id']}`")
+        result = item.get("result")
+        if isinstance(result, dict):
+            for key, label in (
+                ("row_count", "返回行数"),
+                ("truncated", "结果已截断"),
+                ("result_count", "成功任务数"),
+                ("error_count", "失败任务数"),
+                ("status", "查询状态"),
+                ("query_id", "Query ID"),
+            ):
+                if key in result and result[key] is not None:
+                    lines.append(f"- {label}：{result[key]}")
+        error = item.get("error")
+        if isinstance(error, dict) and error.get("message"):
+            lines.append(f"- 错误：{error['message']}")
+        return "\n".join(lines)
+
+    def finalize_open_ask_data_stages(status: str) -> None:
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        for item in history_steps:
+            if item.get("action") != "ask_data_stage" or item.get("status") != "running":
+                continue
+            item["status"] = status
+            item["ended_at"] = now
+            started = ask_data_stage_started.pop(str(item.get("id") or ""), None)
+            if started is not None:
+                item["duration_ms"] = max(0, int((monotonic() - started) * 1000))
+            outputs = item.get("outputs") or []
+            if outputs:
+                outputs[0]["content"] = render_ask_data_stage_output(item)
 
     def record_ask_data_stage_for_history(event: Dict[str, Any]) -> None:
         stage = str(event.get("stage") or "query")
@@ -3321,14 +3645,18 @@ only inside `Action Input.result`.
         detail = str(event.get("detail") or "")
         duration_ms = event.get("duration_ms")
         status_raw = str(event.get("status") or "").lower()
-        status = "failed" if status_raw in {"failed", "error"} else "done"
+        if status_raw in {"error", "failed"}:
+            status = "failed"
+        elif status_raw in {"running", "done", "cancelled", "skipped"}:
+            status = status_raw
+        elif status_raw in {"succeeded", "completed"}:
+            status = "done"
+        elif not status_raw:
+            status = "done"
+        else:
+            status = "failed"
         action = "ask_data_stage"
-        step_id = f"ask-data-{call_id}-{stage}"
-        output_lines = [f"### {title}", f"- 阶段：`{stage}`", f"- 状态：`{status}`"]
-        if isinstance(duration_ms, (int, float)):
-            output_lines.append(f"- 耗时：{duration_ms / 1000:.2f} 秒")
-        if detail:
-            output_lines.append(f"- 说明：{detail}")
+        step_id = str(event.get("node_id") or f"ask-data-{call_id}-{stage}")
         payload = {
             "id": step_id,
             "title": title,
@@ -3339,15 +3667,42 @@ only inside `Action Input.result`.
             "action": action,
             "action_input": None,
             "ask_data_call_id": call_id,
-            "parent_id": f"ask-data-{call_id}",
-            "outputs": [
-                {
-                    "output_type": "markdown",
-                    "content": "\n".join(output_lines),
-                }
-            ],
+            "parent_id": event.get("parent_node_id")
+            or (f"ask-data-{call_id}-query" if stage != "query" else None),
+            "schema_version": event.get("schema_version", 1),
+            "stage": stage,
+            "scope": event.get("scope"),
+            "task_id": event.get("task_id"),
+            "scene": {
+                "scene_id": event.get("scene_id"),
+                "name": event.get("scene_name"),
+            }
+            if event.get("scene_id") or event.get("scene_name")
+            else None,
+            "started_at": event.get("started_at"),
+            "ended_at": event.get("ended_at"),
+            "duration_ms": duration_ms,
+            "result": event.get("result"),
+            "error": event.get("error"),
+            "outputs": [],
             "status": status,
         }
+        payload["outputs"] = [
+            {
+                "output_type": "markdown",
+                "content": render_ask_data_stage_output(payload),
+            }
+        ]
+        if status == "running":
+            ask_data_stage_started[step_id] = monotonic()
+        else:
+            ask_data_stage_started.pop(step_id, None)
+            if (
+                stage == "query"
+                and isinstance(duration_ms, (int, float))
+                and status in {"done", "failed", "cancelled"}
+            ):
+                ask_data_call_duration_ms[call_id] = int(duration_ms)
         for idx, item in enumerate(history_steps):
             if item.get("id") == step_id:
                 history_steps[idx] = payload
@@ -3395,6 +3750,9 @@ only inside `Action Input.result`.
         history_steps.append(current_history_step)
         current_history_step = None
 
+    stream_idle_timeout = _react_stream_idle_timeout()
+    last_stream_activity = monotonic()
+    planning_timeout = False
     while True:
         if cancel_event.is_set():
             break
@@ -3411,6 +3769,7 @@ only inside `Action Input.result`.
             for item in history_steps:
                 if item.get("status") == "running":
                     item["status"] = "cancelled"
+            finalize_open_ask_data_stages("cancelled")
             for item in _todo_list:
                 if item.get("status") in {"pending", "in_progress"}:
                     item["status"] = "cancelled"
@@ -3422,6 +3781,9 @@ only inside `Action Input.result`.
                 history_steps=history_steps,
                 max_steps=react_max_steps,
                 error_message="SSE stream disconnected before completion",
+            )
+            persist_task_checkpoint(
+                outcome["status"], final_content, outcome.get("error_message")
             )
             try:
                 update_react_session_after_turn(
@@ -3443,9 +3805,15 @@ only inside `Action Input.result`.
             try:
                 history_payload = json.dumps(
                     {
-                        "version": 1,
+                        "version": 2,
                         "type": "react-agent",
                         **outcome,
+                        "turn_id": react_state.get("turn_id"),
+                        "task_id": react_state.get("task_id"),
+                        "round_index": storage_conv.chat_order,
+                        "plan_id": todo_plan_state.get("plan_id"),
+                        "plan_revision": todo_plan_state.get("revision", 0),
+                        "plan_sequence": todo_plan_state.get("sequence", 0),
                         "final_content": final_content,
                         "steps": history_steps,
                         "task_plan": list(_todo_list),
@@ -3458,16 +3826,23 @@ only inside `Action Input.result`.
                 storage_conv.end_current_round()
                 storage_conv.save_to_storage()
             except Exception:
-                logger.debug(
-                    "Failed to persist disconnected ReAct run", exc_info=True
-                )
+                logger.debug("Failed to persist disconnected ReAct run", exc_info=True)
             if not agent_task.done():
                 agent_task.cancel()
             REACT_AGENT_RUNS.pop(run_id, None)
             raise
         except asyncio.TimeoutError:
+            if (
+                stream_idle_timeout > 0
+                and current_history_step is None
+                and monotonic() - last_stream_activity >= stream_idle_timeout
+            ):
+                planning_timeout = True
+                cancel_event.set()
+                break
             continue
 
+        last_stream_activity = monotonic()
         event_type = event.get("type")
         if event_type == "context.status":
             # Forward context-management status to frontend as-is.
@@ -3573,12 +3948,6 @@ only inside `Action Input.result`.
                 pending_thoughts.pop(round_num, [])
                 pending_action_intentions.pop(round_num, None)
                 pending_action_reasons.pop(round_num, None)
-                # ── Auto-complete all remaining todos on terminate ──
-                if _todo_list:
-                    for t in _todo_list:
-                        if t["status"] in ("pending", "in_progress"):
-                            t["status"] = "completed"
-                    yield _sse_event({"type": "plan.update", "tasks": list(_todo_list)})
                 continue
 
             # ── TodoWrite: emit plan.update SSE and show step card ──
@@ -3591,6 +3960,8 @@ only inside `Action Input.result`.
                     "content"
                 )
                 todos_payload: List[Dict[str, str]] = []
+                plan_metadata: Dict[str, Any] = {}
+                plan_changed = False
                 if obs_text:
                     try:
                         obs_json = (
@@ -3600,11 +3971,37 @@ only inside `Action Input.result`.
                         )
                         if isinstance(obs_json, dict):
                             todos_payload = obs_json.get("__todos__", [])
+                            plan_metadata = obs_json.get("__plan__", {})
+                            plan_changed = bool(obs_json.get("__plan_update__"))
                     except Exception:
                         pass
                 # Fallback: read from the closure variable
                 if not todos_payload and _todo_list:
                     todos_payload = list(_todo_list)
+                if not plan_metadata:
+                    plan_metadata = {
+                        "plan_id": todo_plan_state.get("plan_id"),
+                        "revision": todo_plan_state.get("revision", 0),
+                        "sequence": todo_plan_state.get("sequence", 0),
+                    }
+                if not plan_changed:
+                    if current_history_step is not None:
+                        current_history_step["status"] = "done"
+                        history_steps.append(current_history_step)
+                        current_history_step = None
+                    if round_num in round_step_map:
+                        yield step_done(round_step_map[round_num])
+                    persist_task_checkpoint("in_progress")
+                    continue
+                yield _sse_event(
+                    {
+                        "type": "plan.update",
+                        "tasks": todos_payload,
+                        "plan_id": plan_metadata.get("plan_id"),
+                        "revision": plan_metadata.get("revision", 0),
+                        "sequence": plan_metadata.get("sequence", 0),
+                    }
+                )
 
                 _td_total = len(todos_payload)
                 _td_done = sum(
@@ -3661,7 +4058,6 @@ only inside `Action Input.result`.
                         }
                     )
 
-                yield _sse_event({"type": "plan.update", "tasks": todos_payload})
                 yield step_meta(
                     round_step_map[round_num],
                     None,
@@ -3685,6 +4081,7 @@ only inside `Action Input.result`.
                         "todo_meta": todo_meta,
                     }
                 )
+                persist_task_checkpoint("in_progress")
                 yield step_done(round_step_map[round_num])
                 continue
 
@@ -3788,6 +4185,13 @@ only inside `Action Input.result`.
             ask_data_reused = bool(
                 ask_data_result_payload and ask_data_result_payload.get("reused")
             )
+            ask_data_duration_ms = (
+                ask_data_call_duration_ms.get(ask_data_call_id)
+                if ask_data_call_id and not ask_data_reused
+                else None
+            )
+            if ask_data_duration_ms is not None and current_history_step is not None:
+                current_history_step["duration_ms"] = ask_data_duration_ms
 
             # Emit thinking metadata
             if thoughts or action or action_input:
@@ -3804,6 +4208,7 @@ only inside `Action Input.result`.
                     action_reason=action_reason,
                     ask_data_call_id=ask_data_call_id,
                     ask_data_reused=ask_data_reused,
+                    duration_ms=ask_data_duration_ms,
                 )
 
             # Emit observation (action execution result)
@@ -3857,7 +4262,15 @@ only inside `Action Input.result`.
             ):
                 updated_todos = advance_todo_list()
                 if updated_todos:
-                    yield _sse_event({"type": "plan.update", "tasks": updated_todos})
+                    yield _sse_event(
+                        {
+                            "type": "plan.update",
+                            "tasks": updated_todos,
+                            "plan_id": todo_plan_state.get("plan_id"),
+                            "revision": todo_plan_state.get("revision", 0),
+                            "sequence": todo_plan_state.get("sequence", 0),
+                        }
+                    )
             # --- History: finalize step ---
             if current_history_step is not None:
                 current_history_step["status"] = status
@@ -3871,6 +4284,7 @@ only inside `Action Input.result`.
                     current_history_step["ask_data_reused"] = True
                 history_steps.append(current_history_step)
                 current_history_step = None
+            persist_task_checkpoint("in_progress")
 
     if cancel_event.is_set():
         if current_history_step is not None:
@@ -3880,9 +4294,11 @@ only inside `Action Input.result`.
         for item in history_steps:
             if item.get("status") == "running":
                 item["status"] = "cancelled"
-        for item in _todo_list:
-            if item.get("status") in {"pending", "in_progress"}:
-                item["status"] = "cancelled"
+        finalize_open_ask_data_stages("cancelled")
+        if not planning_timeout:
+            for item in _todo_list:
+                if item.get("status") in {"pending", "in_progress"}:
+                    item["status"] = "cancelled"
         if not agent_task.done():
             agent_task.cancel()
         try:
@@ -3892,13 +4308,27 @@ only inside `Action Input.result`.
         except Exception:
             logger.debug("Cancelled react agent task ended with error", exc_info=True)
 
-        final_content = "任务已取消。"
+        final_content = (
+            "模型长时间未返回下一步规划，任务已暂停；输入“继续”可恢复。"
+            if planning_timeout
+            else "任务已取消。"
+        )
         outcome = _react_outcome_payload(
-            status=REACT_STATUS_CANCELLED,
-            termination_reason=REACT_REASON_CANCELLED,
+            status=REACT_STATUS_INCOMPLETE
+            if planning_timeout
+            else REACT_STATUS_CANCELLED,
+            termination_reason=REACT_REASON_STREAM_IDLE_TIMEOUT
+            if planning_timeout
+            else REACT_REASON_CANCELLED,
             history_steps=history_steps,
             max_steps=react_max_steps,
+            error_message=(
+                "No ReAct stream event received before the planning idle timeout."
+                if planning_timeout
+                else None
+            ),
         )
+        persist_task_checkpoint(outcome["status"], final_content)
         try:
             update_react_session_after_turn(
                 session_state,
@@ -3916,9 +4346,15 @@ only inside `Action Input.result`.
             logger.debug("Failed to save cancelled ReAct session state", exc_info=True)
         history_payload = json.dumps(
             {
-                "version": 1,
+                "version": 2,
                 "type": "react-agent",
                 **outcome,
+                "turn_id": react_state.get("turn_id"),
+                "task_id": react_state.get("task_id"),
+                "round_index": storage_conv.chat_order,
+                "plan_id": todo_plan_state.get("plan_id"),
+                "plan_revision": todo_plan_state.get("revision", 0),
+                "plan_sequence": todo_plan_state.get("sequence", 0),
                 "final_content": final_content,
                 "steps": history_steps,
                 "task_plan": list(_todo_list),
@@ -3931,7 +4367,13 @@ only inside `Action Input.result`.
         storage_conv.end_current_round()
         storage_conv.save_to_storage()
         REACT_AGENT_RUNS.pop(run_id, None)
-        yield _sse_event({"type": "run.cancelled", "run_id": run_id, **outcome})
+        yield _sse_event(
+            {
+                "type": "run.incomplete" if planning_timeout else "run.cancelled",
+                "run_id": run_id,
+                **outcome,
+            }
+        )
         yield _sse_event({"type": "final", "content": final_content, **outcome})
         yield _sse_event({"type": "done"})
         return
@@ -3939,6 +4381,7 @@ only inside `Action Input.result`.
     try:
         reply = await agent_task
     except Exception as e:
+        finalize_open_ask_data_stages("failed")
         err_msg = f"React agent failed: {e}"
         outcome = _react_outcome_payload(
             status=REACT_STATUS_FAILED,
@@ -3948,6 +4391,9 @@ only inside `Action Input.result`.
             history_steps=history_steps,
             max_steps=react_max_steps,
             error_message=str(e),
+        )
+        persist_task_checkpoint(
+            outcome["status"], err_msg, outcome.get("error_message")
         )
         try:
             update_react_session_after_turn(
@@ -3966,9 +4412,15 @@ only inside `Action Input.result`.
             logger.debug("Failed to save failed ReAct session state", exc_info=True)
         error_payload = json.dumps(
             {
-                "version": 1,
+                "version": 2,
                 "type": "react-agent",
                 **outcome,
+                "turn_id": react_state.get("turn_id"),
+                "task_id": react_state.get("task_id"),
+                "round_index": storage_conv.chat_order,
+                "plan_id": todo_plan_state.get("plan_id"),
+                "plan_revision": todo_plan_state.get("revision", 0),
+                "plan_sequence": todo_plan_state.get("sequence", 0),
                 "final_content": err_msg,
                 "steps": history_steps,
                 "task_plan": list(_todo_list),
@@ -4042,6 +4494,9 @@ only inside `Action Input.result`.
         max_steps=react_max_steps,
     )
     final_content = _final_content_for_outcome(final_content, outcome)
+    persist_task_checkpoint(
+        outcome["status"], final_content, outcome.get("error_message")
+    )
 
     try:
         update_react_session_after_turn(
@@ -4064,15 +4519,27 @@ only inside `Action Input.result`.
             "query_id": str(react_state["ask_data_pending_query_id"]),
             "user_id": dialogue.user_name or "anonymous",
         }
+    elif (
+        pending_ask_data
+        and is_continuation
+        and isinstance(session_state.get("active_task"), dict)
+    ):
+        REACT_ASK_DATA_PENDING[conv_id] = pending_ask_data
     else:
         REACT_ASK_DATA_PENDING.pop(conv_id, None)
 
     # Persist AI reply with structured history payload
     history_payload = json.dumps(
         {
-            "version": 1,
+            "version": 2,
             "type": "react-agent",
             **outcome,
+            "turn_id": react_state.get("turn_id"),
+            "task_id": react_state.get("task_id"),
+            "round_index": storage_conv.chat_order,
+            "plan_id": todo_plan_state.get("plan_id"),
+            "plan_revision": todo_plan_state.get("revision", 0),
+            "plan_sequence": todo_plan_state.get("sequence", 0),
             "final_content": final_content,
             "steps": history_steps,
             "task_plan": list(_todo_list),
@@ -4086,9 +4553,7 @@ only inside `Action Input.result`.
     storage_conv.save_to_storage()
     REACT_AGENT_RUNS.pop(run_id, None)
 
-    yield _sse_event(
-        {"type": f"run.{outcome['status']}", "run_id": run_id, **outcome}
-    )
+    yield _sse_event({"type": f"run.{outcome['status']}", "run_id": run_id, **outcome})
     yield _sse_event({"type": "final", "content": final_content, **outcome})
     yield _sse_event({"type": "done"})
 
@@ -4307,6 +4772,10 @@ async def chat_react_agent(
         dialogue.select_param,
         dialogue.model_name,
     )
+    if dialogue.ext_info and isinstance(dialogue.ext_info, dict):
+        file_paths = dialogue.ext_info.get("file_paths")
+        if isinstance(file_paths, list) and len(file_paths) > MAX_CHAT_UPLOAD_FILES:
+            return Result.failed(msg="You can attach at most 5 files per message")
     dialogue.user_name = user_token.user_id if user_token else dialogue.user_name
     headers = {
         "Content-Type": "text/event-stream",
@@ -4351,31 +4820,43 @@ async def chat_react_agent_cancel(
     The endpoint is intentionally idempotent: the frontend may call it after the
     stream has already closed or after a previous cancel request.
     """
+    user_id = str(getattr(user_token, "user_id", None) or "default")
     cancelled_run = False
     if body.run_id:
         run_state = REACT_AGENT_RUNS.get(body.run_id)
-        if run_state:
+        if run_state and run_state.get("user_id") == user_id:
             cancel_event = run_state.get("cancel_event")
             if cancel_event is not None:
                 cancel_event.set()
                 cancelled_run = True
+            attachment_service = run_state.get("attachment_service")
+            if attachment_service is not None:
+                attachment_service.cancel_active_parsers()
 
     if body.conv_uid:
         for active_run_id, run_state in list(REACT_AGENT_RUNS.items()):
             if body.run_id and active_run_id == body.run_id:
                 continue
-            if run_state.get("conv_uid") != body.conv_uid:
+            if (
+                run_state.get("conv_uid") != body.conv_uid
+                or run_state.get("user_id") != user_id
+            ):
                 continue
             cancel_event = run_state.get("cancel_event")
             if cancel_event is not None:
                 cancel_event.set()
                 cancelled_run = True
+            attachment_service = run_state.get("attachment_service")
+            if attachment_service is not None:
+                attachment_service.cancel_active_parsers()
 
     rejected_questions = 0
     if body.conv_uid:
         from dbgpt_app.openapi.api_v1.tools.question_manager import question_manager
 
-        rejected_questions = question_manager.reject_by_conv(body.conv_uid)
+        rejected_questions = question_manager.reject_by_conv(
+            body.conv_uid, user_id=user_id
+        )
 
     return Result.succ(
         {
@@ -4402,7 +4883,11 @@ async def question_reply(
     from dbgpt_app.openapi.api_v1.tools.question_manager import question_manager
 
     try:
-        question_manager.reply(request_id, body.answers)
+        question_manager.reply(
+            request_id,
+            body.answers,
+            user_id=str(getattr(user_token, "user_id", None) or "default"),
+        )
         return Result.succ({"success": True, "request_id": request_id})
     except KeyError as e:
         return Result.failed(msg=str(e))
@@ -4417,7 +4902,10 @@ async def question_reject(
     from dbgpt_app.openapi.api_v1.tools.question_manager import question_manager
 
     try:
-        question_manager.reject(request_id)
+        question_manager.reject(
+            request_id,
+            user_id=str(getattr(user_token, "user_id", None) or "default"),
+        )
         return Result.succ({"success": True, "request_id": request_id})
     except KeyError as e:
         return Result.failed(msg=str(e))

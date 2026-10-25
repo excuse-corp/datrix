@@ -207,6 +207,34 @@ def test_orchestrator_reports_partial_success_and_limits_parallelism():
     assert service.max_active == 1
 
 
+def test_orchestrator_emits_task_lifecycle_with_executor_duration():
+    registry = _registry()
+    validator = PlanValidator(registry)
+    service = _FakeQueryService()
+    orchestrator = AskDataOrchestrator(validator, service)
+    plan = MainAgentPlan(action="execute", tasks=[_task()], combine=CombinePlan())
+    events = []
+
+    async def on_task_event(event):
+        events.append(event)
+
+    async def run():
+        return await orchestrator.execute(
+            plan=plan,
+            engine_resolver=lambda _: object(),
+            on_task_event=on_task_event,
+        )
+
+    result = asyncio.run(run())
+
+    assert result.status == "succeeded"
+    assert [event["status"] for event in events] == ["running", "done"]
+    assert events[0]["started_at"] == events[1]["started_at"]
+    assert events[0]["ended_at"] is None
+    assert events[1]["duration_ms"] == result.results[0].duration_ms
+    assert events[1]["result"]["row_count"] == result.results[0].row_count
+
+
 def test_orchestrator_reports_all_failed():
     registry = _registry()
     validator = PlanValidator(registry)
@@ -214,12 +242,25 @@ def test_orchestrator_reports_all_failed():
     orchestrator = AskDataOrchestrator(validator, service)
     plan = MainAgentPlan(action="execute", tasks=[_task()], combine=CombinePlan())
 
-    result = asyncio.run(
-        orchestrator.execute(plan=plan, engine_resolver=lambda _: object())
-    )
+    events = []
+
+    async def run():
+        async def on_task_event(event):
+            events.append(event)
+
+        return await orchestrator.execute(
+            plan=plan,
+            engine_resolver=lambda _: object(),
+            on_task_event=on_task_event,
+        )
+
+    result = asyncio.run(run())
 
     assert result.status == "failed"
     assert not result.results
+    assert [event["status"] for event in events] == ["running", "failed"]
+    assert events[1]["error"]["message"] == "query failed"
+    assert isinstance(events[1]["duration_ms"], int)
 
 
 def test_orchestrator_limits_concurrent_requests():
