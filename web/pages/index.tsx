@@ -271,6 +271,82 @@ const buildAskDataStageOutput = (
   },
 ];
 
+const buildAskDataResultOutputs = (
+  resultPayload: AskDataQueryResponse,
+  sceneNameById: AskDataSceneNameLookup = {},
+): ExecutionOutput[] => {
+  const nestedData = resultPayload.data && typeof resultPayload.data === 'object' ? resultPayload.data : {};
+  const combined = resultPayload.combined || (nestedData as any).combined;
+  const sceneResults = getAskDataSceneResults(resultPayload).length
+    ? getAskDataSceneResults(resultPayload)
+    : getAskDataSceneResults(nestedData);
+  const tables: Array<{ title: string; columns: any[]; rows: Record<string, unknown>[]; truncated?: boolean }> = [];
+
+  const addTable = (title: string, rawColumns: any[], rawRows: any[], truncated?: boolean) => {
+    const rows = Array.isArray(rawRows)
+      ? rawRows.filter(row => row && typeof row === 'object' && !Array.isArray(row))
+      : [];
+    if (!rows.length) return;
+    const keys = rawColumns.length
+      ? rawColumns
+          .map(column =>
+            typeof column === 'string' ? column : String(column?.key || column?.dataIndex || column?.name || ''),
+          )
+          .filter(Boolean)
+      : Object.keys(rows[0]);
+    const columns = keys.map(key => {
+      const source = rawColumns.find(column =>
+        typeof column === 'string'
+          ? column === key
+          : String(column?.key || column?.dataIndex || column?.name || '') === key,
+      );
+      const label = typeof source === 'object' ? String(source?.name || source?.title || key) : key;
+      return { title: label, dataIndex: key, key, ellipsis: true };
+    });
+    tables.push({ title, columns, rows, truncated });
+  };
+
+  if (combined && Array.isArray(combined.rows) && combined.rows.length) {
+    addTable('查询结果', Array.isArray(combined.columns) ? combined.columns : [], combined.rows);
+  } else {
+    sceneResults.forEach((scene: any) => {
+      const sceneName = getAskDataSceneName(scene, sceneNameById);
+      addTable(
+        sceneName ? `查询结果：${sceneName}` : '查询结果',
+        Array.isArray(scene?.columns) ? scene.columns : [],
+        scene?.rows,
+        scene?.truncated,
+      );
+    });
+  }
+
+  if (!tables.length) {
+    return [
+      {
+        output_type: 'markdown',
+        content: '查询已完成，但本次响应中没有可展示的行数据。',
+      },
+    ];
+  }
+  const outputs: ExecutionOutput[] = [
+    {
+      output_type: 'markdown',
+      content: '查询结果已返回，最终答复整理中。以下是查询得到的原始结果：',
+    },
+  ];
+  tables.forEach(table => {
+    outputs.push({
+      output_type: 'markdown',
+      content: `### ${table.title}\n共 ${table.rows.length} 行${table.truncated ? '，结果已截断' : ''}`,
+    });
+    outputs.push({
+      output_type: 'table',
+      content: { columns: table.columns, rows: table.rows },
+    });
+  });
+  return outputs;
+};
+
 const getAskDataCallId = (payload: any): string =>
   String(payload?.call_id || payload?.query_id || 'legacy').replace(/[^a-zA-Z0-9_-]/g, '_');
 
@@ -802,6 +878,7 @@ interface ExecutionStep {
   detail: string;
   status: 'running' | 'done' | 'failed' | 'cancelled';
   action?: string;
+  confirmationStatus?: 'confirmed';
   actionInput?: string;
   errorType?: string;
   errorMessage?: string;
@@ -1083,6 +1160,7 @@ const convertToManusFormat = (
         status: getStepStatus(step.status),
         durationMs: step.durationMs,
         startedAt: step.startedAt,
+        confirmationStatus: step.confirmationStatus,
       };
     });
 
@@ -1292,23 +1370,64 @@ const Playground: NextPage = () => {
   }, []);
 
   const replyQuestion = useCallback(async (requestId: string, answers: string[][]) => {
-    const res = await fetch(`${process.env.API_BASE_URL ?? ''}/api/v1/chat/question/${requestId}/reply`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ answers }),
-    });
-    if (res.ok) {
-      setPendingQuestion(null);
+    try {
+      const res = await fetch(`${process.env.API_BASE_URL ?? ''}/api/v1/chat/question/${requestId}/reply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ answers }),
+      });
+      const result = await res.json().catch(() => null);
+      if (res.ok && result?.success === true) {
+        const run = activeRunRef.current;
+        if (run?.pendingQuestionRequestId === requestId) {
+          setExecutionMap(prev => {
+            const current = prev[run.responseId];
+            if (!current) return prev;
+            let targetId: string | undefined;
+            for (let index = current.steps.length - 1; index >= 0; index -= 1) {
+              const step = current.steps[index];
+              if (step.action?.toLowerCase() === 'question' || step.title?.toLowerCase() === 'question') {
+                targetId = step.id;
+                break;
+              }
+            }
+            if (!targetId) return prev;
+            return {
+              ...prev,
+              [run.responseId]: {
+                ...current,
+                steps: current.steps.map(step =>
+                  step.id === targetId ? { ...step, confirmationStatus: 'confirmed' } : step,
+                ),
+              },
+            };
+          });
+        }
+        setPendingQuestion(null);
+        return;
+      }
+      const detail = typeof result?.detail === 'string' ? result.detail : result?.err_msg;
+      message.error(detail || '确认提交失败，请稍后重试。');
+    } catch (_error) {
+      message.error('无法连接服务器，确认仍未提交。请重试。');
     }
   }, []);
 
   const rejectQuestion = useCallback(async (requestId: string) => {
-    const res = await fetch(`${process.env.API_BASE_URL ?? ''}/api/v1/chat/question/${requestId}/reject`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    });
-    if (res.ok) {
-      setPendingQuestion(null);
+    try {
+      const res = await fetch(`${process.env.API_BASE_URL ?? ''}/api/v1/chat/question/${requestId}/reject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const result = await res.json().catch(() => null);
+      if (res.ok && result?.success === true) {
+        setPendingQuestion(null);
+        return;
+      }
+      const detail = typeof result?.detail === 'string' ? result.detail : result?.err_msg;
+      message.error(detail || '取消确认失败，请稍后重试。');
+    } catch (_error) {
+      message.error('无法连接服务器，确认仍未取消。请重试。');
     }
   }, []);
 
@@ -2682,7 +2801,12 @@ const Playground: NextPage = () => {
                 activeStepId: isQueryLifecycleStage ? id : current.activeStepId,
                 outputs: {
                   ...current.outputs,
-                  [id]: stageOutputs,
+                  [id]: stageOutputs.some(output => output.output_type === 'table')
+                    ? stageOutputs
+                    : [
+                        ...stageOutputs,
+                        ...(current.outputs[id] || []).filter(output => output.output_type === 'table'),
+                      ],
                 },
               },
             };
@@ -2719,12 +2843,13 @@ const Playground: NextPage = () => {
               { ...current.outputs },
             );
             if (['succeeded', 'partial_succeeded'].includes(resultStatus)) {
-              outputsWithAskDataStages[queryNodeId] = [
-                {
-                  output_type: 'markdown',
-                  content: '查询结果已返回，正在整理最终答复。',
-                },
-              ];
+              const resultOutputs = buildAskDataResultOutputs(askDataResult, resultSceneNameById);
+              const existingTables = (outputsWithAskDataStages[queryNodeId] || []).filter(
+                output => output.output_type === 'table',
+              );
+              outputsWithAskDataStages[queryNodeId] = resultOutputs.some(output => output.output_type === 'table')
+                ? resultOutputs
+                : [...resultOutputs, ...existingTables];
             }
             return {
               ...prev,
@@ -2879,6 +3004,7 @@ const Playground: NextPage = () => {
                   todoMeta: payload.todo_meta,
                   status: 'running' as const,
                   action: payload.action,
+                  confirmationStatus: undefined,
                 },
               ];
             }

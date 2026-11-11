@@ -140,6 +140,56 @@ def test_run_service_returns_idempotent_result_without_reexecution():
     assert orchestrator.calls == 1
 
 
+def test_authorization_version_separates_idempotency_cache_entries():
+    repository = InMemoryRunRepository()
+    orchestrator = FakeOrchestrator(
+        _snapshot(), QueryRunResult(status="rejected", errors=[{"code": "NO"}])
+    )
+    service = RunExecutionService(orchestrator, repository)
+    base_kwargs = {
+        "question": "not allowed",
+        "plan": MainAgentPlan(action="reject", reason_code="NO"),
+        "user_id": "user-1",
+        "request_id": "req-authz-cache",
+        "engine_resolver": lambda _: object(),
+        "idempotency_key": "same-request",
+    }
+
+    import asyncio
+
+    first, _ = asyncio.run(service.execute(**base_kwargs, authz_version=1))
+    second, _ = asyncio.run(service.execute(**base_kwargs, authz_version=2))
+
+    assert first.query_id != second.query_id
+    assert orchestrator.calls == 2
+
+
+def test_run_service_rejects_unauthorized_scene_before_persisting_query():
+    import asyncio
+
+    repository = InMemoryRunRepository()
+    orchestrator = FakeOrchestrator(
+        _snapshot(), QueryRunResult(status="succeeded")
+    )
+    service = RunExecutionService(orchestrator, repository)
+
+    with pytest.raises(ValueError, match="SCENE_ACCESS_FORBIDDEN"):
+        asyncio.run(
+            service.execute(
+                question="total amount",
+                plan=_plan(),
+                user_id="user-1",
+                request_id="req-unauthorized",
+                engine_resolver=lambda _: object(),
+                authorized_scene_ids=["payroll"],
+                is_platform_admin=False,
+            )
+        )
+
+    assert repository.list_queries() == []
+    assert orchestrator.calls == 0
+
+
 def test_run_service_treats_none_query_lookup_as_missing():
     import asyncio
 

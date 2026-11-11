@@ -35,25 +35,6 @@ _SKILLS_MAP = {
     ]
 }
 
-_EXAMPLE_DST = "dbgpt_app/_builtin_examples"
-
-# fmt: off
-_EXAMPLES_MAP = {
-    "docker/examples/excel/Walmart_Sales.csv": (
-        f"{_EXAMPLE_DST}/excel/Walmart_Sales.csv"
-    ),
-    (
-        "docker/examples/fin_report/pdf/"
-        "2020-01-23__浙江海翔药业股份有限公司__002099__"
-        "海翔药业__2019年__年度报告.pdf"
-    ): (
-        f"{_EXAMPLE_DST}/fin_report/pdf/"
-        "2020-01-23__浙江海翔药业股份有限公司__002099__"
-        "海翔药业__2019年__年度报告.pdf"
-    ),
-}
-# fmt: on
-
 _TPL = "dbgpt_app/pilot_template"
 
 # fmt: off
@@ -87,11 +68,9 @@ _PILOT_TPL_MAP = {
 
 # sdist force-include remaps these paths:
 #   ../../skills/X           -> skills/X
-#   ../../docker/examples/X  -> examples/X
 #   ../../pilot/X            -> pilot_tpl/X
 _SDIST_REMAP = {
     "skills/": "skills/",  # no change
-    "docker/examples/": "examples/",  # strip "docker/"
     "pilot/": "pilot_tpl/",  # pilot -> pilot_tpl
 }
 
@@ -111,7 +90,6 @@ class CustomBuildHook(BuildHookInterface):
         pkg_root = Path(self.root)  # packages/dbgpt-app/
         all_mappings = {
             **_SKILLS_MAP,
-            **_EXAMPLES_MAP,
             **_PILOT_TPL_MAP,
         }
         force_include: dict[str, str] = {}

@@ -37,6 +37,8 @@ class ResultBundleBuilder:
         status: str = "succeeded",
         ontology_snapshot: OntologySnapshot | None = None,
         question: str | None = None,
+        authorized_scene_ids: list[str] | None = None,
+        is_platform_admin: bool = True,
     ) -> ResultBundle:
         warnings: list[dict[str, str]] = []
         for result in results:
@@ -76,7 +78,13 @@ class ResultBundleBuilder:
             for reference in result.rag.get("references", [])
             if isinstance(reference, str)
         ]
-        ontology_context = self._ontology_context(ontology_snapshot, question, results)
+        ontology_context = self._ontology_context(
+            ontology_snapshot,
+            question,
+            results,
+            authorized_scene_ids=authorized_scene_ids,
+            is_platform_admin=is_platform_admin,
+        )
         answer = self._answer(status, results, warnings, ontology_context)
         return ResultBundle(
             status=status,
@@ -106,6 +114,9 @@ class ResultBundleBuilder:
         ontology_snapshot: OntologySnapshot | None,
         question: str | None,
         results: list[SceneResult],
+        *,
+        authorized_scene_ids: list[str] | None = None,
+        is_platform_admin: bool = True,
     ) -> dict[str, Any] | None:
         if ontology_snapshot is None:
             return None
@@ -120,6 +131,8 @@ class ResultBundleBuilder:
             question,
             max_nodes=16,
             scene_ids=scene_ids,
+            authorized_scene_ids=authorized_scene_ids,
+            is_platform_admin=is_platform_admin,
             result_columns=result_columns,
         )
 

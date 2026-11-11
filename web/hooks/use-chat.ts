@@ -215,29 +215,45 @@ const useChat = ({ queryAgentURL = '/api/v1/chat/completions', app_code }: Props
   );
 
   const replyQuestion = useCallback(async (requestId: string, answers: string[][]) => {
-    const res = await fetch(`${process.env.API_BASE_URL ?? ''}/api/v1/chat/question/${requestId}/reply`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        [HEADER_USER_ID_KEY]: getUserId() ?? '',
-      },
-      body: JSON.stringify({ answers }),
-    });
-    if (res.ok) {
-      setPendingQuestion(null);
+    try {
+      const res = await fetch(`${process.env.API_BASE_URL ?? ''}/api/v1/chat/question/${requestId}/reply`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          [HEADER_USER_ID_KEY]: getUserId() ?? '',
+        },
+        body: JSON.stringify({ answers }),
+      });
+      const result = await res.json().catch(() => null);
+      if (res.ok && result?.success === true) {
+        setPendingQuestion(null);
+        return;
+      }
+      const detail = typeof result?.detail === 'string' ? result.detail : result?.err_msg;
+      message.error(detail || '确认提交失败，请稍后重试。');
+    } catch (_error) {
+      message.error('无法连接服务器，确认仍未提交。请重试。');
     }
   }, []);
 
   const rejectQuestion = useCallback(async (requestId: string) => {
-    const res = await fetch(`${process.env.API_BASE_URL ?? ''}/api/v1/chat/question/${requestId}/reject`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        [HEADER_USER_ID_KEY]: getUserId() ?? '',
-      },
-    });
-    if (res.ok) {
-      setPendingQuestion(null);
+    try {
+      const res = await fetch(`${process.env.API_BASE_URL ?? ''}/api/v1/chat/question/${requestId}/reject`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          [HEADER_USER_ID_KEY]: getUserId() ?? '',
+        },
+      });
+      const result = await res.json().catch(() => null);
+      if (res.ok && result?.success === true) {
+        setPendingQuestion(null);
+        return;
+      }
+      const detail = typeof result?.detail === 'string' ? result.detail : result?.err_msg;
+      message.error(detail || '取消确认失败，请稍后重试。');
+    } catch (_error) {
+      message.error('无法连接服务器，确认仍未取消。请重试。');
     }
   }, []);
 

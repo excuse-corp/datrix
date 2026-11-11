@@ -426,10 +426,10 @@ def _extract_artifacts_from_text(text: str) -> List[Dict[str, Any]]:
     artifacts: List[Dict[str, Any]] = []
     seen = set()
     path_patterns = [
-        r"(?:/root/dataman/)?skills/[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+",
-        r"(?:/root/dataman/)?skills/[A-Za-z0-9_.-]+\.skill",
-        r"(?:/root/dataman/)?pilot/tmp/[A-Za-z0-9_./-]+",
-        r"(?:/root/dataman/)?[^\s'\")]+\.html",
+        r"(?:/root/datrix/)?skills/[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+",
+        r"(?:/root/datrix/)?skills/[A-Za-z0-9_.-]+\.skill",
+        r"(?:/root/datrix/)?pilot/tmp/[A-Za-z0-9_./-]+",
+        r"(?:/root/datrix/)?[^\s'\")]+\.html",
     ]
     for pattern in path_patterns:
         for match in re.finditer(pattern, text):

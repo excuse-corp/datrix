@@ -51,7 +51,9 @@ CREATE TABLE sync.pcm_project_info (
   project_grid_manager varchar(255),
   project_start_date date,
   project_bid_awarded_at date,
-  project_id integer
+  project_id integer,
+  funding_type_code integer,
+  funding_year varchar(32)
 );
 
 CREATE TABLE public.vm_list (
@@ -68,7 +70,13 @@ CREATE TABLE public.vm_list (
 );
 
 COMMENT ON TABLE sync.pcm_project_info IS
-  '第三方平台同步的远程 dbo.vw_xmk_project_contract_report 空表，不由 DataMan 写入。';
+  '第三方平台从 dbo.vw_xmk_project_contract_report 同步的信息化项目数据；由同步平台写入。';
+COMMENT ON COLUMN sync.pcm_project_info.funding_type_year IS
+  '经费年份原始选项编码，来源于 uf_xmk.jflxnf；不是实际年份。';
+COMMENT ON COLUMN sync.pcm_project_info.funding_type_code IS
+  '经费类型原始编码，来源于 uf_xmk.jflx。';
+COMMENT ON COLUMN sync.pcm_project_info.funding_year IS
+  '经费年份显示值，来源于年份字典 selectname；用于年份筛选和统计。';
 
 COMMENT ON TABLE public.vm_list IS
   '虚拟机清单(来源:虚拟机清单.xlsx)';
@@ -117,8 +125,15 @@ SELECT
     ) THEN '信息管理部'
     ELSE source.department_name
   END AS line_department,
-  source.project_id
+  source.project_id,
+  source.funding_type_code,
+  source.funding_year
 FROM sync.pcm_project_info AS source;
+
+COMMENT ON COLUMN reporting.vw_information_project_contract_report.funding_type_code IS
+  '经费类型原始编码；排查和核对使用，业务展示优先使用 funding_type。';
+COMMENT ON COLUMN reporting.vw_information_project_contract_report.funding_year IS
+  '经费年份显示值；年份筛选、分组和统计使用此字段。';
 
 CREATE VIEW reporting.vw_vm_list AS
 SELECT

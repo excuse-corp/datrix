@@ -26,10 +26,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/eosphoros-ai/DB-GPT"
+Homepage = "https://github.com/excuse-corp/datrix"
 Documentation = "http://docs.dbgpt.cn/docs/overview"
-Repository = "https://github.com/eosphoros-ai/DB-GPT.git"
-Issues = "https://github.com/eosphoros-ai/DB-GPT/issues"
+Repository = "https://github.com/excuse-corp/datrix.git"
+Issues = "https://github.com/excuse-corp/datrix/issues"
 
 [build-system]
 requires = ["hatchling"]
@@ -74,9 +74,6 @@ exclude = [
 "../../skills/document-analysis" = "skills/document-analysis"
 "../../skills/document-data-filler" = "skills/document-data-filler"
 "../../skills/skill-creator" = "skills/skill-creator"
-# Builtin example files
-"../../docker/examples/excel/Walmart_Sales.csv" = "examples/excel/Walmart_Sales.csv"
-"../../docker/examples/fin_report/pdf/2020-01-23__浙江海翔药业股份有限公司__002099__海翔药业__2019年__年度报告.pdf" = "examples/fin_report/pdf/2020-01-23__浙江海翔药业股份有限公司__002099__海翔药业__2019年__年度报告.pdf"
 # Pilot workspace template files (source of truth: pilot/)
 "../../pilot/meta_data/alembic.ini" = "pilot_tpl/meta_data/alembic.ini"
 "../../pilot/meta_data/alembic/README" = "pilot_tpl/meta_data/alembic/README"

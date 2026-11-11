@@ -14,10 +14,10 @@ import xml.etree.ElementTree as ElementTree
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import (
     Boolean,
@@ -31,21 +31,27 @@ from sqlalchemy import (
     UniqueConstraint,
     and_,
     create_engine,
+    func,
     inspect,
+    or_,
     select,
     update,
 )
+from sqlalchemy.exc import IntegrityError
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
 _COOKIE_NAME = "dataman_session"
 _DEFAULT_PUBLIC_PATHS = {
+    "/api/health",
     "/api/v1/auth/config",
     "/api/v1/auth/health",
     "/api/v1/auth/login",
     "/api/v1/auth/local/login",
     "/api/v1/auth/refresh",
     "/api/v1/auth/logout",
+    "/api/v1/auth/setup/status",
+    "/api/v1/auth/setup",
     "/docs",
     "/openapi.json",
     "/redoc",
@@ -95,6 +101,7 @@ class AuthUser:
     scene_ids: tuple[str, ...] = ()
     is_active: bool = True
     authz_version: int = 1
+    display_name: str | None = None
 
     @property
     def role(self) -> str:
@@ -133,7 +140,7 @@ class AuthConfig:
     def __init__(
         self,
         secret: str,
-        ttl_seconds: int = 600,
+        ttl_seconds: int = 3600,
         *,
         issuer: str = "dataman",
         audience: str = "dataman-api",
@@ -288,8 +295,105 @@ class AuthStore:
             Column("return_to", String(2048), nullable=False),
             Column("expires_at", DateTime(timezone=True), nullable=False),
         )
+        self.setup = Table(
+            "auth_setup", metadata,
+            Column("id", Integer, primary_key=True),
+            Column("token_hash", String(128), nullable=False),
+            Column("completed", Boolean, nullable=False, default=False),
+            Column("created_at", DateTime(timezone=True), nullable=False),
+            Column("completed_at", DateTime(timezone=True), nullable=True),
+        )
         metadata.create_all(self.engine)
         self._migrate_legacy_users()
+
+    def _has_active_admin(self, connection: Any) -> bool:
+        rows = connection.execute(
+            select(self.users.c.roles, self.users.c.is_active).where(self.users.c.is_active.is_(True))
+        ).all()
+        return any("admin" in (roles or "").split(",") for roles, _ in rows)
+
+    def prepare_setup(self, token_hash: str) -> bool:
+        now = _utcnow()
+        with self.engine.begin() as connection:
+            row = connection.execute(select(self.setup).where(self.setup.c.id == 1)).mappings().first()
+            has_admin = self._has_active_admin(connection)
+            if row is None:
+                connection.execute(
+                    self.setup.insert().values(
+                        id=1,
+                        token_hash=secrets.token_hex(32) if has_admin else token_hash,
+                        completed=has_admin,
+                        created_at=now,
+                        completed_at=now if has_admin else None,
+                    )
+                )
+                return has_admin
+            if has_admin and not row["completed"]:
+                connection.execute(
+                    self.setup.update().where(self.setup.c.id == 1).values(
+                        token_hash=secrets.token_hex(32), completed=True, completed_at=now
+                    )
+                )
+                return True
+            if not row["completed"]:
+                connection.execute(
+                    self.setup.update().where(self.setup.c.id == 1).values(token_hash=token_hash)
+                )
+            return bool(row["completed"])
+
+    def setup_status(self) -> bool:
+        with self.engine.connect() as connection:
+            row = connection.execute(select(self.setup.c.completed).where(self.setup.c.id == 1)).scalar()
+            return bool(row) or self._has_active_admin(connection)
+
+    def initialize_admin(self, token: str, username: str, password: str, display_name: str | None = None) -> AuthUser:
+        now = _utcnow()
+        with self.engine.begin() as connection:
+            row = connection.execute(select(self.setup).where(self.setup.c.id == 1)).mappings().first()
+            if row is None or row["completed"] or self._has_active_admin(connection):
+                raise ValueError("AUTH_SETUP_ALREADY_COMPLETED")
+            if not hmac.compare_digest(row["token_hash"], _token_hash(token)):
+                raise ValueError("AUTH_SETUP_TOKEN_INVALID")
+            claimed = connection.execute(
+                self.setup.update()
+                .where(self.setup.c.id == 1, self.setup.c.completed.is_(False))
+                .values(token_hash=secrets.token_hex(32), completed=True, completed_at=now)
+            )
+            if claimed.rowcount != 1:
+                raise ValueError("AUTH_SETUP_ALREADY_COMPLETED")
+            user_id = str(uuid.uuid4())
+            safe_name = (display_name or username).strip() or username
+            connection.execute(
+                self.users.insert().values(
+                    user_id=user_id,
+                    username=username.strip(),
+                    display_name=safe_name,
+                    roles="admin",
+                    scene_ids="",
+                    is_active=True,
+                    authz_version=1,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            connection.execute(
+                self.credentials.insert().values(
+                    user_id=user_id,
+                    password_hash=hash_password(password),
+                    failed_attempts=0,
+                    locked_until=None,
+                    changed_at=now,
+                )
+            )
+        return AuthUser(user_id, username.strip(), ("admin",), (), True, 1, safe_name)
+
+    def mark_setup_complete(self) -> None:
+        with self.engine.begin() as connection:
+            connection.execute(
+                self.setup.update().where(self.setup.c.id == 1).values(
+                    token_hash=secrets.token_hex(32), completed=True, completed_at=_utcnow()
+                )
+            )
 
     def _migrate_legacy_users(self) -> None:
         if not inspect(self.engine).has_table("dbgpt_auth_users"):
@@ -316,6 +420,7 @@ class AuthStore:
             scene_ids=tuple(filter(None, row["scene_ids"].split(","))),
             is_active=row["is_active"],
             authz_version=row["authz_version"],
+            display_name=row["display_name"],
         )
 
     def create_user(self, username: str, password: str, *, user_id: str | None = None, roles: tuple[str, ...] = ("normal",), scene_ids: tuple[str, ...] = ()) -> AuthUser:
@@ -326,12 +431,102 @@ class AuthStore:
         with self.engine.begin() as connection:
             connection.execute(self.users.insert().values(user_id=user_id, username=username, display_name=username, roles=",".join(roles), scene_ids=",".join(scene_ids), is_active=True, authz_version=1, created_at=now, updated_at=now))
             connection.execute(self.credentials.insert().values(user_id=user_id, password_hash=hash_password(password), failed_attempts=0, locked_until=None, changed_at=now))
-        return AuthUser(user_id, username, roles, scene_ids)
+        return AuthUser(user_id, username, roles, scene_ids, display_name=username)
 
     def get_user(self, user_id: str) -> AuthUser | None:
         with self.engine.connect() as connection:
             row = connection.execute(select(self.users).where(self.users.c.user_id == user_id)).mappings().first()
         return self._user(row) if row else None
+
+    def list_users(self, *, page: int, page_size: int, search: str = "") -> tuple[list[dict[str, Any]], int]:
+        statement = select(self.users)
+        count_statement = select(func.count()).select_from(self.users)
+        if search:
+            criterion = or_(self.users.c.username.ilike(f"%{search}%"), self.users.c.display_name.ilike(f"%{search}%"))
+            statement = statement.where(criterion)
+            count_statement = count_statement.where(criterion)
+        with self.engine.connect() as connection:
+            total = connection.execute(count_statement).scalar_one()
+            rows = connection.execute(
+                statement.order_by(self.users.c.created_at.desc(), self.users.c.username.asc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            ).mappings().all()
+            user_ids = [row["user_id"] for row in rows]
+            local_ids = set(connection.execute(select(self.credentials.c.user_id).where(self.credentials.c.user_id.in_(user_ids))).scalars()) if user_ids else set()
+            identity_rows = connection.execute(
+                select(self.identities.c.user_id, self.identities.c.provider_id).where(self.identities.c.user_id.in_(user_ids))
+            ).all() if user_ids else []
+        providers_by_user: dict[str, set[str]] = {}
+        for user_id, provider_id in identity_rows:
+            providers_by_user.setdefault(user_id, set()).add(provider_id)
+        result = []
+        for row in rows:
+            user_id = row["user_id"]
+            methods = (["local"] if user_id in local_ids else []) + sorted(providers_by_user.get(user_id, set()))
+            result.append({
+                "user_id": user_id,
+                "username": row["username"],
+                "display_name": row["display_name"] or row["username"],
+                "roles": list(filter(None, row["roles"].split(","))),
+                "scene_ids": list(filter(None, row["scene_ids"].split(","))),
+                "is_active": row["is_active"],
+                "auth_methods": methods,
+                "created_at": row["created_at"].isoformat(),
+            })
+        return result, total
+
+    def update_user(self, user_id: str, changes: dict[str, Any]) -> AuthUser | None:
+        if not changes:
+            return self.get_user(user_id)
+        normalized = dict(changes)
+        if "display_name" in normalized:
+            normalized["display_name"] = (normalized["display_name"] or "").strip() or None
+        if "roles" in normalized:
+            normalized["roles"] = ",".join(normalized["roles"])
+        if "scene_ids" in normalized:
+            normalized["scene_ids"] = ",".join(normalized["scene_ids"])
+        normalized.update(authz_version=self.users.c.authz_version + 1, updated_at=_utcnow())
+        with self.engine.begin() as connection:
+            current = connection.execute(select(self.users).where(self.users.c.user_id == user_id)).mappings().first()
+            if current is None:
+                return None
+            if current["roles"].split(",").count("admin") and current["is_active"]:
+                rows = connection.execute(
+                    select(self.users.c.roles, self.users.c.is_active).with_for_update()
+                ).all()
+                active_admins = sum(active and "admin" in roles.split(",") for roles, active in rows)
+                next_roles = normalized.get("roles", current["roles"])
+                next_active = normalized.get("is_active", current["is_active"])
+                if next_active and "admin" in next_roles.split(","):
+                    remaining_admins = active_admins
+                else:
+                    remaining_admins = active_admins - 1
+                if remaining_admins < 1:
+                    raise HTTPException(status_code=409, detail="AUTH_LAST_ADMIN_REQUIRED")
+            connection.execute(update(self.users).where(self.users.c.user_id == user_id).values(**normalized))
+            connection.execute(update(self.sessions).where(self.sessions.c.user_id == user_id).values(revoked_at=_utcnow()))
+            row = connection.execute(select(self.users).where(self.users.c.user_id == user_id)).mappings().one()
+        return self._user(row)
+
+    def reset_local_password(self, user_id: str, password: str) -> bool:
+        now = _utcnow()
+        with self.engine.begin() as connection:
+            credential = connection.execute(select(self.credentials.c.user_id).where(self.credentials.c.user_id == user_id)).first()
+            if credential is None:
+                return False
+            connection.execute(
+                update(self.credentials)
+                .where(self.credentials.c.user_id == user_id)
+                .values(password_hash=hash_password(password), failed_attempts=0, locked_until=None, changed_at=now)
+            )
+            connection.execute(
+                update(self.users)
+                .where(self.users.c.user_id == user_id)
+                .values(authz_version=self.users.c.authz_version + 1, updated_at=now)
+            )
+            connection.execute(update(self.sessions).where(self.sessions.c.user_id == user_id).values(revoked_at=now))
+        return True
 
     def authenticate(self, username: str, password: str, config: AuthConfig) -> AuthUser | None:
         now = _utcnow()
@@ -375,7 +570,15 @@ class AuthStore:
             user_id = str(uuid.uuid4())
             connection.execute(self.users.insert().values(user_id=user_id, username=username, display_name=attributes.get("display_name") or username, roles=",".join(config.default_roles), scene_ids="", is_active=active, authz_version=1, created_at=now, updated_at=now))
             connection.execute(self.identities.insert().values(user_id=user_id, provider_id=provider.provider_id, subject=subject, attributes=json.dumps(attributes, ensure_ascii=False), created_at=now, updated_at=now))
-            return AuthUser(user_id, username, config.default_roles, (), active, 1) if active else None
+            return AuthUser(
+                user_id,
+                username,
+                config.default_roles,
+                (),
+                active,
+                1,
+                attributes.get("display_name") or username,
+            ) if active else None
 
     def _available_username(self, connection: Any, base: str) -> str:
         base = base.strip()[:120] or "external-user"
@@ -458,6 +661,32 @@ class PasswordChangeRequest(BaseModel):
     new_password: str = Field(min_length=12, max_length=512)
 
 
+class AdminUserCreateRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=12, max_length=512)
+    display_name: str | None = Field(default=None, max_length=256)
+    roles: list[str] = Field(default_factory=lambda: ["normal"], min_length=1)
+    scene_ids: list[str] = Field(default_factory=list)
+
+
+class AdminUserUpdateRequest(BaseModel):
+    display_name: str | None = Field(default=None, max_length=256)
+    roles: list[str] | None = Field(default=None, min_length=1)
+    scene_ids: list[str] | None = None
+    is_active: bool | None = None
+
+
+class AdminPasswordResetRequest(BaseModel):
+    password: str = Field(min_length=12, max_length=512)
+
+
+class SetupRequest(BaseModel):
+    token: str = Field(min_length=16, max_length=512)
+    username: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=12, max_length=512)
+    display_name: str | None = Field(default=None, max_length=256)
+
+
 def _safe_return_to(value: str | None) -> str:
     if value and value.startswith("/") and not value.startswith("//"):
         return value
@@ -503,41 +732,101 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         self.auth_config = auth_config
         self.store = store
         self.required = required
+        self.internal_token = hmac.new(
+            auth_config.secret, b"dataman-internal-controller-v1", hashlib.sha256
+        ).hexdigest()
 
     def _public(self, path: str) -> bool:
-        return path in _DEFAULT_PUBLIC_PATHS or path.startswith("/api/v1/auth/sso/") or path.startswith("/api/v1/auth/provider/")
+        return (
+            path in _DEFAULT_PUBLIC_PATHS
+            or path.startswith("/api/v1/auth/sso/")
+            or path.startswith("/api/v1/auth/provider/")
+        )
 
     async def dispatch(self, request: Request, call_next: Any) -> Response:
+        if not request.url.path.startswith("/api/"):
+            return await call_next(request)
+        if request.url.path.startswith("/api/controller/"):
+            internal_token = request.headers.get("X-DataMan-Internal-Token", "")
+            if hmac.compare_digest(internal_token, self.internal_token):
+                return await call_next(request)
         authorization = request.headers.get("Authorization", "")
         token = authorization[7:].strip() if authorization.lower().startswith("bearer ") else request.cookies.get(self.auth_config.cookie_name)
         if token:
             try:
                 request.state.user = self.store.authenticate_access_token(token, self.auth_config)
             except HTTPException as exc:
-                return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
-        elif self.required and not self._public(request.url.path):
+                if not self._public(request.url.path):
+                    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+        elif self.required and request.url.path.startswith("/api/") and not self._public(request.url.path):
             return JSONResponse(status_code=401, content={"detail": "Authentication required"})
         return await call_next(request)
 
 
 def ask_data_principal_resolver(request: Request):
-    from dbgpt_app.scene.ask_data.security import AskDataPrincipal
+    from dbgpt_app.scene.ask_data.security import principal_from_user
 
     user = getattr(request.state, "user", None)
     if user is None:
         raise HTTPException(status_code=401, detail="Authentication required")
-    return AskDataPrincipal(user_id=user.user_id, roles=frozenset(user.roles), scene_ids=frozenset(user.scene_ids))
+    return principal_from_user(user)
 
 
-def configure_authentication(app: Any, *, database_url: str, secret: str, ttl_seconds: int = 600, required: bool = False, **options: Any) -> AuthStore:
+def configure_authentication(
+    app: Any,
+    *,
+    database_url: str,
+    secret: str,
+    ttl_seconds: int = 3600,
+    required: bool = False,
+    setup_token: str | None = None,
+    setup_token_file: str | None = None,
+    **options: Any,
+) -> AuthStore:
     config = AuthConfig(secret, ttl_seconds, **options)
     store = AuthStore(database_url)
+    store.prepare_setup(_token_hash(setup_token or ""))
+    if setup_token_file and store.setup_status():
+        try:
+            import os
+
+            os.remove(setup_token_file)
+        except FileNotFoundError:
+            pass
     app.state.auth_store = store
     app.state.auth_config = config
+    app.state.auth_internal_token = hmac.new(
+        config.secret, b"dataman-internal-controller-v1", hashlib.sha256
+    ).hexdigest()
     app.state.auth_required = required
     app.add_middleware(AuthenticationMiddleware, auth_config=config, store=store, required=required)
     app.state.ask_data_principal_resolver = ask_data_principal_resolver
     router = APIRouter(prefix="/api/v1/auth", tags=["Auth"])
+    admin_router = APIRouter(prefix="/api/v1/admin/users", tags=["User management"])
+
+    def require_admin(request: Request, *, mutation: bool = False) -> AuthUser:
+        user = getattr(request.state, "user", None)
+        if user is None:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        if "admin" not in user.roles:
+            raise HTTPException(status_code=403, detail="AUTH_PERMISSION_DENIED")
+        origin = request.headers.get("origin")
+        if mutation and origin and urlsplit(origin).netloc != request.headers.get("host"):
+            raise HTTPException(status_code=403, detail="AUTH_CROSS_ORIGIN_REQUEST")
+        return user
+
+    def validate_roles(roles: list[str]) -> list[str]:
+        normalized = list(dict.fromkeys(role.strip() for role in roles if role.strip()))
+        allowed = {"normal", "admin", "ask_data_admin"}
+        if not normalized or not set(normalized).issubset(allowed):
+            raise HTTPException(status_code=422, detail="AUTH_INVALID_ROLES")
+        return normalized
+
+    def normalize_scene_ids(scene_ids: list[str]) -> list[str]:
+        normalized = list(dict.fromkeys(scene_id.strip() for scene_id in scene_ids if scene_id.strip()))
+        if any(len(scene_id) > 128 for scene_id in normalized) or sum(map(len, normalized)) + max(len(normalized) - 1, 0) > 4096:
+            raise HTTPException(status_code=422, detail="AUTH_INVALID_SCENE_ID")
+        return normalized
 
     def session_response(user: AuthUser, session: AuthSession, *, auth_method: str, provider_id: str | None) -> JSONResponse:
         access_token = config.issue(user, session.session_id, auth_method=auth_method, provider_id=provider_id)
@@ -553,6 +842,35 @@ def configure_authentication(app: Any, *, database_url: str, secret: str, ttl_se
     @router.get("/config")
     def auth_public_config():
         return {"mode": config.mode, "providers": [{"id": provider.provider_id, "type": provider.provider_type, "display_name": provider.display_name} for provider in config.enabled_providers]}
+
+    @router.get("/setup/status")
+    def setup_status():
+        return {"initialized": store.setup_status()}
+
+    @router.post("/setup")
+    def setup(payload: SetupRequest, request: Request):
+        origin = request.headers.get("origin")
+        if origin and urlsplit(origin).netloc != request.headers.get("host"):
+            raise HTTPException(status_code=403, detail="AUTH_CROSS_ORIGIN_REQUEST")
+        if not payload.username.strip():
+            raise HTTPException(status_code=422, detail="AUTH_INVALID_USERNAME")
+        try:
+            user = store.initialize_admin(payload.token, payload.username, payload.password, payload.display_name)
+        except ValueError as exc:
+            if str(exc) == "AUTH_SETUP_TOKEN_INVALID":
+                raise HTTPException(status_code=403, detail=str(exc)) from exc
+            if str(exc) == "AUTH_SETUP_ALREADY_COMPLETED":
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            raise
+        if setup_token_file:
+            try:
+                import os
+
+                os.remove(setup_token_file)
+            except FileNotFoundError:
+                pass
+        session = store.create_session(user, auth_method="local", provider_id=None, config=config)
+        return session_response(user, session, auth_method="local", provider_id=None)
 
     @router.post("/local/login")
     @router.post("/login", include_in_schema=False)
@@ -635,7 +953,82 @@ def configure_authentication(app: Any, *, database_url: str, secret: str, ttl_se
             raise HTTPException(status_code=401, detail="AUTH_INVALID_CREDENTIALS")
         return {"status": "ok"}
 
+    @admin_router.get("")
+    def list_managed_users(
+        request: Request,
+        page: int = Query(default=1, ge=1),
+        page_size: int = Query(default=20, ge=1, le=100),
+        search: str = Query(default="", max_length=128),
+    ):
+        require_admin(request)
+        items, total = store.list_users(page=page, page_size=page_size, search=search.strip())
+        return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+    @admin_router.post("")
+    def create_managed_user(payload: AdminUserCreateRequest, request: Request):
+        require_admin(request, mutation=True)
+        username = payload.username.strip()
+        if not username:
+            raise HTTPException(status_code=422, detail="AUTH_USERNAME_REQUIRED")
+        roles = validate_roles(payload.roles)
+        scene_ids = normalize_scene_ids(payload.scene_ids)
+        try:
+            user = store.create_user(
+                username,
+                payload.password,
+                roles=tuple(roles),
+                scene_ids=tuple(scene_ids),
+            )
+        except IntegrityError as exc:
+            raise HTTPException(status_code=409, detail="AUTH_USERNAME_CONFLICT") from exc
+        with store.engine.begin() as connection:
+            connection.execute(
+                update(store.users)
+                .where(store.users.c.user_id == user.user_id)
+                .values(display_name=(payload.display_name or username).strip() or username)
+            )
+        return {
+            "user_id": user.user_id,
+            "username": user.username,
+            "display_name": (payload.display_name or username).strip() or username,
+            "roles": roles,
+            "scene_ids": scene_ids,
+            "is_active": True,
+            "auth_methods": ["local"],
+        }
+
+    @admin_router.patch("/{user_id}")
+    def update_managed_user(user_id: str, payload: AdminUserUpdateRequest, request: Request):
+        require_admin(request, mutation=True)
+        changes = payload.model_dump(exclude_unset=True)
+        if "roles" in changes:
+            changes["roles"] = validate_roles(changes["roles"])
+        if "scene_ids" in changes:
+            changes["scene_ids"] = normalize_scene_ids(changes["scene_ids"])
+        user = store.update_user(user_id, changes)
+        if user is None:
+            raise HTTPException(status_code=404, detail="AUTH_USER_NOT_FOUND")
+        items, _ = store.list_users(page=1, page_size=1, search=user.username)
+        result = next((item for item in items if item["user_id"] == user_id), None)
+        return result or {
+            "user_id": user.user_id,
+            "username": user.username,
+            "roles": list(user.roles),
+            "scene_ids": list(user.scene_ids),
+            "is_active": user.is_active,
+        }
+
+    @admin_router.post("/{user_id}/password-reset")
+    def reset_managed_user_password(user_id: str, payload: AdminPasswordResetRequest, request: Request):
+        require_admin(request, mutation=True)
+        if store.get_user(user_id) is None:
+            raise HTTPException(status_code=404, detail="AUTH_USER_NOT_FOUND")
+        if not store.reset_local_password(user_id, payload.password):
+            raise HTTPException(status_code=409, detail="AUTH_LOCAL_CREDENTIAL_NOT_FOUND")
+        return {"status": "ok"}
+
     app.include_router(router)
+    app.include_router(admin_router)
     from dbgpt_app.scene.ask_data.security import AskDataAuthorizer
     app.state.ask_data_authorizer = AskDataAuthorizer()
     return store

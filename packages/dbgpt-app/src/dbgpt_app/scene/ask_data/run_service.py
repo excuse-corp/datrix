@@ -41,7 +41,20 @@ class RunExecutionService:
         entry_type: str = "main_agent",
         sql_by_task: dict[str, str] | None = None,
         on_task_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        authorized_scene_ids: list[str] | None = None,
+        is_platform_admin: bool = True,
+        authz_version: int = 0,
     ) -> tuple[QueryRun, QueryRunResult]:
+        if (
+            plan.action == "execute"
+            and authorized_scene_ids is not None
+            and not is_platform_admin
+        ):
+            allowed_scene_ids = {str(scene_id) for scene_id in authorized_scene_ids}
+            if any(task.scene_id not in allowed_scene_ids for task in plan.tasks):
+                raise ValueError("SCENE_ACCESS_FORBIDDEN")
+        if idempotency_key:
+            idempotency_key = f"{idempotency_key}:authz-{authz_version}"
         if idempotency_key:
             existing = self.repository.find_by_idempotency(user_id, idempotency_key)
             if existing:
@@ -132,6 +145,9 @@ class RunExecutionService:
                 execute_kwargs["sql_by_task"] = sql_by_task
             if on_task_event is not None:
                 execute_kwargs["on_task_event"] = on_task_event
+            if authorized_scene_ids is not None:
+                execute_kwargs["authorized_scene_ids"] = authorized_scene_ids
+                execute_kwargs["is_platform_admin"] = is_platform_admin
             result = await self.orchestrator.execute(**execute_kwargs)
         except Exception as exc:
             result = QueryRunResult(

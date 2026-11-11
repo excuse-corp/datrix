@@ -99,7 +99,10 @@ def main() -> int:
     )
     parser.add_argument(
         "--base-url",
-        default=os.getenv("ASK_DATA_BASE_URL", "http://127.0.0.1:5670"),
+        default=os.getenv(
+            "ASK_DATA_BASE_URL",
+            f"http://127.0.0.1:{os.getenv('DATAMAN_BACKEND_PORT', '7771')}",
+        ),
     )
     parser.add_argument("--token", default=os.getenv("ASK_DATA_TOKEN"))
     parser.add_argument("--report", type=Path)

@@ -6,7 +6,6 @@ encrypt_key = "${env:DBGPT_ENCRYPT_KEY:-change-me-before-production}"
 [service.web]
 host = "0.0.0.0"
 port = 7771
-new_web_ui = true
 
 [service.web.database]
 type = "sqlite"
@@ -17,7 +16,19 @@ path = "pilot/meta_data/dataman.db"
 type = "chroma"
 persist_path = "pilot/data"
 
-# A model declaration is required by Datrix during WorkerManager initialization.
-# Replace the environment variables with a real compatible model endpoint before
-# using natural-language queries in production.
 [models]
+[[models.llms]]
+name = "${env:LLM_MODEL_NAME:-Qwen/Qwen2.5-Coder-32B-Instruct}"
+provider = "${env:LLM_MODEL_PROVIDER:-proxy/siliconflow}"
+api_key = "${env:SILICONFLOW_API_KEY}"
+
+[[models.embeddings]]
+name = "${env:EMBEDDING_MODEL_NAME:-BAAI/bge-large-zh-v1.5}"
+provider = "${env:EMBEDDING_MODEL_PROVIDER:-proxy/openai}"
+api_url = "${env:EMBEDDING_MODEL_API_URL:-https://api.siliconflow.cn/v1/embeddings}"
+api_key = "${env:SILICONFLOW_API_KEY}"
+
+[[models.rerankers]]
+name = "BAAI/bge-reranker-v2-m3"
+provider = "proxy/siliconflow"
+api_key = "${env:SILICONFLOW_API_KEY}"

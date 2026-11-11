@@ -349,15 +349,35 @@ class ReActOutputParser:
                 or None
             )
 
-        # Extract action
-        action_match = re.search(
-            rf"{action_line}(.*?)(?={action_input_line}|{observation_line}|\Z)",
-            match_text,
-            re.DOTALL | re.MULTILINE,
+        # Extract action.  Models occasionally emit an explanatory ``Action:``
+        # line before the real tool call (for example, ``Action: generate report``
+        # followed by ``Action: code_interpreter``).  The old expression treated
+        # everything between the first action label and ``Action Input:`` as the
+        # tool name, which then caused a misleading "No tool found" error.  Keep
+        # action labels as boundaries and use the last one before the input; this
+        # preserves the normal single-action case and recovers the actual tool in
+        # the malformed duplicate-label case.
+        action_matches = self._find_prefix_matches(
+            match_text, self.action_prefix_escaped
         )
-        if action_match:
+        input_and_observation_matches = (
+            self._find_prefix_matches(match_text, self.action_input_prefix_escaped)
+            + self._find_prefix_matches(match_text, self.observation_prefix_escaped)
+        )
+        action_end = min(
+            (match.start() for match in input_and_observation_matches),
+            default=len(match_text),
+        )
+        action_matches = [
+            match for match in action_matches if match.start() < action_end
+        ]
+        if action_matches:
+            action_match = action_matches[-1]
+            action_value_end = match_text.find("\n", action_match.end(), action_end)
+            if action_value_end < 0:
+                action_value_end = action_end
             action = self._clean_action_name(
-                step_text[action_match.start(1) : action_match.end(1)]
+                step_text[action_match.end() : action_value_end]
             )
 
             # Check if this is a terminate action

@@ -11,13 +11,25 @@ from pathlib import Path
 import tomllib
 
 
+def env_variable_name(value: object) -> str | None:
+    """Return the variable name when value is a `${env:NAME}` expression."""
+    text = str(value or "")
+    if not text.startswith("${env:"):
+        return None
+    variable, _, _fallback = text[6:-1].partition(":-")
+    return variable
+
+
 def check_source(name: str, config: dict, *, skip_network: bool) -> list[str]:
     failures = []
-    for variable in ("ECOLOGY_DB_USER", "ECOLOGY_DB_PASSWORD"):
-        if not os.getenv(variable):
+    # Credentials are declared as `${env:...}` references in the TOML, so derive
+    # the required variable names from the config instead of hardcoding them.
+    for field in ("user", "password"):
+        variable = env_variable_name(config.get(field, ""))
+        if variable and not os.getenv(variable):
             failures.append(f"missing environment variable: {variable}")
     host = str(config.get("host", ""))
-    port_value = str(config.get("port", 1433))
+    port_value = str(config.get("port", 5432))
     if port_value.startswith("${env:"):
         expression = port_value[6:-1]
         variable, _, fallback = expression.partition(":-")

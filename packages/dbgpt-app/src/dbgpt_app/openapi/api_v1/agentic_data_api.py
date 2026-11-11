@@ -15,7 +15,16 @@ from time import monotonic
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Body, Depends, File, Query, Request, UploadFile
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+)
 from fastapi.responses import StreamingResponse
 
 from dbgpt._private.config import Config
@@ -1596,6 +1605,7 @@ def _sse_event(payload: Dict[str, Any]) -> str:
 async def _react_agent_stream(
     dialogue: ConversationVo,
     user_token: UserRequest | None = None,
+    ask_data_principal=None,
 ) -> AsyncGenerator[str, None]:
     ext_info = dialogue.ext_info if isinstance(dialogue.ext_info, dict) else {}
     run_id = str(
@@ -1603,7 +1613,9 @@ async def _react_agent_stream(
     )
     dialogue.ext_info = {**ext_info, "client_run_id": run_id}
     try:
-        async for event in _react_agent_stream_impl(dialogue, user_token):
+        async for event in _react_agent_stream_impl(
+            dialogue, user_token, ask_data_principal
+        ):
             yield event
     finally:
         run_state = REACT_AGENT_RUNS.pop(run_id, None)
@@ -1619,6 +1631,7 @@ async def _react_agent_stream(
 async def _react_agent_stream_impl(
     dialogue: ConversationVo,
     user_token: UserRequest | None = None,
+    ask_data_principal=None,
 ) -> AsyncGenerator[str, None]:
     import asyncio
 
@@ -1672,7 +1685,11 @@ async def _react_agent_stream_impl(
         )
     run_id = str(run_id or uuid.uuid4().hex)
     conv_id = dialogue.conv_uid or str(uuid.uuid4())
-    user_id = getattr(user_token, "user_id", None) or dialogue.user_name or "default"
+    user_id = (
+        ask_data_principal.user_id
+        if ask_data_principal is not None
+        else getattr(user_token, "user_id", None) or dialogue.user_name or "default"
+    )
     cancel_event = asyncio.Event()
     REACT_AGENT_RUNS[run_id] = {
         "conv_uid": conv_id,
@@ -2645,15 +2662,16 @@ print(json.dumps(summary, ensure_ascii=False))
             1024, int(ask_data_context_budget.max_context_tokens * 0.5)
         )
 
-        role = getattr(user_token, "role", None)
-        ask_data_principal = AskDataPrincipal(
-            user_id=(
-                getattr(user_token, "user_id", None)
-                or dialogue.user_name
-                or "anonymous"
-            ),
-            roles=frozenset({str(role)}) if role else frozenset(),
-        )
+        if ask_data_principal is None:
+            role = getattr(user_token, "role", None)
+            ask_data_principal = AskDataPrincipal(
+                user_id=(
+                    getattr(user_token, "user_id", None)
+                    or dialogue.user_name
+                    or "anonymous"
+                ),
+                roles=frozenset({str(role)}) if role else frozenset(),
+            )
         ask_data_query_tool, ask_data_capabilities_tool = make_ask_data_tools(
             react_state,
             stream_callback,
@@ -2863,11 +2881,13 @@ print(json.dumps(summary, ensure_ascii=False))
         from dbgpt_app.openapi.api_v1.tools import reply_to_ask_data_query
         from dbgpt_app.scene.ask_data.security import AskDataPrincipal
 
-        role = getattr(user_token, "role", None)
-        principal = AskDataPrincipal(
-            user_id=dialogue.user_name or "anonymous",
-            roles=frozenset({str(role)}) if role else frozenset(),
-        )
+        principal = ask_data_principal
+        if principal is None:
+            role = getattr(user_token, "role", None)
+            principal = AskDataPrincipal(
+                user_id=dialogue.user_name or "anonymous",
+                roles=frozenset({str(role)}) if role else frozenset(),
+            )
         yield _sse_event(
             {
                 "type": "ask_data.stage",
@@ -3231,6 +3251,9 @@ Do not use ellipsis.
 Action Reason: Why this action is needed now, plain text, MUST be concise and fit in
 <= 30 Chinese chars or <= 12 English words. If too long, rewrite shorter.
 Do not use ellipsis.
+Output exactly one `Action:` line per interaction round. Put descriptions only in
+`Action Intention:` or `Action Reason:`. The `Action:` line must contain only one
+tool name from the list above (no explanation, no second `Action:` line).
 Action: The selected tool name (must be one of the tools listed above)
 Action Input: The JSON format of tool parameters
 For final answers, use `Action: terminate` and put the complete user-facing answer
@@ -3390,6 +3413,9 @@ Do not use ellipsis.
 Action Reason: Why this action is needed now, plain text, MUST be concise and fit in
 <= 30 Chinese chars or <= 12 English words. If too long, rewrite shorter.
 Do not use ellipsis.
+Output exactly one `Action:` line per interaction round. Put descriptions only in
+`Action Intention:` or `Action Reason:`. The `Action:` line must contain only one
+tool name from the list above (no explanation, no second `Action:` line).
 Action: The selected tool name
 Action Input: The JSON format of tool parameters
 For final answers, use `Action: terminate` and put the complete user-facing answer
@@ -4763,6 +4789,7 @@ async def download_skill_package(
 
 @router.post("/v1/chat/react-agent")
 async def chat_react_agent(
+    request: Request,
     dialogue: ConversationVo = Body(),
     user_token: UserRequest = Depends(get_user_from_headers),
 ):
@@ -4776,7 +4803,21 @@ async def chat_react_agent(
         file_paths = dialogue.ext_info.get("file_paths")
         if isinstance(file_paths, list) and len(file_paths) > MAX_CHAT_UPLOAD_FILES:
             return Result.failed(msg="You can attach at most 5 files per message")
-    dialogue.user_name = user_token.user_id if user_token else dialogue.user_name
+    from dbgpt_app.scene.ask_data.security import principal_from_user
+
+    authenticated_user = getattr(request.state, "user", None)
+    if authenticated_user is None and (
+        getattr(request.app.state, "auth_required", False)
+        or getattr(request.app.state, "ask_data_principal_resolver", None) is not None
+    ):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    ask_data_principal = (
+        principal_from_user(authenticated_user) if authenticated_user else None
+    )
+    if ask_data_principal is not None:
+        dialogue.user_name = ask_data_principal.user_id
+    elif user_token:
+        dialogue.user_name = user_token.user_id
     headers = {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
@@ -4785,7 +4826,7 @@ async def chat_react_agent(
     }
     try:
         return StreamingResponse(
-            _react_agent_stream(dialogue, user_token),
+            _react_agent_stream(dialogue, user_token, ask_data_principal),
             headers=headers,
             media_type="text/event-stream",
         )
@@ -4805,6 +4846,20 @@ async def chat_react_agent(
 # ── Human-in-the-Loop Question API ──────────────────────────────────────────
 
 
+def _question_owner_id(request: Request, user_token: UserRequest) -> str:
+    """Resolve the same owner identity used when the ReAct question is created."""
+    authenticated_user = getattr(request.state, "user", None)
+    if authenticated_user is not None:
+        from dbgpt_app.scene.ask_data.security import principal_from_user
+
+        return principal_from_user(authenticated_user).user_id
+    if getattr(request.app.state, "auth_required", False) or getattr(
+        request.app.state, "ask_data_principal_resolver", None
+    ) is not None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return str(getattr(user_token, "user_id", None) or "default")
+
+
 class _ReactAgentCancelBody(_BaseModel):
     conv_uid: Optional[str] = None
     run_id: Optional[str] = None
@@ -4812,6 +4867,7 @@ class _ReactAgentCancelBody(_BaseModel):
 
 @router.post("/v1/chat/react-agent/cancel", response_model=Result)
 async def chat_react_agent_cancel(
+    request: Request,
     body: _ReactAgentCancelBody = Body(),
     user_token: UserRequest = Depends(get_user_from_headers),
 ):
@@ -4820,7 +4876,7 @@ async def chat_react_agent_cancel(
     The endpoint is intentionally idempotent: the frontend may call it after the
     stream has already closed or after a previous cancel request.
     """
-    user_id = str(getattr(user_token, "user_id", None) or "default")
+    user_id = _question_owner_id(request, user_token)
     cancelled_run = False
     if body.run_id:
         run_state = REACT_AGENT_RUNS.get(body.run_id)
@@ -4877,6 +4933,7 @@ class _QuestionReplyBody(_BaseModel):
 async def question_reply(
     request_id: str,
     body: _QuestionReplyBody,
+    request: Request,
     user_token: UserRequest = Depends(get_user_from_headers),
 ):
     """User submits answers to a pending question, unblocking the agent tool."""
@@ -4886,16 +4943,21 @@ async def question_reply(
         question_manager.reply(
             request_id,
             body.answers,
-            user_id=str(getattr(user_token, "user_id", None) or "default"),
+            user_id=_question_owner_id(request, user_token),
         )
         return Result.succ({"success": True, "request_id": request_id})
     except KeyError as e:
-        return Result.failed(msg=str(e))
+        logger.warning("Question reply rejected: request_id=%s", request_id)
+        raise HTTPException(
+            status_code=409,
+            detail="该确认已过期或无法继续，请重新发起任务。",
+        ) from e
 
 
 @router.post("/v1/chat/question/{request_id}/reject", response_model=Result)
 async def question_reject(
     request_id: str,
+    request: Request,
     user_token: UserRequest = Depends(get_user_from_headers),
 ):
     """User dismisses a pending question, unblocking the agent tool with rejection."""
@@ -4904,8 +4966,12 @@ async def question_reject(
     try:
         question_manager.reject(
             request_id,
-            user_id=str(getattr(user_token, "user_id", None) or "default"),
+            user_id=_question_owner_id(request, user_token),
         )
         return Result.succ({"success": True, "request_id": request_id})
     except KeyError as e:
-        return Result.failed(msg=str(e))
+        logger.warning("Question rejection failed: request_id=%s", request_id)
+        raise HTTPException(
+            status_code=409,
+            detail="该确认已过期或无法继续，请重新发起任务。",
+        ) from e

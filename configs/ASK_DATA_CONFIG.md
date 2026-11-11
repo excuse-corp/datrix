@@ -2,7 +2,7 @@
 
 The ask-data module uses two configuration layers:
 
-1. A DB-GPT profile such as `dbgpt-proxy-siliconflow.toml` for the web server,
+1. A DB-GPT profile such as `configs/dataman-runtime.toml` for the web server,
    metadata database, model provider, and RAG storage.
 2. `ask-data.example.toml` for ask-data limits, Snapshot/Registry settings, and
    the bound business data source.
@@ -10,18 +10,20 @@ The ask-data module uses two configuration layers:
 Copy `.env.ask-data.example` to `.env.ask-data` and fill in credentials locally.
 The example env file is tracked; the copied file is ignored by Git.
 
-The current development path is **Scheme A**: `dataman` connects read-only to
-the SQL Server `ecology` database and queries
-`dbo.vw_xmk_project_contract_report` directly.  No local business-data copy or
-daily ETL is enabled yet.  Scheme B will add a separate sync configuration and
-must not change the Scene/Snapshot query contract.
+The current path is: the upstream Ecology SQL Server is read by a third-party
+synchronization platform, which writes into the PostgreSQL `dataman_data`
+database.  `dataman` never connects to SQL Server directly; it reads only the
+`reporting.vw_information_project_contract_report` view with the read-only
+`dataman_reader` account.  The end-to-end flow is documented in
+`configs/INFORMATION_PROJECT_DATA_FLOW.md`.
 
 The ask-data package profile intentionally keeps only the capabilities required
 by the plan: Datrix web/API, controlled agents, SQLAlchemy/data-source support,
-RAG/Chroma, OpenAI-compatible model access, and the SQL Server driver.  Legacy
-Excel/chat apps, free-form code execution, shell sandboxing, and unused Tongyi
-or Zhipu provider extras are disabled.  The commented legacy app examples in
-`dbgpt-app-config.example.toml` can be restored for unrelated DB-GPT use cases.
+RAG/Chroma, OpenAI-compatible model access, and the PostgreSQL driver
+(`psycopg`).  Legacy Excel/chat apps, free-form code execution, shell sandboxing,
+and unused Tongyi or Zhipu provider extras are disabled.  The commented legacy
+app examples in `dbgpt-app-config.example.toml` can be restored for unrelated
+DB-GPT use cases.
 
 ## React Agent integration
 
@@ -39,8 +41,8 @@ only for explicitly named authorized scenes; every Scene still receives only
 its own Snapshot and two private Markdown documents.
 
 Before starting the service, verify that the host running `dataman` can reach
-`ECOLOGY_DB_HOST:ECOLOGY_DB_PORT` and that the account has only read access to
-the configured view.
+`DATAMAN_DATA_DB_HOST:DATAMAN_DATA_DB_PORT` and that the account has only read
+access to the configured view.
 
 The non-secret prerequisite check is:
 
@@ -86,7 +88,7 @@ Run it against a deployed service and retain the release report:
 ```bash
 python scripts/ask_data_uat.py \
   --config configs/ask-data-uat.example.toml \
-  --base-url http://127.0.0.1:5670 \
+  --base-url http://127.0.0.1:7771 \
   --report artifacts/ask-data-uat.json
 ```
 
@@ -121,11 +123,22 @@ python scripts/ask_data_perf.py \
 
 ## Account and unified authentication
 
-Set `DBGPT_AUTH_SECRET` to enable DataMan's self-managed account system. It
-stores local credentials, external identity bindings, and revocable sessions in
-`DBGPT_AUTH_DB`; it injects the verified internal user into
+DataMan enables its self-managed account system at startup. When
+`DBGPT_AUTH_SECRET` is not set, the service creates a random secret in
+`pilot/meta_data/dataman_auth_secret` (or the path in
+`DBGPT_AUTH_SECRET_FILE`) with restricted file permissions. Local credentials,
+external identity bindings, and revocable sessions are stored in
+`DBGPT_AUTH_DB`; the verified internal user is injected into
 `request.state.user` for AskData authorization. Set `DBGPT_AUTH_REQUIRED=true`
-to require authentication on all non-public Datrix routes.
+to require authentication on API routes.
+
+On a new instance, the service also writes a one-time setup token to
+`pilot/meta_data/dataman_setup_token` (or `DBGPT_AUTH_SETUP_TOKEN_FILE`). Read
+that file from the server through a secure channel, open `/setup`, and create
+the first platform administrator. The token is invalidated and the file is
+removed after successful setup. If an active administrator already exists,
+setup is considered complete and no new administrator can be claimed through
+this flow.
 
 The default `hybrid` mode permits local accounts and CAS. Configure
 `DBGPT_AUTH_CAS_BASE_URL` and `DBGPT_AUTH_CAS_CALLBACK_URL` with HTTPS URLs to
@@ -137,6 +150,8 @@ The public endpoints are:
 
 ```bash
 GET  /api/v1/auth/config
+GET  /api/v1/auth/setup/status
+POST /api/v1/auth/setup
 POST /api/v1/auth/local/login
 GET  /api/v1/auth/sso/{provider_id}/login
 POST /api/v1/auth/refresh
@@ -186,7 +201,7 @@ DATAMAN_ADMIN_ACCESS_TOKEN='admin-access-token' \
 python scripts/seed_information_project_scene.py
 ```
 
-The seed does not activate the Scene because the synchronization table is empty.
+The seed does not activate the Scene because it is created in a draft state.
 After the third-party platform completes its first successful load, validate,
 build, and activate the Scene through the AskData Scene API.
 

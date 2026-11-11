@@ -13,7 +13,10 @@ import httpx
 def main() -> int:
     root = Path(__file__).resolve().parents[1]
     semantic_path = root / "dataman1111/scenes/information_project_contract_report.semantic.md"
-    api_base_url = os.environ.get("DATAMAN_API_BASE_URL", "http://127.0.0.1:5670")
+    api_base_url = os.environ.get(
+        "DATAMAN_API_BASE_URL",
+        f"http://127.0.0.1:{os.environ.get('DATAMAN_BACKEND_PORT', '7771')}",
+    )
     access_token = os.environ.get("DATAMAN_ADMIN_ACCESS_TOKEN", "")
     if not access_token:
         raise SystemExit("DATAMAN_ADMIN_ACCESS_TOKEN is required")

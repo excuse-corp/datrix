@@ -1,8 +1,15 @@
 # 信息化项目数据流程与经费年份改造说明
 
-> 核查日期：2026-10-12
+> 核查日期：2026-10-26
 > 用途：说明信息化项目数据从 Ecology 上游到 DataMan 问数结果的流转过程，并列出将经费年份编码转换为真实年份所需的改动。
 > 安全说明：本文不记录数据库主机地址、账号或密码。连接凭证应放在受控的密钥配置中，不应写入仓库。
+
+### 实施状态（2026-10-26）
+
+- 已准备上游视图 SQL，追加经费类型原始编码和字典翻译后的经费年份；尚未在 Ecology SQL Server 上执行该视图变更。
+- 已给本地 PostgreSQL 的 `sync.pcm_project_info` 增加 `funding_type_code`、`funding_year`，并扩展 reporting 视图；迁移文件为 `docker/dataman-postgres/migrations/002-add-project-funding-code-and-year.sql`。
+- 已更新初始化脚本、字段映射和 AskData 语义文档。
+- 尚需在数据交换平台配置两列映射并重新同步，再刷新/重建 AskData Scene Snapshot。上游视图和同步平台未完成前，新加的 PostgreSQL 列会保持空值。
 
 ## 一、端到端数据流程
 
@@ -17,8 +24,10 @@ Ecology SQL Server
        └─ fieldid=12163：当前项目表单的经费年份选项
              ↓
 dbo.vw_xmk_project_contract_report（上游报表视图）
-  ├─ 已将 jflx 翻译成经费类型名称
-  └─ 当前将 jflxnf 原样输出为编码，尚未输出年份名称
+  ├─ 经费类型名称：jflx 经 fieldid=10657 字典翻译
+  ├─ 经费类型编码：jflx 原始值
+  ├─ 经费年份编码：jflxnf 原始值（既有列）
+  └─ 经费年份：jflxnf 经 fieldid=12163 字典翻译（新列，待上游发布）
              ↓ 第三方同步平台（当前可观察到 JDBC 写入）
 dataman_data PostgreSQL
   └─ sync.pcm_project_info（同步落地表）
@@ -39,7 +48,7 @@ DataMan AskData
 |---|---|---|
 | 上游业务数据 | `dbo.uf_xmk` | 一行代表一个项目；`id` 是项目 ID，`jflx` 和 `jflxnf` 保存选择项代码。 |
 | 上游字典 | `dbo.workflow_selectitem` | 用 `selectvalue` 保存选项代码，用 `selectname` 保存用户看到的文字。经费类型字段 ID 是 `10657`；当前项目表单的年份字段 ID 是 `12163`。 |
-| 上游报表视图 | `dbo.vw_xmk_project_contract_report` | 把项目字段组织成同步接口。目前经费类型已翻译，年份字段仍是代码。 |
+| 上游报表视图 | `dbo.vw_xmk_project_contract_report` | 把项目字段组织成同步接口；更新后的定义同时输出经费类型编码/名称、经费年份编码/名称，实际发布仍待完成。 |
 | 数据同步 | 第三方同步平台 | 从上游视图读取数据，再写入 PostgreSQL 的同步表。DataMan 本身不负责这一步。 |
 | 本地落地表 | `sync.pcm_project_info` | 保存同步后的项目数据，是同步平台的写入目标。 |
 | 本地查询视图 | `reporting.vw_information_project_contract_report` | 为 DataMan 提供受控、只读的项目查询字段，并进行必要的口径整理。 |
@@ -54,7 +63,7 @@ DataMan AskData
 
 上游表单配置显示，经费类型字段 `10657` 的子字段是年份字段 `12163`，所以在业务表单上，经费年份选项受经费类型联动控制。年份代码本身不是年份，也不能用代码大小或项目日期推算年份。
 
-上游视图当前的相关逻辑在 `dataman1111/create_vw_xmk_project_contract_report.sql`：经费类型通过 `fieldid=10657` 翻译；年份列直接选取 `x.jflxnf`，没有关联年份选项名称。这是年份在 DataMan 中显示为代码的根因。
+上游原视图只输出经费类型名称和 `jflxnf` 编码，没有单独输出经费类型原码或年份名称。更新定义在 `configs/alter_ecology_project_contract_report_view.sql`：保留既有输出，并在末尾追加 `uf_xmk.jflx` 原码及年份字典 `selectname`；应用到上游数据库后才会生效。
 
 ### 本次核实到的实际映射
 
@@ -71,15 +80,15 @@ DataMan AskData
 
 验证时，当前项目表单年份选项表中每个 `selectvalue` 唯一对应一个 `selectname`，上述项目记录中的年份编码均能查到对应年份。其他表单版本也有相似的年份字典字段 ID；维护 SQL 时应使用与项目视图字段配置相对应的 `12163`，不要仅凭字段名称选取其他表单的 ID。
 
-## 三、需要修改哪些部分
+## 三、字段变更和待完成事项
 
-### 必须修改：让真实年份进入 DataMan
+### 已实施的兼容性变更
 
-1. **上游 SQL Server 报表视图**
-   - 修改 `dataman1111/create_vw_xmk_project_contract_report.sql` 对应的上游视图定义。
-   - 保留原始年份代码列以便追溯，新增清晰命名的年份列，例如 `[经费年份]`。
-   - 新增年份字典关联：`workflow_selectitem.isbill=1`、`fieldid=12163`、`selectvalue=x.jflxnf`，输出 `selectname`。
-   - 不要将年份编码直接改名成真实年份；编码和翻译值应分列保存。
+1. **上游 SQL Server 报表视图：定义已更新，部署待完成**
+   - 目标字段为 `[经费类型编码] = uf_xmk.jflx` 和 `[经费年份] = 年份字典 selectname`。
+   - 保留既有 `[经费类型]` 名称和 `[经费类型年份]` 编码，不重命名或删除。
+   - 年份字典按 `workflow_selectitem.isbill=1`、`fieldid=12163`、`selectvalue=x.jflxnf` 关联；经费类型名称仍由 `fieldid=10657` 翻译。
+   - 由有权限的上游数据库维护人员执行 `configs/alter_ecology_project_contract_report_view.sql`，并核对结果行数、重复和年份匹配情况。
 
    逻辑示意：
 
@@ -95,48 +104,35 @@ DataMan AskData
       AND si_jflxnf.selectvalue = x.jflxnf
    ```
 
-2. **第三方同步平台字段映射**
-   - 将新增的 `[经费年份]` 映射到 PostgreSQL 新字段 `funding_year`。
-   - 保留原代码字段 `funding_type_year`，用于排错和追溯。
-   - 确认同步任务执行全量或增量更新，并检查 `funding_year` 是否为空或出现非四位年份值。
+2. **第三方同步平台字段映射：待配置**
+   - `[经费类型编码]` → `funding_type_code`；`[经费年份]` → `funding_year`。
+   - 保留 `[经费类型年份]` → `funding_type_year`，用于编码追溯；业务年份问题使用 `funding_year`。
+   - 优先按列名映射；若平台按列序号同步，核对追加列顺序后再启用任务。
 
-3. **PostgreSQL 同步表与查询视图**
-   - 在 `sync.pcm_project_info` 增加 `funding_year varchar(4)`。
-   - 在 `reporting.vw_information_project_contract_report` 输出 `source.funding_year`；对现有 PostgreSQL 视图做 `CREATE OR REPLACE VIEW` 时，将新列追加在现有列清单末尾，保持原有列名和顺序不变。
-   - 同时更新初始化脚本 `docker/dataman-postgres/init/001-create-information-project-schema.sh`。
-   - 对已运行的数据库单独执行迁移；修改初始化脚本不会自动更新已有数据卷。
+3. **PostgreSQL 同步表与查询视图：本地已迁移**
+   - `sync.pcm_project_info` 新增 `funding_type_code integer` 和 `funding_year varchar(32)`；既有字段不删除、不重命名。
+   - reporting 视图在原有输出末尾追加这两列，保留既有列顺序及 `line_department` 派生规则。
+   - 初始化定义在 `docker/dataman-postgres/init/001-create-information-project-schema.sh`；已运行数据库的可重复迁移在 `docker/dataman-postgres/migrations/002-add-project-funding-code-and-year.sql`。
 
-   运行库迁移逻辑示意：
+4. **AskData 语义和场景 Snapshot：语义已更新，Snapshot 待刷新**
+   - 已更新字段定义、同步语义和 Scene 语义。
+   - 明确 `funding_year` 是年份筛选、分组和统计字段；`funding_type_year` 是旧名称下的原始选项编码，不用于回答年份问题。
+   - 上游同步完成后重新读取视图结构、构建 Snapshot 并验收。
 
-   ```sql
-   ALTER TABLE sync.pcm_project_info
-     ADD COLUMN IF NOT EXISTS funding_year varchar(4);
+### 外部待完成事项
 
-   -- 在完整的现有 SELECT 列清单最后追加：
-   source.funding_year
-   ```
-
-   上面只展示需要追加的列，不是可单独执行的 SQL。实际执行 `CREATE OR REPLACE VIEW` 时必须保留现有视图的全部列、顺序和既有 `line_department` 派生逻辑，并把 `funding_year` 追加到列清单末尾。
-
-4. **AskData 语义和场景 Snapshot**
-   - 更新 `dataman1111/sync_pcm_project_info_fields.md`、`dataman1111/sync_pcm_project_info_semantic_layer.md` 和 `dataman1111/scenes/information_project_contract_report.semantic.md`。
-   - 明确 `funding_year` 是可用于年份筛选、分组和统计的真实年份；`funding_type_year` 只是原始选项编码，默认不用于回答年份问题。
-   - 更新场景后重新校验/构建并激活 Scene，使新的 Snapshot 包含 `funding_year`。
-
-### 建议同步修改：保持文档与运行现状一致
-
-- 更新 `dataman1111/vw_xmk_to_sync_pcm_project_info_mapping.md`，记录新增源列到 `funding_year` 的映射。
-- 更新 `configs/DATAMAN_DATA_SYNC_GUIDE.md`，说明本场景采用“上游 SQL Server → 第三方同步 → PostgreSQL”的链路。
-- 更新 `configs/ASK_DATA_CONFIG.md` 中仍称 DataMan 直接连接 SQL Server、且描述本地表为空的旧内容；当前 AskData 查询配置绑定的是 PostgreSQL `dataman_data`，本次检查时同步表和查询视图各有 384 条记录。
+- 在 Ecology SQL Server 发布更新后的源视图定义。
+- 在数据交换平台配置两列新增映射并执行同步。
+- 同步后刷新/重建 AskData Scene Snapshot，并验证新字段进入场景。
 
 ## 四、实施顺序与验收
 
-建议按以下顺序实施，避免下游先改好但拿不到年份：
+后续按以下顺序完成剩余部署：
 
-1. 在上游 SQL Server 更新报表视图，确认原代码与新增年份列同时正确返回。
-2. 更新同步平台映射和 PostgreSQL 表结构，运行一次全量/增量同步。
-3. 更新 reporting 视图并验证 DataMan 只读账号仍可查询。
-4. 更新语义文档，重建并激活 AskData Scene Snapshot。
+1. 在上游 SQL Server 更新报表视图，确认原代码、新经费类型编码和年份名称正确返回且项目行数未增加。
+2. 更新同步平台字段映射并同步数据；本地 PostgreSQL 结构已准备完成。
+3. 验证 `dataman_reader` 可读 reporting 视图及新字段。
+4. 刷新/重建 AskData Scene Snapshot 并验收。
 5. 用问数分别验证“按经费年份筛选”“按经费类型和年份分组”以及空年份记录的处理。
 
 验收至少确认：
@@ -149,8 +145,9 @@ DataMan AskData
 
 ## 五、相关文件
 
-- 上游视图 SQL：`dataman1111/create_vw_xmk_project_contract_report.sql`
+- 上游视图 SQL：`configs/alter_ecology_project_contract_report_view.sql`
 - 上游到同步表字段映射：`dataman1111/vw_xmk_to_sync_pcm_project_info_mapping.md`
+- PostgreSQL 已运行实例迁移：`docker/dataman-postgres/migrations/002-add-project-funding-code-and-year.sql`
 - PostgreSQL 初始化结构与 reporting 视图：`docker/dataman-postgres/init/001-create-information-project-schema.sh`
 - PostgreSQL 同步落地字段说明：`dataman1111/sync_pcm_project_info_fields.md`
 - AskData 场景语义：`dataman1111/scenes/information_project_contract_report.semantic.md`

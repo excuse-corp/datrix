@@ -61,8 +61,8 @@ class StorageManager(BaseComponent):
                     "   port = 7687\n"
                     '   username = "admin"\n'
                     '   password = "73@TuGraph"\n'
-                    "See docs/docs/installation/integrations/graph_rag_install.md "
-                    "for details."
+                    "See legacy/docs/docs/installation/integrations/"
+                    "graph_rag_install.md for details."
                 )
             return self.create_kg_store(index_name, llm_model)
         elif storage_type == "FullText":

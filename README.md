@@ -44,9 +44,42 @@ The compatibility CLI is still named `dbgpt` while package and command migration
 
 `dbgpt start webserver` starts the Datrix backend WebServer. The WebServer runs the FastAPI / Uvicorn API service and serves the already-built static frontend from the backend package; it is not a standalone frontend dev server.
 
+On a fresh clone, install the web dependencies and build the static frontend before starting the backend. The generated backend assets are ignored build output and are not included in a fresh checkout:
+
+```bash
+cd web
+npm ci
+cd ..
+./scripts/build_web_static.sh
+```
+
 The CLI name still follows DB-GPT for compatibility during the package and command migration.
 
-If your local environment is managed by `uv`, run:
+For a new Linux or macOS server, you can use the setup script from a terminal. It downloads the Datrix source, installs the Python and web dependencies, builds the frontend, and opens the model setup wizard. This is a shell script, not a separate desktop application. Git, curl, Node.js, and npm must already be installed; Docker is not required for this route.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/excuse-corp/datrix/main/scripts/install/install.sh | bash
+```
+
+The script prints the command to start Datrix when setup finishes.
+
+For a source install with `uv`, install the backend dependencies from the repository root:
+
+```bash
+uv sync --all-packages --extra base --extra proxy_openai --extra rag --extra storage_chromadb --extra dbgpts
+```
+
+Copy the environment template, set a valid model provider API key, and load it before starting:
+
+```bash
+cp configs/.env.ask-data.example configs/.env.ask-data
+# Edit configs/.env.ask-data, then load its values into this shell.
+set -a
+source configs/.env.ask-data
+set +a
+```
+
+Then start the backend:
 
 ```bash
 uv run dbgpt start webserver --config configs/dataman-runtime.toml
@@ -61,8 +94,14 @@ conda run -n dataman dbgpt start webserver --config configs/dataman-runtime.toml
 For the managed local development stack, including database startup and frontend static asset build, use:
 
 ```bash
+cp docker/dataman-postgres/.env.example docker/dataman-postgres/.env
+cp configs/.env.ask-data.example configs/.env.ask-data
 scripts/start_dataman_services.sh
 ```
+
+Set the passwords and provider credentials in those local environment files before starting. This managed stack also requires the `dataman` conda environment; it builds the frontend automatically, but `web/node_modules` must already exist. Install it with `cd web && npm ci` first.
+
+This stack uses Docker for PostgreSQL and the `dataman` conda environment for the Datrix backend. The sandbox can also use Docker, Podman, or Nerdctl to run isolated code sessions. The repository does not provide a Datrix application Docker image or an all-in-one Compose deployment; old upstream DB-GPT deployment files have been removed from the tracked project.
 
 ## Positioning
 

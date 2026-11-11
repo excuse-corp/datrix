@@ -24,6 +24,7 @@ from ..security import (
     AskDataAuthorizationError,
     AskDataAuthorizer,
     AskDataPrincipal,
+    principal_from_user,
 )
 from ..snapshot.service import InMemorySnapshotService
 
@@ -53,6 +54,10 @@ _idempotency_cache: dict[
 _idempotency_lock = RLock()
 
 
+def _idempotency_scope(principal: AskDataPrincipal, endpoint: str) -> str:
+    return f"{principal.user_id}:authz-{principal.authz_version}:{endpoint}"
+
+
 def _idempotent_replay(
     *,
     endpoint: str,
@@ -65,7 +70,8 @@ def _idempotent_replay(
     fingerprint = sha256(
         json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
     ).hexdigest()
-    cache_key = (f"{principal.user_id}:{endpoint}", idempotency_key)
+    scope = _idempotency_scope(principal, endpoint)
+    cache_key = (scope, idempotency_key)
     with _idempotency_lock:
         cached = _idempotency_cache.get(cache_key)
         if cached and cached[2] <= datetime.now(timezone.utc):
@@ -73,7 +79,7 @@ def _idempotent_replay(
             cached = None
         if cached is None and _idempotency_repository is not None:
             record = _idempotency_repository.get(
-                f"{principal.user_id}:{endpoint}", idempotency_key
+                scope, idempotency_key
             )
             if record is not None:
                 cached = (record.fingerprint, record.response, record.expires_at)
@@ -106,7 +112,8 @@ def _remember_idempotent(
     fingerprint = sha256(
         json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
     ).hexdigest()
-    cache_key = (f"{principal.user_id}:{endpoint}", idempotency_key)
+    scope = _idempotency_scope(principal, endpoint)
+    cache_key = (scope, idempotency_key)
     with _idempotency_lock:
         expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
         copied = deepcopy(response)
@@ -114,7 +121,7 @@ def _remember_idempotent(
         if _idempotency_repository is not None:
             _idempotency_repository.save(
                 IdempotencyRecord(
-                    scope=f"{principal.user_id}:{endpoint}",
+                    scope=scope,
                     key=idempotency_key,
                     fingerprint=fingerprint,
                     response=copied,
@@ -588,25 +595,9 @@ def get_principal(request: Request) -> AskDataPrincipal:
         return principal
     user = getattr(request.state, "user", None)
     if user is not None:
-        if isinstance(user, dict):
-            user_id = str(user.get("user_id") or user.get("username") or "anonymous")
-            roles = user.get("roles") or user.get("role", ())
-            scene_ids = user.get("scene_ids", ())
-        else:
-            user_id = str(
-                getattr(user, "user_id", None)
-                or getattr(user, "username", None)
-                or "anonymous"
-            )
-            roles = getattr(user, "roles", None) or getattr(user, "role", ())
-            scene_ids = getattr(user, "scene_ids", ())
-        if isinstance(roles, str):
-            roles = (roles,)
-        return AskDataPrincipal(
-            user_id=user_id,
-            roles=frozenset(str(item) for item in roles),
-            scene_ids=frozenset(str(item) for item in scene_ids),
-        )
+        return principal_from_user(user)
+    if getattr(request.app.state, "auth_required", False):
+        raise HTTPException(status_code=401, detail="Authentication required")
     roles = frozenset(
         item.strip()
         for item in request.headers.get("X-AskData-Role", "").split(",")
@@ -656,7 +647,7 @@ def _require_plan_scene_access(principal: AskDataPrincipal, plan: Any) -> None:
 
 
 def _require_query_visibility(principal: AskDataPrincipal, query: Any) -> None:
-    if _authorizer is not None and not principal.is_admin:
+    if _authorizer is not None and not principal.is_platform_admin:
         if getattr(query, "user_id", None) != principal.user_id:
             raise HTTPException(
                 status_code=404,
@@ -894,6 +885,9 @@ async def execute_query(
             max_agents=request.max_agents,
             entry_type="main_agent",
             sql_by_task=sql_by_task,
+            authorized_scene_ids=sorted(principal.scene_ids),
+            is_platform_admin=principal.is_platform_admin,
+            authz_version=principal.authz_version,
         )
     except ValueError as exc:
         raise _execution_http_error(exc) from exc
@@ -974,6 +968,9 @@ async def execute_scene_query(
             max_agents=request.max_agents,
             entry_type="scene_api",
             sql_by_task=sql_by_task,
+            authorized_scene_ids=sorted(principal.scene_ids),
+            is_platform_admin=principal.is_platform_admin,
+            authz_version=principal.authz_version,
         )
     except ValueError as exc:
         raise _execution_http_error(exc) from exc
@@ -1003,7 +1000,7 @@ def get_query_run(
         raise _query_not_found()
     _require_query_visibility(principal, query)
     agent_runs = service.repository.agents_for_query(query_id)
-    if _authorizer is not None and not principal.is_admin:
+    if _authorizer is not None and not principal.is_platform_admin:
         for agent in agent_runs:
             _require_scene_access(principal, agent.scene_id)
     return {
@@ -1034,7 +1031,7 @@ def list_agent_runs(
         raise _query_not_found()
     _require_query_visibility(principal, query)
     agent_runs = service.repository.agents_for_query(query_id)
-    if _authorizer is not None and not principal.is_admin:
+    if _authorizer is not None and not principal.is_platform_admin:
         for agent in agent_runs:
             _require_scene_access(principal, agent.scene_id)
     return {
@@ -1073,7 +1070,7 @@ def get_agent_run(
     if query is None:
         raise _query_not_found()
     _require_query_visibility(principal, query)
-    if _authorizer is not None and not principal.is_admin:
+    if _authorizer is not None and not principal.is_platform_admin:
         _require_scene_access(principal, agent.scene_id)
     return {
         "request_id": _request_id(),
@@ -1095,8 +1092,17 @@ def list_query_runs(
     principal: AskDataPrincipal = Depends(get_principal),
 ):
     items = service.repository.list_queries()
-    if _authorizer is not None and not principal.is_admin:
+    if _authorizer is not None and not principal.is_platform_admin:
         items = [item for item in items if item.user_id == principal.user_id]
+        visible_items = []
+        for item in items:
+            scene_ids = {
+                str(agent.scene_id)
+                for agent in service.repository.agents_for_query(item.query_id)
+            }
+            if all(principal.can_access_scene(item_scene_id) for item_scene_id in scene_ids):
+                visible_items.append(item)
+        items = visible_items
     if entry_type:
         items = [item for item in items if item.entry_type == entry_type]
     if start_time:
@@ -1207,6 +1213,7 @@ async def reply_query(
             detail={"code": "INVALID_PLAN", "message": str(exc)},
         ) from exc
     try:
+        _require_plan_scene_access(principal, plan)
         query, result = await service.execute(
             question=reply_question,
             plan=plan,
@@ -1216,6 +1223,9 @@ async def reply_query(
             query_id=query_id,
             max_agents=10,
             sql_by_task=sql_by_task,
+            authorized_scene_ids=sorted(principal.scene_ids),
+            is_platform_admin=principal.is_platform_admin,
+            authz_version=principal.authz_version,
         )
     except ValueError as exc:
         raise _execution_http_error(exc) from exc
@@ -1261,7 +1271,7 @@ def reset_conversation(
 ):
     user_id = (
         principal.user_id
-        if _authorizer is not None and not principal.is_admin
+        if _authorizer is not None and not principal.is_platform_admin
         else None
     )
     service.reset_conversation(conversation_id, user_id=user_id)
@@ -1283,7 +1293,7 @@ def list_scenes(
     principal: AskDataPrincipal = Depends(get_principal),
 ):
     scenes = service.repository.list_scenes()
-    if _authorizer is not None and not principal.is_admin:
+    if _authorizer is not None and not principal.can_manage_ask_data:
         scenes = [
             scene for scene in scenes if principal.can_access_scene(scene.scene_id)
         ]
@@ -1545,6 +1555,10 @@ def list_snapshots(
     principal: AskDataPrincipal = Depends(get_principal),
 ):
     snapshots = service.snapshot_service.list_snapshots()
+    if _authorizer is not None and not principal.can_manage_ask_data:
+        snapshots = [
+            item for item in snapshots if principal.can_access_scene(item.scene_id)
+        ]
     if scene_id:
         snapshots = [item for item in snapshots if item.scene_id == scene_id]
     if status:

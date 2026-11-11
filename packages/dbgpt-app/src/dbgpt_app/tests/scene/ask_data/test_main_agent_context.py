@@ -39,10 +39,13 @@ def test_main_agent_context_aggregates_scene_introductions_only(monkeypatch):
 def test_main_agent_result_context_passes_scene_ids_and_columns(monkeypatch):
     captured = {}
 
-    def fake_ontology_context(question, *, scene_ids=None, result_columns=None):
+    def fake_ontology_context(
+        question, *, scene_ids=None, principal=None, result_columns=None
+    ):
         captured["question"] = question
         captured["scene_ids"] = scene_ids
         captured["result_columns"] = result_columns
+        captured["principal"] = principal
         return "ontology-context"
 
     monkeypatch.setattr(
@@ -69,6 +72,11 @@ def test_main_agent_result_context_passes_scene_ids_and_columns(monkeypatch):
         },
         max_result_tokens=None,
         question="合同金额是多少？",
+        principal=AskDataPrincipal(
+            user_id="alice",
+            scene_ids=frozenset({"contracts"}),
+            authz_version=3,
+        ),
     )
 
     payload = json.loads(content)
@@ -77,6 +85,7 @@ def test_main_agent_result_context_passes_scene_ids_and_columns(monkeypatch):
     assert "先直接回答用户问题" in payload["analysis_guidance_for_final_answer"][0]
     assert captured["question"] == "合同金额是多少？"
     assert captured["scene_ids"] == ["contracts"]
+    assert captured["principal"].authz_version == 3
     assert captured["result_columns"] == [
         {"key": "contract_amount", "type": "metric", "unit": "元"}
     ]

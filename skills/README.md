@@ -179,7 +179,7 @@ class CustomSkill(Skill):
 
 ### 完整示例
 
-查看 `examples/agents/skill_agent_example.py` 获取完整的使用示例。
+查看 `legacy/examples/agents/skill_agent_example.py` 获取完整的使用示例。
 
 ### 技能文件
 

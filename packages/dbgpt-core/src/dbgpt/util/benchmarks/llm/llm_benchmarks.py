@@ -41,10 +41,11 @@ input_lens = [64, 64]
 output_lens = [256, 512]
 
 
+# Upstream shipped an 11k-token prompt at
+# ``docker/examples/benchmarks/benchmarks_llm_11k_prompt.txt``. This repository no
+# longer carries it, so the prompt file has to be supplied by the caller.
 prompt_file_map = {
-    "11k": os.path.join(
-        ROOT_PATH, "docker/examples/benchmarks/benchmarks_llm_11k_prompt.txt"
-    )
+    "11k": os.getenv("DBGPT_BENCHMARK_PROMPT_FILE"),
 }
 
 METRICS_HEADERS = [
@@ -80,7 +81,13 @@ METRICS_HEADERS = [
 
 
 def read_prompt_from_file(file_key: str) -> str:
-    full_path = prompt_file_map[file_key]
+    full_path = prompt_file_map.get(file_key)
+    if not full_path or not os.path.isfile(full_path):
+        raise FileNotFoundError(
+            f"Benchmark prompt file not found for {file_key!r}"
+            + (f": {full_path}" if full_path else "")
+            + ". Set DBGPT_BENCHMARK_PROMPT_FILE to the prompt file to use."
+        )
     with open(full_path, "r+", encoding="utf-8") as f:
         return f.read()
 

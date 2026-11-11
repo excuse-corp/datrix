@@ -15,7 +15,7 @@ from dbgpt_app.scene.ask_data.schemas.snapshot import (
     SnapshotSourceHashes,
     SnapshotStatus,
 )
-from dbgpt_app.scene.ask_data.security import AskDataPrincipal
+from dbgpt_app.scene.ask_data.security import AskDataAuthorizer, AskDataPrincipal
 from dbgpt_app.scene.ask_data.snapshot.service import InMemorySnapshotService
 
 
@@ -106,6 +106,29 @@ def test_generate_draft_defaults_to_llm_and_fails_when_unavailable():
 
         assert generated.status_code == 400
         assert generated.json()["detail"]["code"] == "ONTOLOGY_LLM_UNAVAILABLE"
+    finally:
+        ontology_api.configure_ontology_service(previous_service)
+
+
+def test_ontology_draft_and_history_are_hidden_from_non_admin_users(monkeypatch):
+    app = FastAPI()
+    app.include_router(ontology_api.router)
+    previous_service = ontology_api.get_ontology_service()
+    ontology_api.configure_ontology_service(
+        OntologyLifecycleService(InMemoryOntologyRepository())
+    )
+    monkeypatch.setattr(scenes_api, "_authorizer", AskDataAuthorizer())
+    app.dependency_overrides[ontology_api.get_principal] = lambda: AskDataPrincipal(
+        user_id="alice",
+        roles=frozenset({"normal"}),
+        scene_ids=frozenset({"contracts"}),
+    )
+    try:
+        client = TestClient(app)
+        assert client.get("/api/v1/ask-data/ontology/draft").status_code == 403
+        assert client.get("/api/v1/ask-data/ontology/revisions").status_code == 403
+        assert client.get("/api/v1/ask-data/ontology/snapshots").status_code == 403
+        assert client.get("/api/v1/ask-data/ontology/snapshot/latest").status_code == 403
     finally:
         ontology_api.configure_ontology_service(previous_service)
 

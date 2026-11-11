@@ -65,6 +65,8 @@ class AskDataOrchestrator:
         max_agents: int | None = None,
         sql_by_task: dict[str, str] | None = None,
         on_task_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        authorized_scene_ids: list[str] | None = None,
+        is_platform_admin: bool = True,
     ) -> QueryRunResult:
         acquired = False
         try:
@@ -90,6 +92,8 @@ class AskDataOrchestrator:
                 max_agents=max_agents,
                 sql_by_task=sql_by_task,
                 on_task_event=on_task_event,
+                authorized_scene_ids=authorized_scene_ids,
+                is_platform_admin=is_platform_admin,
             )
         finally:
             if acquired:
@@ -103,6 +107,8 @@ class AskDataOrchestrator:
         max_agents: int | None = None,
         sql_by_task: dict[str, str] | None = None,
         on_task_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        authorized_scene_ids: list[str] | None = None,
+        is_platform_admin: bool = True,
     ) -> QueryRunResult:
         started = monotonic()
         if plan.action == "clarify":
@@ -122,6 +128,23 @@ class AskDataOrchestrator:
                     }
                 ],
             )
+        if authorized_scene_ids is not None and not is_platform_admin:
+            allowed_scene_ids = {str(scene_id) for scene_id in authorized_scene_ids}
+            unauthorized = [
+                task.scene_id
+                for task in plan.tasks
+                if task.scene_id not in allowed_scene_ids
+            ]
+            if unauthorized:
+                return QueryRunResult(
+                    status="rejected",
+                    errors=[
+                        {
+                            "code": "SCENE_ACCESS_FORBIDDEN",
+                            "message": "The query plan contains an unauthorized Scene",
+                        }
+                    ],
+                )
         agent_limit = min(
             max_agents
             or getattr(self.plan_validator, "max_tasks", self.max_parallel_tasks),
@@ -328,6 +351,8 @@ class AskDataOrchestrator:
             status=status,
             ontology_snapshot=ontology_snapshot,
             question="\n".join(task.question for task in plan.tasks),
+            authorized_scene_ids=authorized_scene_ids,
+            is_platform_admin=is_platform_admin,
         )
         return QueryRunResult(
             status=status,

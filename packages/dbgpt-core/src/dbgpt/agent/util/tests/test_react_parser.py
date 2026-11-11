@@ -513,6 +513,21 @@ Action Input: {"question": "丁宇龙有哪些项目"}"""
         assert steps[0].action == "ask_data_query"
         assert steps[0].action_input == {"question": "丁宇龙有哪些项目"}
 
+    def test_duplicate_action_labels_use_last_tool_name(self):
+        """Ignore a prose action label when the model repeats the tool label."""
+        parser = ReActOutputParser()
+        text = """Thought: 报告数据已经准备好。
+Action: 生成对比报告HTML
+Action Reason: 需要调用工具渲染报告
+Action: code_interpreter
+Action Input: {"code": "print('ok')"}"""
+
+        steps = parser.parse_current_step(text)
+
+        assert len(steps) == 1
+        assert steps[0].action == "code_interpreter"
+        assert steps[0].action_input == {"code": "print('ok')"}
+
     def test_parsing_fullwidth_colon_labels_and_quoted_action(self):
         """Accept Chinese fullwidth colons and markdown-wrapped action names."""
         parser = ReActOutputParser()

@@ -85,7 +85,17 @@ class QuestionManager:
         user_id: Optional[str] = None,
     ) -> None:
         pq = self._pending.get(request_id)
-        if not pq or (user_id is not None and pq.user_id != user_id):
+        if not pq:
+            logger.warning(
+                "QuestionManager.reply: request_id=%s is no longer pending",
+                request_id,
+            )
+            raise KeyError(f"No pending question: {request_id}")
+        if user_id is not None and pq.user_id != user_id:
+            logger.warning(
+                "QuestionManager.reply: owner mismatch for request_id=%s",
+                request_id,
+            )
             raise KeyError(f"No pending question: {request_id}")
         pq.answers = answers
         pq.event.set()
@@ -93,7 +103,17 @@ class QuestionManager:
 
     def reject(self, request_id: str, user_id: Optional[str] = None) -> None:
         pq = self._pending.get(request_id)
-        if not pq or (user_id is not None and pq.user_id != user_id):
+        if not pq:
+            logger.warning(
+                "QuestionManager.reject: request_id=%s is no longer pending",
+                request_id,
+            )
+            raise KeyError(f"No pending question: {request_id}")
+        if user_id is not None and pq.user_id != user_id:
+            logger.warning(
+                "QuestionManager.reject: owner mismatch for request_id=%s",
+                request_id,
+            )
             raise KeyError(f"No pending question: {request_id}")
         pq.rejected = True
         pq.event.set()

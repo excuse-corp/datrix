@@ -22,12 +22,14 @@ from dbgpt_app.scene.ask_data.ontology.llm_validator import OntologyLLMValidatio
 from dbgpt_app.scene.ask_data.ontology.markdown import with_managed_frontmatter
 from dbgpt_app.scene.ask_data.ontology.repository import InMemoryOntologyRepository
 from dbgpt_app.scene.ask_data.ontology.schemas import OntologyRevisionStatus
+from dbgpt_app.scene.ask_data.ontology.context import relevant_ontology_projection
 from dbgpt_app.scene.ask_data.ontology.service import OntologyLifecycleService
 from dbgpt_app.scene.ask_data.schemas.snapshot import (
     Snapshot,
     SnapshotSourceHashes,
     SnapshotStatus,
 )
+from dbgpt_app.scene.ask_data.ontology.schemas import OntologySnapshot
 
 
 def test_default_ontology_is_empty_until_scenes_are_synchronized():
@@ -200,6 +202,97 @@ def test_source_manifest_uses_semantic_md_hash_name():
             "semantic_md_hash": "sha256:semantic",
         }
     ]
+
+
+def test_runtime_ontology_projection_hides_unassigned_and_unscoped_sources():
+    snapshot = OntologySnapshot(
+        snapshot_id="onto_shared",
+        ontology_id="ontology",
+        revision=3,
+        status="active",
+        content_hash="sha256:ontology",
+        graph_json={
+            "nodes": [
+                {
+                    "id": "contracts",
+                    "type": "scene",
+                    "name": "合同场景",
+                    "provenance": [{"scene_id": "contracts"}],
+                },
+                {
+                    "id": "contract_amount",
+                    "type": "metric",
+                    "name": "合同金额",
+                    "data": {"source_scene": "contracts"},
+                },
+                {
+                    "id": "payroll_amount",
+                    "type": "metric",
+                    "name": "薪酬金额",
+                    "data": {"source_scene": "payroll"},
+                },
+                {
+                    "id": "global_secret",
+                    "type": "entity",
+                    "name": "未标记全局实体",
+                },
+            ],
+            "edges": [
+                {
+                    "id": "contract_binding",
+                    "source": "contracts",
+                    "target": "contract_amount",
+                    "type": "scene_binding",
+                    "name": "绑定",
+                },
+                {
+                    "id": "payroll_binding",
+                    "source": "payroll_amount",
+                    "target": "global_secret",
+                    "type": "relation",
+                    "name": "泄露关系",
+                    "provenance": [{"scene_id": "payroll"}],
+                },
+            ],
+        },
+        prompt_projection_json={
+            "entities": [
+                {"id": "contract_entity", "name": "合同", "data": {"source_scenes": ["contracts"]}},
+                {"id": "payroll_entity", "name": "薪酬", "data": {"source_scenes": ["payroll"]}},
+                {"id": "unscoped_entity", "name": "未标记实体", "data": {}},
+            ],
+            "metrics": [
+                {"id": "contract_amount", "name": "合同金额", "data": {"source_scene": "contracts"}},
+                {"id": "payroll_amount", "name": "薪酬金额", "data": {"source_scene": "payroll"}},
+            ],
+            "analysis_dimensions": [],
+            "metric_relations": [],
+            "cross_scene_analysis_paths": [
+                {"id": "contract_payroll", "data": {"scenes": ["contracts", "payroll"]}}
+            ],
+            "result_analysis_rules": [
+                {"id": "global_rule", "data": {"applies_to_metrics": []}}
+            ],
+            "clarification_rules": ["全局澄清规则"],
+        },
+    )
+
+    projection = relevant_ontology_projection(
+        snapshot,
+        "合同金额",
+        scene_ids=["contracts"],
+        authorized_scene_ids=["contracts"],
+        is_platform_admin=False,
+    )
+    encoded = json.dumps(projection, ensure_ascii=False)
+
+    assert "合同场景" in encoded
+    assert "合同金额" in encoded
+    assert "薪酬" not in encoded
+    assert "未标记" not in encoded
+    assert projection["cross_scene_analysis_paths"] == []
+    assert projection["result_analysis_rules"] == []
+    assert projection["clarification_rules"] == []
 
 
 def test_scene_semantic_keys_include_business_binding_aliases():

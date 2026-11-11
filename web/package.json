@@ -9,7 +9,7 @@
   },
   "author": "",
   "license": "ISC",
-  "repository": "https://github.com/eosphoros-ai/DB-GPT-Web.git",
+  "repository": "https://github.com/excuse-corp/datrix.git",
   "scripts": {
     "start": "NODE_OPTIONS=--max_old_space_size=8192 next start",
     "dev": "NODE_OPTIONS=--max_old_space_size=16384 next dev",
@@ -124,25 +124,5 @@
     "*.{json,md}": [
       "prettier --write"
     ]
-  },
-  "resolutions": {
-    "d3-color": "2",
-    "d3-array": "2",
-    "d3-shape": "2",
-    "d3-path": "2",
-    "d3-dsv": "2",
-    "d3-hierarchy": "2",
-    "d3-scale-chromatic": "2",
-    "d3-format": "2",
-    "d3-timer": "2",
-    "d3-dispatch": "2",
-    "d3-quadtree": "2",
-    "d3-force": "2",
-    "d3-geo": "2"
-  },
-  "overrides": {
-    "@antv/g2": {
-      "d3-array": "2.12.1"
-    }
   }
 }

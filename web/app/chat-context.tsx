@@ -5,11 +5,14 @@ import { getUserId } from '@/utils';
 import { STORAGE_THEME_KEY } from '@/utils/constants/index';
 import { useRequest } from 'ahooks';
 import { useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/router';
 import { createContext, useEffect, useState } from 'react';
 
 type ThemeMode = 'dark' | 'light';
 
 interface IChatContext {
+  isAuthenticated: boolean;
+  setIsAuthenticated: (value: boolean) => void;
   mode: ThemeMode;
   isContract?: boolean;
   isMenuExpand?: boolean;
@@ -48,6 +51,8 @@ function getDefaultTheme(): ThemeMode {
 }
 
 const ChatContext = createContext<IChatContext>({
+  isAuthenticated: false,
+  setIsAuthenticated: () => {},
   mode: 'light',
   scene: '',
   chatId: '',
@@ -76,6 +81,9 @@ const ChatContext = createContext<IChatContext>({
 });
 
 const ChatContextProvider = ({ children }: { children: React.ReactElement }) => {
+  const router = useRouter();
+  const isPublicPage =
+    router.pathname === '/login' || router.pathname === '/setup' || router.pathname.startsWith('/share');
   const searchParams = useSearchParams();
   const chatId = searchParams?.get('id') ?? '';
   const scene = searchParams?.get('scene') ?? '';
@@ -88,6 +96,7 @@ const ChatContextProvider = ({ children }: { children: React.ReactElement }) => 
   const [history, setHistory] = useState<ChatHistoryResponse>([]);
   const [docId, setDocId] = useState<number>();
   const [mode, setMode] = useState<ThemeMode>('light');
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   // 管理员列表
   const [adminList, setAdminList] = useState<UserInfoResponse[]>([]);
 
@@ -97,10 +106,13 @@ const ChatContextProvider = ({ children }: { children: React.ReactElement }) => 
   });
 
   // 获取model
-  const { data: modelList = [] } = useRequest(async () => {
-    const [, res] = await apiInterceptors(getUsableModels());
-    return res ?? [];
-  });
+  const { data: modelList = [] } = useRequest(
+    async () => {
+      const [, res] = await apiInterceptors(getUsableModels());
+      return res ?? [];
+    },
+    { ready: !isPublicPage && isAuthenticated },
+  );
 
   // 获取管理员列表
   const { run: queryAdminListRun } = useRequest(
@@ -117,11 +129,11 @@ const ChatContextProvider = ({ children }: { children: React.ReactElement }) => 
   );
 
   useEffect(() => {
-    if (getUserId()) {
+    if (!isPublicPage && isAuthenticated && getUserId()) {
       queryAdminListRun();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [queryAdminListRun, getUserId()]);
+  }, [isPublicPage, isAuthenticated, queryAdminListRun, getUserId()]);
 
   useEffect(() => {
     setMode(getDefaultTheme());
@@ -142,6 +154,8 @@ const ChatContextProvider = ({ children }: { children: React.ReactElement }) => 
   }, [modelList]);
 
   const contextValue = {
+    isAuthenticated,
+    setIsAuthenticated,
     isContract,
     isMenuExpand,
     scene,

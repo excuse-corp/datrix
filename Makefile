@@ -43,7 +43,6 @@ $(VENV)/.testenv: $(VENV)/bin/activate
 			--extra "dbgpts" \
 			--link-mode=copy; \
 	fi
-	cp .devcontainer/dbgpt.pth $(VENV)/lib/python3.11/site-packages
 	touch $(VENV)/.testenv
 
 
@@ -51,13 +50,11 @@ $(VENV)/.testenv: $(VENV)/bin/activate
 fmt: setup ## Format Python code
 	# Format code
 	$(VENV_BIN)/ruff format packages
-	$(VENV_BIN)/ruff format --exclude="examples/notebook" examples
 	$(VENV_BIN)/ruff format i18n
 	$(VENV_BIN)/ruff format scripts/update_version_all.py
 	$(VENV_BIN)/ruff format install_help.py
 	# Sort imports
 	$(VENV_BIN)/ruff check --select I --fix packages
-	$(VENV_BIN)/ruff check --select I --fix --exclude="examples/notebook" examples
 	$(VENV_BIN)/ruff check --select I --fix i18n
 	$(VENV_BIN)/ruff check --select I --fix scripts/update_version_all.py
 	$(VENV_BIN)/ruff check --select I --fix install_help.py
@@ -67,15 +64,10 @@ fmt: setup ## Format Python code
 
 	$(VENV_BIN)/ruff check --fix packages/dbgpt-serve --ignore F811,F841
 
-	# Not need to check examples/notebook
-	#$(VENV_BIN)/ruff check --fix --exclude="examples/notebook" examples
-
 .PHONY: fmt-check
 fmt-check: setup ## Check Python code formatting and style without making changes
 	$(VENV_BIN)/ruff format --check packages
-	$(VENV_BIN)/ruff format --check --exclude="examples/notebook" examples
 	$(VENV_BIN)/ruff check --select I packages
-	$(VENV_BIN)/ruff check --select I --exclude="examples/notebook" examples
 	$(VENV_BIN)/ruff check --fix packages \
 		--exclude="packages/dbgpt-serve/src/**"
 

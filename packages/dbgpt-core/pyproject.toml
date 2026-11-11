@@ -27,10 +27,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/eosphoros-ai/DB-GPT"
+Homepage = "https://github.com/excuse-corp/datrix"
 Documentation = "http://docs.dbgpt.cn/docs/overview"
-Repository = "https://github.com/eosphoros-ai/DB-GPT.git"
-Issues = "https://github.com/eosphoros-ai/DB-GPT/issues"
+Repository = "https://github.com/excuse-corp/datrix.git"
+Issues = "https://github.com/excuse-corp/datrix/issues"
 
 [project.optional-dependencies]
 client = [

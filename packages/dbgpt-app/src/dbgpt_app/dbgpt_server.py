@@ -1,7 +1,11 @@
 # ruff: noqa: E501
 import logging
+import hashlib
+import hmac
 import os
+import secrets
 import sys
+from pathlib import Path
 from typing import List
 
 from fastapi import FastAPI
@@ -55,10 +59,30 @@ system_app = SystemApp(app)
 
 def configure_local_authentication(app: FastAPI) -> None:
     """Enable DataMan local and CAS authentication from deployment settings."""
-    secret = os.getenv("DBGPT_AUTH_SECRET", "")
-    if not secret:
-        logger.info("Local authentication is disabled; DBGPT_AUTH_SECRET is not set")
-        return
+    def read_or_create_secret(path: Path) -> str:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            value = path.read_text(encoding="utf-8").strip()
+            if value:
+                path.chmod(0o600)
+                return value
+        except FileNotFoundError:
+            pass
+        value = secrets.token_urlsafe(48)
+        try:
+            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+                output.write(value + "\n")
+        except FileExistsError:
+            value = path.read_text(encoding="utf-8").strip()
+        path.chmod(0o600)
+        return value
+
+    secret_file = Path(os.getenv("DBGPT_AUTH_SECRET_FILE", "pilot/meta_data/dataman_auth_secret"))
+    configured_secret = os.getenv("DBGPT_AUTH_SECRET", "").strip()
+    secret = configured_secret or read_or_create_secret(secret_file)
+    setup_token_file = Path(os.getenv("DBGPT_AUTH_SETUP_TOKEN_FILE", "pilot/meta_data/dataman_setup_token"))
+    setup_token = read_or_create_secret(setup_token_file)
     from dbgpt_app.auth import ProviderConfig, configure_authentication
 
     cas_base_url = os.getenv("DBGPT_AUTH_CAS_BASE_URL", "").rstrip("/")
@@ -77,11 +101,15 @@ def configure_local_authentication(app: FastAPI) -> None:
                 verify_tls=os.getenv("DBGPT_AUTH_CAS_VERIFY_TLS", "true").lower() in {"1", "true", "yes", "on"},
             ),
         )
+    internal_token = hmac.new(
+        secret.encode(), b"dataman-internal-controller-v1", hashlib.sha256
+    ).hexdigest()
+    os.environ["DBGPT_AUTH_INTERNAL_TOKEN"] = internal_token
     store = configure_authentication(
         app,
         database_url=os.getenv("DBGPT_AUTH_DB", "sqlite:///pilot/meta_data/dbgpt_auth.db"),
         secret=secret,
-        ttl_seconds=int(os.getenv("DBGPT_AUTH_TOKEN_TTL", "600")),
+        ttl_seconds=int(os.getenv("DBGPT_AUTH_TOKEN_TTL", "3600")),
         required=os.getenv("DBGPT_AUTH_REQUIRED", "true").lower() in {"1", "true", "yes", "on"},
         mode=os.getenv("DBGPT_AUTH_MODE", "hybrid"),
         issuer=os.getenv("DBGPT_AUTH_ISSUER", "dataman"),
@@ -89,13 +117,21 @@ def configure_local_authentication(app: FastAPI) -> None:
         providers=providers,
         refresh_ttl_seconds=int(os.getenv("DBGPT_AUTH_REFRESH_TOKEN_TTL", "28800")),
         session_idle_timeout_seconds=int(os.getenv("DBGPT_AUTH_SESSION_IDLE_TIMEOUT", "3600")),
-        cookie_secure=os.getenv("DBGPT_AUTH_COOKIE_SECURE", "true").lower() in {"1", "true", "yes", "on"},
+        cookie_secure=os.getenv("DBGPT_AUTH_COOKIE_SECURE", "false").lower() in {"1", "true", "yes", "on"},
+        setup_token=setup_token,
+        setup_token_file=str(setup_token_file),
     )
+    if store.setup_status():
+        try:
+            setup_token_file.unlink()
+        except FileNotFoundError:
+            pass
     bootstrap_username = os.getenv("DBGPT_AUTH_BOOTSTRAP_USERNAME", "")
     bootstrap_password = os.getenv("DBGPT_AUTH_BOOTSTRAP_PASSWORD", "")
-    if bootstrap_username and bootstrap_password:
+    if bootstrap_username and bootstrap_password and not store.setup_status():
         try:
             store.create_user(bootstrap_username, bootstrap_password, roles=("admin",))
+            store.mark_setup_complete()
             logger.info("Created local authentication bootstrap administrator")
         except Exception:
             logger.info("Local authentication bootstrap administrator already exists")
@@ -110,7 +146,6 @@ def mount_routers(app: FastAPI):
     from dbgpt_app.openapi.api_v1.editor.api_editor_v1 import (
         router as api_editor_route_v1,
     )
-    from dbgpt_app.openapi.api_v1.examples_api import router as examples_router
     from dbgpt_app.openapi.api_v1.feedback.api_fb_v1 import router as api_fb_v1
     from dbgpt_app.openapi.api_v1.python_upload_api import (
         router as python_upload_router,
@@ -128,7 +163,6 @@ def mount_routers(app: FastAPI):
     app.include_router(gpts_v1, prefix="/api", tags=["GptsApp"])
     app.include_router(app_v2, prefix="/api", tags=["App"])
     app.include_router(python_upload_router, prefix="/api", tags=["PythonUpload"])
-    app.include_router(examples_router, prefix="/api", tags=["Examples"])
     app.include_router(agentic_data_api, prefix="/api", tags=["AgenticData"])
     app.include_router(attachment_router, prefix="/api", tags=["Attachments"])
     app.include_router(ask_data_router)
@@ -169,7 +203,14 @@ def configure_ask_data_metadata_backend() -> None:
                 current_revision.view_name,
             )
 
-        configure_sql_ask_data_services(db, schema_resolver=schema_resolver)
+        configure_sql_ask_data_services(
+            db,
+            schema_resolver=schema_resolver,
+            authorizer=getattr(app.state, "ask_data_authorizer", None),
+            principal_resolver=getattr(
+                app.state, "ask_data_principal_resolver", None
+            ),
+        )
         logger.info("AskData metadata backend configured with SQL persistence")
     except Exception:
         logger.exception("Failed to configure AskData SQL metadata backend")
@@ -178,10 +219,7 @@ def configure_ask_data_metadata_backend() -> None:
 
 def mount_static_files(app: FastAPI, param: ApplicationConfig):
     package_dir = os.path.dirname(os.path.abspath(__file__))
-    if param.service.web.new_web_ui:
-        static_file_path = os.path.join(package_dir, "static", "web")
-    else:
-        static_file_path = os.path.join(package_dir, "static", "old_web")
+    static_file_path = os.path.join(package_dir, "static", "web")
 
     os.makedirs(STATIC_MESSAGE_IMG_PATH, exist_ok=True)
     app.mount(
@@ -263,7 +301,7 @@ def initialize_app(param: ApplicationConfig, args: List[str] = None):
 
     # Register default data sources
     try:
-        from dbgpt.configs.model_config import PILOT_PATH, ROOT_PATH
+        from dbgpt.configs.model_config import PILOT_PATH
         from dbgpt_serve.datasource.manages.connect_config_db import ConnectConfigDao
 
         dao = ConnectConfigDao()
@@ -271,9 +309,6 @@ def initialize_app(param: ApplicationConfig, args: List[str] = None):
         if not dao.get_by_names(db_name):
             candidate_paths = [
                 os.path.join(PILOT_PATH, "examples", "Walmart_Sales.db"),
-                os.path.join(
-                    ROOT_PATH, "docker", "examples", "dashboard", "Walmart_Sales.db"
-                ),
             ]
             db_absolute_path = next(
                 (p for p in candidate_paths if os.path.isfile(p)), None

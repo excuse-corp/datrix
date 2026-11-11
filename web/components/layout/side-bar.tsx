@@ -3,11 +3,13 @@ import { delDialogue, getDialogueList } from '@/client/api/request';
 import { apiInterceptors } from '@/client/api/tools/interceptors';
 import InterfaceStyleSwitch from '@/components/layout/InterfaceStyleSwitch';
 import type { IChatDialogueSchema } from '@/types/chat';
+import { STORAGE_USERINFO_KEY } from '@/utils/constants/index';
 import {
   ApartmentOutlined,
   AppstoreOutlined,
   BarChartOutlined,
   DeleteOutlined,
+  LogoutOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   MessageOutlined,
@@ -15,7 +17,7 @@ import {
   RightOutlined,
   SettingOutlined,
 } from '@ant-design/icons';
-import { Skeleton, Tooltip, message } from 'antd';
+import { Avatar, Popover, Skeleton, Tooltip, message } from 'antd';
 import cls from 'classnames';
 import moment from 'moment';
 import 'moment/locale/zh-cn';
@@ -33,6 +35,14 @@ type RouteItem = {
   activeIconSrc?: string;
   path: string;
   isActive?: boolean;
+};
+
+type CurrentUser = {
+  username?: string;
+  display_name?: string;
+  user_id?: string;
+  avatar_url?: string;
+  roles?: string[];
 };
 
 const CHAT_DIALOGUE_UPSERT_EVENT = 'dataman:chat-dialogue-upsert';
@@ -74,7 +84,65 @@ function SideBar() {
   const logo = '/datrix-brand.png';
   const [dialogueList, setDialogueList] = useState<IChatDialogueSchema[]>([]);
   const [loadingDialogues, setLoadingDialogues] = useState(false);
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
   const optimisticDialoguesRef = useRef<Record<string, IChatDialogueSchema>>({});
+
+  const syncCurrentUser = useCallback(() => {
+    try {
+      const stored = localStorage.getItem(STORAGE_USERINFO_KEY);
+      setCurrentUser(stored ? (JSON.parse(stored) as CurrentUser) : null);
+    } catch {
+      setCurrentUser(null);
+    }
+  }, []);
+
+  const handleLogout = useCallback(async () => {
+    setUserMenuOpen(false);
+    setLoggingOut(true);
+    try {
+      await fetch('/api/v1/auth/logout', {
+        method: 'POST',
+        credentials: 'same-origin',
+      });
+    } catch {
+      // Clear the local state and return to the login page even if the session
+      // has already expired or the logout request cannot reach the server.
+    } finally {
+      localStorage.removeItem(STORAGE_USERINFO_KEY);
+      setCurrentUser(null);
+      setLoggingOut(false);
+      await router.replace('/login');
+    }
+  }, [router]);
+
+  const userDisplayName = currentUser?.display_name || currentUser?.username || '已登录用户';
+  const userInitial = userDisplayName.slice(0, 1).toUpperCase();
+  const userPopoverContent = currentUser ? (
+    <div className='w-52 p-1'>
+      <div className='flex items-center gap-2.5 px-2 py-2'>
+        <Avatar size={36} src={currentUser.avatar_url}>
+          {userInitial}
+        </Avatar>
+        <div className='min-w-0'>
+          <div className='truncate text-sm font-semibold text-gray-800'>{userDisplayName}</div>
+          <div className='truncate text-xs text-gray-500'>
+            {currentUser.username ? `已登录 · @${currentUser.username}` : '当前账号已登录'}
+          </div>
+        </div>
+      </div>
+      <button
+        type='button'
+        disabled={loggingOut}
+        onClick={handleLogout}
+        className='flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs text-gray-600 transition-colors hover:bg-gray-100 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-60'
+      >
+        <LogoutOutlined />
+        <span>{loggingOut ? '正在退出…' : '退出登录'}</span>
+      </button>
+    </div>
+  ) : null;
 
   const fetchDialogueList = useCallback(async () => {
     setLoadingDialogues(true);
@@ -175,6 +243,10 @@ function SideBar() {
   }, [fetchDialogueList]);
 
   useEffect(() => {
+    syncCurrentUser();
+  }, [syncCurrentUser]);
+
+  useEffect(() => {
     const handleUpsert = (event: Event) => {
       const detail = (event as CustomEvent<Partial<IChatDialogueSchema>>).detail;
       if (!detail?.conv_uid) return;
@@ -246,6 +318,27 @@ function SideBar() {
         </div>
         <div className='dashboard-sidebar-compact-bottom py-4'>
           <div className='flex flex-col items-center gap-3'>
+            {currentUser && (
+              <Popover
+                trigger='click'
+                placement='rightBottom'
+                open={userMenuOpen}
+                onOpenChange={setUserMenuOpen}
+                content={userPopoverContent}
+              >
+                <Tooltip title={`${userDisplayName}（已登录）`} placement='right'>
+                  <button
+                    type='button'
+                    aria-label={`${userDisplayName}，已登录`}
+                    className='dashboard-sidebar-user-trigger flex h-12 w-12 items-center justify-center rounded-xl'
+                  >
+                    <Avatar size={32} src={currentUser.avatar_url} className='dashboard-sidebar-avatar'>
+                      {userInitial}
+                    </Avatar>
+                  </button>
+                </Tooltip>
+              </Popover>
+            )}
             <Link href='/settings'>
               <Tooltip title={t('settings')} placement='right'>
                 <div className={smallMenuItemStyle(isSettingsActive)}>
@@ -375,6 +468,25 @@ function SideBar() {
       {/* Bottom controls */}
       <div className='pt-4 pb-2'>
         <div className='dashboard-sidebar-bottom-controls flex items-center justify-center gap-4 py-4 border-t border-dashed border-gray-200 dark:border-gray-700'>
+          {currentUser && (
+            <Popover
+              trigger='click'
+              placement='topLeft'
+              open={userMenuOpen}
+              onOpenChange={setUserMenuOpen}
+              content={userPopoverContent}
+            >
+              <button
+                type='button'
+                aria-label={`${userDisplayName}，已登录`}
+                className='dashboard-sidebar-bottom-control dashboard-sidebar-user-trigger rounded-xl'
+              >
+                <Avatar size={32} src={currentUser.avatar_url} className='dashboard-sidebar-avatar'>
+                  {userInitial}
+                </Avatar>
+              </button>
+            </Popover>
+          )}
           <div className='dashboard-sidebar-bottom-control'>
             <InterfaceStyleSwitch compact />
           </div>

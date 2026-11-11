@@ -14,6 +14,8 @@ def relevant_ontology_projection(
     *,
     max_nodes: int = 24,
     scene_ids: list[str] | None = None,
+    authorized_scene_ids: list[str] | None = None,
+    is_platform_admin: bool = True,
     result_columns: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Select a small connected subgraph; never expose scene Markdown or SQL."""
@@ -21,6 +23,109 @@ def relevant_ontology_projection(
     prompt_projection = snapshot.prompt_projection_json or {}
     nodes = list(graph.get("nodes", []))
     edges = list(graph.get("edges", []))
+    authorized = {str(item) for item in (authorized_scene_ids or []) if str(item)}
+
+    def source_scenes(item: dict[str, Any]) -> set[str]:
+        data = item.get("data", {}) or {}
+        values: set[str] = set()
+        for raw in (
+            item.get("source_scenes"),
+            item.get("scenes"),
+            data.get("source_scene"),
+            data.get("source_scenes"),
+        ):
+            if isinstance(raw, str):
+                values.update(_split_values(raw))
+            elif isinstance(raw, (list, tuple, set)):
+                values.update(str(value) for value in raw if value)
+        for provenance in item.get("provenance", []) or []:
+            if isinstance(provenance, dict) and provenance.get("scene_id"):
+                values.add(str(provenance["scene_id"]))
+        return values
+
+    def source_is_visible(item: dict[str, Any]) -> bool:
+        if is_platform_admin:
+            return True
+        sources = source_scenes(item)
+        if not sources and str(item.get("id") or "") in authorized:
+            sources.add(str(item["id"]))
+        return bool(sources) and sources.issubset(authorized)
+
+    if authorized_scene_ids is not None and not is_platform_admin:
+        nodes = [node for node in nodes if source_is_visible(node)]
+        visible_node_ids = {str(node.get("id")) for node in nodes}
+        nodes_by_id = {str(node.get("id")): node for node in nodes}
+
+        def edge_is_visible(edge: dict[str, Any]) -> bool:
+            edge_sources = source_scenes(edge)
+            if edge_sources:
+                return edge_sources.issubset(authorized)
+            source_node = nodes_by_id.get(str(edge.get("source")))
+            target_node = nodes_by_id.get(str(edge.get("target")))
+            if source_node is None or target_node is None:
+                return False
+            endpoint_sources = source_scenes(source_node) | source_scenes(target_node)
+            return bool(endpoint_sources) and endpoint_sources.issubset(authorized)
+
+        scene_nodes = {
+            str(node.get("id"))
+            for node in nodes
+            if node.get("type") == "scene"
+        }
+        edges = [
+            edge
+            for edge in edges
+            if edge.get("source") in visible_node_ids
+            and edge.get("target") in visible_node_ids
+            and edge_is_visible(edge)
+            and not (
+                edge.get("type") == "cross_scene_join"
+                and (
+                    not (edge.get("data") or {}).get("scenes")
+                    or not set((edge.get("data") or {}).get("scenes", [])).issubset(
+                        authorized
+                    )
+                )
+            )
+            and not (
+                edge.get("type") == "scene_binding"
+                and edge.get("source") not in scene_nodes
+                and edge.get("target") not in scene_nodes
+            )
+        ]
+        prompt_projection = {
+            **prompt_projection,
+            **{
+                key: [item for item in prompt_projection.get(key, []) if source_is_visible(item)]
+                for key in (
+                    "entities",
+                    "metrics",
+                    "analysis_dimensions",
+                    "metric_relations",
+                    "cross_scene_analysis_paths",
+                    "result_analysis_rules",
+                )
+            },
+            "clarification_rules": [],
+        }
+        visible_node_ids = {str(node.get("id")) for node in nodes}
+        prompt_edges = prompt_projection.get("edges", [])
+        prompt_projection["edges"] = [
+            edge
+            for edge in prompt_edges
+            if edge.get("source") in visible_node_ids
+            and edge.get("target") in visible_node_ids
+            and edge_is_visible(edge)
+            and (
+                edge.get("type") != "cross_scene_join"
+                or (
+                    bool((edge.get("data") or {}).get("scenes"))
+                    and set((edge.get("data") or {}).get("scenes", [])).issubset(
+                        authorized
+                    )
+                )
+            )
+        ]
     selected_scene_ids = {str(item) for item in (scene_ids or []) if str(item)}
     column_keys = {
         str(column.get("key"))
@@ -169,6 +274,8 @@ def render_main_agent_ontology_context(
     question: str | None = None,
     *,
     scene_ids: list[str] | None = None,
+    authorized_scene_ids: list[str] | None = None,
+    is_platform_admin: bool = True,
     result_columns: list[dict[str, Any]] | None = None,
 ) -> str:
     if snapshot is None:
@@ -177,6 +284,8 @@ def render_main_agent_ontology_context(
         snapshot,
         question,
         scene_ids=scene_ids,
+        authorized_scene_ids=authorized_scene_ids,
+        is_platform_admin=is_platform_admin,
         result_columns=result_columns,
     )
     lines = [f"全局业务 Ontology（版本 {projection['revision']}）："]

@@ -36,7 +36,7 @@ expected_truncated = true
 
 [[uat.cases]]
 name = "injection_rejected"
-question = "查询合同金额；DROP TABLE dbo.vw_xmk_project_contract_report"
+question = "查询合同金额；DROP TABLE reporting.vw_information_project_contract_report"
 expected_status = "rejected"
 expected_error_code = "INVALID_PLAN"
 

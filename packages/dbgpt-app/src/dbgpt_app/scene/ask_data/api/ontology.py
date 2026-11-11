@@ -143,7 +143,11 @@ def _authorized_scene_snapshots(principal: AskDataPrincipal) -> list[Any]:
     snapshot_service = scenes.get_publish_service().snapshot_service
     authorizer = getattr(scenes, "_authorizer", None)
     for snapshot in snapshot_service.active_snapshots():
-        if authorizer is not None and not principal.can_access_scene(snapshot.scene_id):
+        if (
+            authorizer is not None
+            and not principal.can_manage_ask_data
+            and not principal.can_access_scene(snapshot.scene_id)
+        ):
             continue
         snapshots.append(snapshot)
     return snapshots
@@ -226,6 +230,7 @@ def get_ontology(
     service: OntologyLifecycleService = Depends(get_ontology_service),
     principal: AskDataPrincipal = Depends(get_principal),
 ):
+    _require_admin(principal)
     draft = service.draft(user_id=principal.user_id)
     active = service.active_snapshot()
     return {
@@ -243,6 +248,7 @@ def get_draft(
     service: OntologyLifecycleService = Depends(get_ontology_service),
     principal: AskDataPrincipal = Depends(get_principal),
 ):
+    _require_admin(principal)
     return {
         "status": "succeeded",
         "data": _revision_payload(service.draft(user_id=principal.user_id)),
@@ -371,6 +377,42 @@ def get_graph(
     principal: AskDataPrincipal = Depends(get_principal),
 ):
     try:
+        if not principal.can_manage_ask_data:
+            active = service.active_snapshot()
+            if active is None:
+                return {"status": "succeeded", "data": None}
+            from ..ontology.context import relevant_ontology_projection
+
+            projection = relevant_ontology_projection(
+                active,
+                authorized_scene_ids=sorted(principal.scene_ids),
+                is_platform_admin=principal.is_platform_admin,
+            )
+            return {
+                "status": "succeeded",
+                "data": {
+                    "revision": active.revision,
+                    "valid": True,
+                    "graph": {
+                        "nodes": projection["nodes"],
+                        "edges": projection["edges"],
+                    },
+                    "prompt_projection": {
+                        key: projection[key]
+                        for key in (
+                            "entities",
+                            "metrics",
+                            "analysis_dimensions",
+                            "metric_relations",
+                            "cross_scene_analysis_paths",
+                            "result_analysis_rules",
+                            "clarification_rules",
+                        )
+                    },
+                    "issues": [],
+                    "layout": {},
+                },
+            }
         return {
             "status": "succeeded",
             "data": service.graph(
@@ -388,6 +430,7 @@ def list_revisions(
     service: OntologyLifecycleService = Depends(get_ontology_service),
     principal: AskDataPrincipal = Depends(get_principal),
 ):
+    _require_admin(principal)
     service.draft(user_id=principal.user_id)
     return {
         "status": "succeeded",
@@ -402,6 +445,7 @@ def list_snapshots(
     service: OntologyLifecycleService = Depends(get_ontology_service),
     principal: AskDataPrincipal = Depends(get_principal),
 ):
+    _require_admin(principal)
     service.draft(user_id=principal.user_id)
     return {
         "status": "succeeded",
@@ -473,6 +517,7 @@ def draft_source_manifest(
     service: OntologyLifecycleService = Depends(get_ontology_service),
     principal: AskDataPrincipal = Depends(get_principal),
 ):
+    _require_admin(principal)
     revision = service.draft(user_id=principal.user_id)
     return {
         "status": "succeeded",
@@ -514,7 +559,9 @@ def source_scenes(
 @router.get("/snapshot/latest")
 def latest_snapshot(
     service: OntologyLifecycleService = Depends(get_ontology_service),
+    principal: AskDataPrincipal = Depends(get_principal),
 ):
+    _require_admin(principal)
     snapshot = service.active_snapshot()
     return {
         "status": "succeeded",

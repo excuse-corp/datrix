@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import threading
 import time
 from abc import ABC
@@ -7,6 +8,7 @@ from concurrent.futures import Executor, ThreadPoolExecutor
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timedelta
 from inspect import signature
+from urllib.parse import urlsplit
 from typing import List, Literal, Optional, Tuple, Type, TypeVar, Union, get_type_hints
 
 T = TypeVar("T")
@@ -200,6 +202,15 @@ def _build_request(self, base_url, func, path, method, *args, **kwargs):
         request_params["json"] = request_data
     else:  # For GET, DELETE, etc.
         request_params["params"] = request_data
+
+    internal_token = os.getenv("DBGPT_AUTH_INTERNAL_TOKEN", "")
+    hostname = urlsplit(base_url).hostname
+    if internal_token and path.startswith("/api/controller/") and hostname in {
+        "127.0.0.1",
+        "localhost",
+        "::1",
+    }:
+        request_params["headers"] = {"X-DataMan-Internal-Token": internal_token}
 
     logger.debug(f"request_params: {request_params}, args: {args}, kwargs: {kwargs}")
     return return_type, actual_dataclass, request_params

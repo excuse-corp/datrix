@@ -7,10 +7,11 @@ import {
   RightOutlined,
   RobotOutlined,
   SettingOutlined,
+  UserOutlined,
 } from '@ant-design/icons';
 import { Typography } from 'antd';
 import Link from 'next/link';
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 
 type SettingItem = {
   href: string;
@@ -52,6 +53,14 @@ function SettingsGrid({ items }: { items: SettingItem[] }) {
 export default function SettingsPage() {
   const interfaceStyle = useInterfaceStyle();
   const isDashboard = isDashboardStyle(interfaceStyle);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/v1/auth/me', { credentials: 'same-origin' })
+      .then(response => (response.ok ? response.json() : null))
+      .then(user => setIsAdmin(Boolean(user?.roles?.includes('admin'))))
+      .catch(() => setIsAdmin(false));
+  }, []);
 
   return (
     <main className='dashboard-main-canvas dashboard-settings-page h-full overflow-auto bg-[#f7f9fc] px-4 py-6 dark:bg-[#111827] md:px-6'>
@@ -73,6 +82,13 @@ export default function SettingsPage() {
           </div>
         )}
         <SettingsGrid items={items} />
+
+        {isAdmin && (
+          <section className='mt-8'>
+            <Typography.Title level={4}>平台管理</Typography.Title>
+            <SettingsGrid items={[{ href: '/settings/users', icon: <UserOutlined />, label: '用户管理' }]} />
+          </section>
+        )}
 
         <section className='mt-8'>
           <Typography.Title level={4}>问数管理</Typography.Title>

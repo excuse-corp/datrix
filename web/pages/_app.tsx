@@ -1,6 +1,6 @@
 import { ChatContext, ChatContextProvider } from '@/app/chat-context';
 import SideBar from '@/components/layout/side-bar';
-import { STORAGE_LANG_KEY, STORAGE_USERINFO_KEY, STORAGE_USERINFO_VALID_TIME_KEY } from '@/utils/constants/index';
+import { STORAGE_LANG_KEY, STORAGE_USERINFO_KEY } from '@/utils/constants/index';
 import { getInterfaceStyle, isDashboardStyle, type InterfaceStyle } from '@/utils/interface-style';
 import { App, ConfigProvider, MappingAlgorithm, theme } from 'antd';
 import enUS from 'antd/locale/en_US';
@@ -66,38 +66,48 @@ function CssWrapper({ children }: { children: React.ReactElement }) {
 }
 
 function LayoutWrapper({ children }: { children: React.ReactNode }) {
-  const { isMenuExpand, mode } = useContext(ChatContext);
+  const { isAuthenticated, setIsAuthenticated, isMenuExpand, mode } = useContext(ChatContext);
   const { i18n } = useTranslation();
-  const [isLogin, setIsLogin] = useState(false);
   const [interfaceStyle, setInterfaceStyle] = useState<InterfaceStyle>('dashboard');
 
   const router = useRouter();
 
-  // 登录检测
-  const handleAuth = async () => {
-    setIsLogin(false);
-    // 如果已有登录信息，直接展示首页
-    // if (localStorage.getItem(STORAGE_USERINFO_KEY)) {
-    //   setIsLogin(true);
-    //   return;
-    // }
-
-    // MOCK User info
-    const user = {
-      user_channel: `dbgpt`,
-      user_no: `001`,
-      nick_name: `dbgpt`,
-    };
-    if (user) {
-      localStorage.setItem(STORAGE_USERINFO_KEY, JSON.stringify(user));
-      localStorage.setItem(STORAGE_USERINFO_VALID_TIME_KEY, Date.now().toString());
-      setIsLogin(true);
-    }
-  };
-
   useEffect(() => {
-    handleAuth();
-  }, []);
+    if (router.pathname === '/login' || router.pathname === '/setup' || router.pathname.startsWith('/share')) {
+      setIsAuthenticated(false);
+      return;
+    }
+    let active = true;
+    setIsAuthenticated(false);
+    fetch('/api/v1/auth/me', { credentials: 'same-origin' })
+      .then(async response => {
+        if (!response.ok) throw new Error('AUTH_REQUIRED');
+        return response.json();
+      })
+      .then(user => {
+        if (!active) return;
+        localStorage.setItem(
+          STORAGE_USERINFO_KEY,
+          JSON.stringify({
+            ...user,
+            user_no: user.user_id,
+            nick_name: user.display_name || user.username,
+            user_channel: 'dataman',
+          }),
+        );
+        setIsAuthenticated(true);
+      })
+      .catch(() => {
+        if (active) {
+          setIsAuthenticated(false);
+          localStorage.removeItem(STORAGE_USERINFO_KEY);
+          router.replace({ pathname: '/login', query: { return_to: router.asPath } });
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [router, setIsAuthenticated]);
 
   useEffect(() => {
     const syncInterfaceStyle = () => setInterfaceStyle(getInterfaceStyle());
@@ -106,7 +116,9 @@ function LayoutWrapper({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener('dataman-interface-style-change', syncInterfaceStyle);
   }, []);
 
-  if (!isLogin && !router.pathname.startsWith('/share')) {
+  const isPublicPage =
+    router.pathname === '/login' || router.pathname === '/setup' || router.pathname.startsWith('/share');
+  if (!isAuthenticated && !isPublicPage) {
     return null;
   }
 
@@ -115,7 +127,12 @@ function LayoutWrapper({ children }: { children: React.ReactNode }) {
     const hideSidebar =
       router.pathname.includes('mobile') || router.pathname.startsWith('/share') || !!router.query.from_task;
 
-    if (router.pathname.includes('mobile') || router.pathname.startsWith('/share')) {
+    if (
+      router.pathname === '/login' ||
+      router.pathname === '/setup' ||
+      router.pathname.includes('mobile') ||
+      router.pathname.startsWith('/share')
+    ) {
       return <>{children}</>;
     }
     return (

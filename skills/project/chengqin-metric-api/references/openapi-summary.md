@@ -1,6 +1,6 @@
 # Chengqin Indicator Hub OpenAPI Summary
 
-The source document is ref/诚勤指标中枢OpenAPI开发指南.pdf. This reference keeps only the operational details needed by the Skill; consult the source PDF when the platform behavior differs.
+This file keeps the operational API details needed by the Skill. Treat it as the maintained reference and update it when the provider contract changes.
 
 ## Authentication
 

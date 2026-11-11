@@ -40,6 +40,34 @@ git remote add "$GITHUB_REMOTE_NAME" "$GITHUB_REMOTE_URL"
   `7771`.
 - Local service logs live under `logs/dataman-services/`.
 
+### `static/web` is build output, not source
+
+`packages/dbgpt-app/src/dbgpt_app/static/web` is **not tracked by git**. It is
+produced by `scripts/build_web_static.sh`, which runs `next build && next export`
+in `web/` and then `rsync -a --delete web/out/` onto that directory. Everything in
+it is reproducible from `web/` plus `web/public/` (which is tracked); do not edit
+files there, and do not commit them.
+
+Two consequences:
+
+- `scripts/start_dataman_services.sh` rebuilds it on every start. Skipping that
+  build with `DATAMAN_SKIP_WEB_BUILD=1` only works if the directory already exists
+  from an earlier build.
+- `mount_static_files()` in `dbgpt_server.py` mounts the directory with FastAPI's
+  `StaticFiles`, which raises if it is missing. A fresh clone therefore cannot
+  start the backend until the frontend has been built once.
+
+Bootstrapping a fresh clone:
+
+```bash
+cd web && npm install && cd ..   # /web/node_modules is not tracked either
+./scripts/build_web_static.sh
+./scripts/start_dataman_services.sh
+```
+
+Note that untracking does not shrink existing clones: the assets are still in git
+history. Only a history rewrite (`git filter-repo`/BFG) would reclaim that space.
+
 ## Common Commands
 
 ```bash
@@ -51,7 +79,9 @@ DATAMAN_SKIP_WEB_BUILD=1 ./scripts/restart_dataman_services.sh
 ```
 
 Use `DATAMAN_SKIP_WEB_BUILD=1` when only Python/backend resources changed. Rebuild
-static assets when editing frontend code under `web/`.
+static assets when editing frontend code under `web/`. Skipping the build assumes
+`packages/dbgpt-app/src/dbgpt_app/static/web` already exists — see
+[`static/web` is build output](#staticweb-is-build-output-not-source).
 
 ## Conda Environment
 

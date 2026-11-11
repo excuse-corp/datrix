@@ -3,17 +3,17 @@
 # ║  Datrix Quick Installer                                                  ║
 # ║                                                                          ║
 # ║  One-line usage:                                                         ║
-# ║    curl -fsSL https://raw.githubusercontent.com/eosphoros-ai/DB-GPT/\    ║
-# ║      main/scripts/install/install.sh | bash                             ║
+# ║    curl -fsSL https://raw.githubusercontent.com/excuse-corp/datrix/main/scripts/install/install.sh | bash ║
 # ║                                                                          ║
 # ║  What this script does:                                                  ║
 # ║    1. Detect OS (macOS / Linux)                                          ║
-# ║    2. Ensure git and curl are available                                  ║
+# ║    2. Ensure git, curl, and npm are available                            ║
 # ║    3. Install uv (if not already present)                                ║
 # ║    4. Clone (or update) the Datrix repository                           ║
 # ║    5. Run `uv sync` with the extras for the chosen profile              ║
-# ║    6. Generate config via dbgpt setup wizard                             ║
-# ║    7. Print next-steps (start command, URL)                              ║
+# ║    6. Install frontend dependencies and build static assets              ║
+# ║    7. Generate config via dbgpt setup wizard                             ║
+# ║    8. Print next-steps (start command, URL)                              ║
 # ║                                                                          ║
 # ║  What this script does NOT do:                                           ║
 # ║    - Install GPU drivers or CUDA                                         ║
@@ -27,7 +27,8 @@ set -euo pipefail
 # When piped from curl, BASH_SOURCE is empty.  In that case we download the
 # helper libs from GitHub on the fly.
 SCRIPT_DIR=""
-REMOTE_BASE="https://raw.githubusercontent.com/eosphoros-ai/DB-GPT/main/scripts/install"
+REPOSITORY_URL="https://github.com/excuse-corp/datrix.git"
+REMOTE_BASE="https://raw.githubusercontent.com/excuse-corp/datrix/main/scripts/install"
 
 _resolve_script_dir() {
   if [[ -n "${BASH_SOURCE[0]:-}" && "${BASH_SOURCE[0]}" != "bash" ]]; then
@@ -93,7 +94,7 @@ Environment variables:
   MINIMAX_API_KEY        Automatically injected into MiniMax config
   ZHIPUAI_API_KEY        Automatically injected into GLM config
   DBGPT_INSTALL_DIR      Override default install directory
-  DBGPT_REPO_DIR         Reuse an existing local DB-GPT repo
+  DBGPT_REPO_DIR         Reuse an existing local Datrix repo
   DBGPT_VERSION          Override default git ref
 
 Examples:
@@ -202,6 +203,7 @@ step_check_platform() {
 step_ensure_base_commands() {
   require_cmd curl
   require_cmd git
+  require_cmd npm
 }
 
 step_choose_profile() {
@@ -287,7 +289,7 @@ step_prepare_dirs() {
 
 resolve_repo_dir() {
   if [[ -z "${REPO_DIR}" ]]; then
-    REPO_DIR="${INSTALL_DIR}/DB-GPT"
+    REPO_DIR="${INSTALL_DIR}/datrix"
     return
   fi
 
@@ -317,7 +319,7 @@ step_clone_or_update_repo() {
   if [[ ! -e "${repo_dir}" ]]; then
     run "Cloning Datrix repository..." \
       git clone --depth 1 --branch "${VERSION}" \
-      https://github.com/eosphoros-ai/DB-GPT.git "${repo_dir}"
+      "${REPOSITORY_URL}" "${repo_dir}"
     return
   fi
 
@@ -354,6 +356,22 @@ step_install_deps() {
   )
 
   success "Dependencies installed."
+}
+
+step_build_frontend() {
+  local repo_dir="${REPO_DIR}"
+
+  (
+    cd "${repo_dir}/web"
+    run "Installing frontend dependencies..." npm ci
+  )
+
+  (
+    cd "${repo_dir}"
+    run "Building frontend static assets..." ./scripts/build_web_static.sh
+  )
+
+  success "Frontend assets built."
 }
 
 step_check_api_key() {
@@ -490,6 +508,7 @@ BANNER
     step_ensure_uv
     step_clone_or_update_repo
     step_install_deps
+    step_build_frontend
     step_validate
     step_print_summary
     step_start_if_requested
@@ -502,6 +521,7 @@ BANNER
     step_ensure_uv
     step_clone_or_update_repo
     step_install_deps
+    step_build_frontend
     step_check_api_key
     step_generate_config
     step_validate

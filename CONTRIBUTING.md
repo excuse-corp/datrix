@@ -162,7 +162,3 @@ Write necessary information about your changes and click "Create pull request".
 4. Wait for the project maintainer to review your changes and provide feedback.
 
 That's it you made it 🐣⭐⭐
-
-# Developing inside a Container
-
-If you are using VS Code as your IDE for development, you can refer to the [configuration here](.devcontainer/README.md) to set up the Dev Containers development environment.

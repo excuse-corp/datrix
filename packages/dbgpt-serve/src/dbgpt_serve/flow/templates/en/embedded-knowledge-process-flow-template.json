@@ -451,7 +451,7 @@
                 "placeholder": null,
                 "description": "Default data source.",
                 "options": null,
-                "value": "../../../../docs/docs/quickstart.md",
+                "value": "../../../../legacy/docs/docs/quickstart.md",
                 "alias": null,
                 "ui": null
               },

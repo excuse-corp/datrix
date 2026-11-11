@@ -451,7 +451,7 @@
                 "placeholder": null,
                 "description": "默认数据源。",
                 "options": null,
-                "value": "../../../../docs/docs/quickstart.md",
+                "value": "../../../../legacy/docs/docs/quickstart.md",
                 "alias": null,
                 "ui": null
               },

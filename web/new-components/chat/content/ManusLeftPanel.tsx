@@ -65,6 +65,7 @@ export interface ExecutionStep {
   description?: string;
   phase?: string;
   status: StepStatus;
+  confirmationStatus?: 'confirmed';
   output?: any;
   durationMs?: number;
   startedAt?: string;
@@ -572,7 +573,8 @@ const StepCard: React.FC<{
   }
   const isQuestionStep = step.type === 'question' || step.title === 'question';
   if (isQuestionStep) {
-    const isWaiting = step.status === 'running';
+    const isConfirmed = step.confirmationStatus === 'confirmed';
+    const isWaiting = step.status === 'running' && !isConfirmed;
     return (
       <div
         onClick={onClick}
@@ -601,10 +603,18 @@ const StepCard: React.FC<{
           </div>
           <div className='flex flex-col min-w-0 flex-1'>
             <span className='text-[10px] font-semibold uppercase tracking-wider text-amber-600/80 dark:text-amber-400/80'>
-              {isWaiting ? t('waiting_for_user') || 'Waiting for User' : t('step_type_question') || 'Ask User'}
+              {isConfirmed
+                ? t('confirmation_received') || 'Confirmation received'
+                : isWaiting
+                  ? t('waiting_for_user') || 'Waiting for User'
+                  : t('step_type_question') || 'Ask User'}
             </span>
             <span className='text-sm font-medium text-slate-800 dark:text-slate-200 truncate'>
-              {step.title === 'question' ? t('user_confirmation') || '需要您的确认' : step.title}
+              {isConfirmed
+                ? t('confirmation_received_continue') || 'Your confirmation was received. Continuing.'
+                : step.title === 'question'
+                  ? t('user_confirmation') || '需要您的确认'
+                  : step.title}
             </span>
           </div>
           <div className='flex-shrink-0'>

@@ -401,6 +401,9 @@ def make_ask_data_tools(
                 entry_type="main_agent",
                 sql_by_task=sql_by_task,
                 on_task_event=on_sql_task_event,
+                authorized_scene_ids=sorted(principal.scene_ids),
+                is_platform_admin=principal.is_platform_admin,
+                authz_version=principal.authz_version,
             )
             formatting_started = monotonic()
             formatting_started_at = _utc_now()
@@ -479,7 +482,10 @@ def make_ask_data_tools(
         elif payload.get("status") in {"succeeded", "partial_succeeded"}:
             try:
                 content = _main_agent_result_content(
-                    payload, max_result_tokens, normalized_question
+                    payload,
+                    max_result_tokens,
+                    normalized_question,
+                    principal=principal,
                 )
             except Exception as exc:
                 payload["status"] = "failed"
@@ -774,7 +780,11 @@ async def _build_scene_sqls(
 
 
 def _main_agent_result_content(
-    payload: dict[str, Any], max_result_tokens: int | None, question: str | None = None
+    payload: dict[str, Any],
+    max_result_tokens: int | None,
+    question: str | None = None,
+    *,
+    principal: AskDataPrincipal | None = None,
 ) -> str:
     scene_items = [item for item in payload.get("results", []) if isinstance(item, dict)]
     scene_ids = [
@@ -820,6 +830,7 @@ def _main_agent_result_content(
     ontology_context = _active_ontology_analysis_context(
         question,
         scene_ids=scene_ids,
+        principal=principal,
         result_columns=result_columns,
     )
     has_data_caliber = any(
@@ -908,6 +919,7 @@ def _active_ontology_analysis_context(
     question: str | None,
     *,
     scene_ids: list[str] | None = None,
+    principal: AskDataPrincipal | None = None,
     result_columns: list[dict[str, Any]] | None = None,
 ) -> str:
     try:
@@ -920,6 +932,12 @@ def _active_ontology_analysis_context(
             get_ontology_service().active_snapshot(),
             question,
             scene_ids=scene_ids,
+            authorized_scene_ids=(
+                sorted(principal.scene_ids) if principal is not None else []
+            ),
+            is_platform_admin=(
+                principal.is_platform_admin if principal is not None else False
+            ),
             result_columns=result_columns,
         )
     except Exception:
@@ -985,6 +1003,9 @@ async def reply_to_ask_data_query(
             max_agents=10,
             entry_type="main_agent",
             sql_by_task=sql_by_task,
+            authorized_scene_ids=sorted(principal.scene_ids),
+            is_platform_admin=principal.is_platform_admin,
+            authz_version=principal.authz_version,
         )
         return scenes._query_response(query, result, plan)
     except Exception as exc:

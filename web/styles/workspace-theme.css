@@ -802,6 +802,66 @@ html[data-interface-style='workspace'] .dashboard-sidebar-bottom-control svg {
   font-size: 24px !important;
 }
 
+html[data-interface-style='workspace'] .dashboard-sidebar-user-trigger {
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+
+html[data-interface-style='workspace'] .dashboard-sidebar-bottom-control,
+html[data-interface-style='workspace'] .dashboard-sidebar-compact .dashboard-sidebar-user-trigger {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 14px !important;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.88) !important;
+  transition: background-color 160ms ease, color 160ms ease, border-color 160ms ease;
+}
+
+html[data-interface-style='workspace'] .dashboard-sidebar-bottom-control:hover,
+html[data-interface-style='workspace'] .dashboard-sidebar-compact .dashboard-sidebar-user-trigger:hover {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.35);
+  color: #fff;
+}
+
+html[data-interface-style='workspace'] .dashboard-sidebar-bottom-control > div,
+html[data-interface-style='workspace'] .dashboard-sidebar-bottom-control .anticon,
+html[data-interface-style='workspace'] .dashboard-sidebar-bottom-control svg {
+  color: inherit !important;
+}
+
+html[data-interface-style='workspace'] .dashboard-sidebar-avatar {
+  background: rgba(255, 255, 255, 0.24) !important;
+  color: #fff !important;
+  font-weight: 700;
+}
+
+html[data-interface-style='workspace'] .dashboard-sidebar-bottom-control .interface-style-switch-compact {
+  width: 100% !important;
+  min-height: 100% !important;
+  height: 100% !important;
+  border: 0 !important;
+  border-radius: inherit !important;
+  background: transparent !important;
+}
+
+html[data-interface-style='workspace'] .dashboard-sidebar-compact-bottom .dashboard-sidebar-compact-item,
+html[data-interface-style='workspace'] .dashboard-sidebar-compact-bottom .interface-style-switch-compact {
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  border-radius: 14px !important;
+  background: rgba(255, 255, 255, 0.1) !important;
+  color: rgba(255, 255, 255, 0.88) !important;
+  transition: background-color 160ms ease, color 160ms ease, border-color 160ms ease;
+}
+
+html[data-interface-style='workspace'] .dashboard-sidebar-compact-bottom .dashboard-sidebar-compact-item:hover,
+html[data-interface-style='workspace'] .dashboard-sidebar-compact-bottom .interface-style-switch-compact:hover,
+html[data-interface-style='workspace'] .dashboard-sidebar-compact-bottom .dashboard-sidebar-user-trigger:hover {
+  border-color: rgba(255, 255, 255, 0.35) !important;
+  background: rgba(255, 255, 255, 0.2) !important;
+  color: #fff !important;
+}
+
 /* Compact navigation stays transparent and follows the light workspace palette. */
 html[data-interface-style='workspace'] .dashboard-sidebar-compact {
   background: transparent !important;
