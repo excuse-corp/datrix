@@ -8,10 +8,11 @@ their legacy stored query model during the compatibility window.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..scene.markdown import SemanticMarkdownParser
+from ..scene.markdown import SemanticMarkdownParser, split_scene_documents
 from ..schemas.snapshot import Snapshot
 
 
@@ -49,16 +50,15 @@ def build_query_capabilities(snapshot: Snapshot | dict[str, Any]) -> QueryCapabi
     schema_dimensions, schema_metrics = _schema_capabilities(schema)
 
     dimensions = (
-        declared.get("dimensions")
-        or legacy.get("dimensions")
-        or schema_dimensions
+        declared.get("dimensions") or legacy.get("dimensions") or schema_dimensions
     )
     metrics = declared.get("metrics") or legacy.get("metrics") or schema_metrics
     time = declared.get("time") or legacy.get("time") or {}
+    dictionary = _data_dictionary_metadata(runtime)
 
     return QueryCapabilities(
-        dimensions=_dict_items(dimensions),
-        metrics=_dict_items(metrics),
+        dimensions=_enrich_with_dictionary(_dict_items(dimensions), dictionary),
+        metrics=_enrich_with_dictionary(_dict_items(metrics), dictionary),
         time=time if isinstance(time, dict) else {},
         named_filters=named_filters(snapshot),
         value_mapping=_dict_value(runtime.get("value_mapping", {})),
@@ -123,9 +123,7 @@ def semantic_keys(snapshot: Snapshot | dict[str, Any]) -> set[str]:
 
 def _declared_from_semantic(runtime: dict[str, Any]) -> dict[str, Any]:
     documents = runtime.get("documents", {})
-    semantic_md = (
-        documents.get("semantic_md") if isinstance(documents, dict) else None
-    )
+    semantic_md = documents.get("semantic_md") if isinstance(documents, dict) else None
     if not isinstance(semantic_md, str) or not semantic_md.strip():
         return {}
     try:
@@ -137,6 +135,109 @@ def _declared_from_semantic(runtime: dict[str, Any]) -> dict[str, Any]:
         "metrics": [item.model_dump(mode="json") for item in config.metrics],
         "time": config.time.model_dump(mode="json"),
     }
+
+
+def _data_dictionary_metadata(runtime: dict[str, Any]) -> dict[str, dict[str, str]]:
+    documents = runtime.get("documents", {})
+    if not isinstance(documents, dict):
+        return {}
+    markdown = documents.get("data_dictionary_md")
+    if not isinstance(markdown, str) or not markdown.strip():
+        semantic_md = documents.get("semantic_md")
+        if not isinstance(semantic_md, str) or not semantic_md.strip():
+            return {}
+        try:
+            body = SemanticMarkdownParser().parse(semantic_md).body_markdown
+        except Exception:
+            return {}
+        markdown = split_scene_documents(body).get("data_dictionary_md", "")
+    if not isinstance(markdown, str) or not markdown.strip():
+        return {}
+
+    def normalize(value: str) -> str:
+        return re.sub(r"[\s_（）()：:.-]", "", value).lower()
+
+    def split_row(line: str) -> list[str]:
+        return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+    aliases = {
+        "field": {
+            "field",
+            "字段",
+            "字段名",
+            "目标字段",
+            "物理字段",
+            "column",
+            "columnname",
+        },
+        "semantic_key": {"semantickey", "语义键", "指标语义键"},
+        "name": {"name", "名称", "业务名称", "中文名", "中文字段", "含义", "业务含义"},
+        "unit": {"unit", "单位", "计量单位"},
+        "aggregation": {"aggregation", "聚合", "聚合方式", "计算口径"},
+        "grain": {"grain", "粒度", "统计粒度"},
+        "time_basis": {"timebasis", "时间依据", "统计时间依据"},
+    }
+    normalized_aliases = {
+        key: {normalize(alias) for alias in values} for key, values in aliases.items()
+    }
+    lines = [line.strip() for line in markdown.replace("\r\n", "\n").split("\n")]
+    result: dict[str, dict[str, str]] = {}
+    index = 0
+    while index + 1 < len(lines):
+        if not lines[index].startswith("|") or not lines[index + 1].startswith("|"):
+            index += 1
+            continue
+        headers = [normalize(cell) for cell in split_row(lines[index])]
+        divider = split_row(lines[index + 1])
+        if not headers or not all(re.fullmatch(r":?-{3,}:?", cell) for cell in divider):
+            index += 1
+            continue
+        mapped_headers: dict[str, int] = {}
+        for column, header in enumerate(headers):
+            for key, values in normalized_aliases.items():
+                if header in values:
+                    mapped_headers[key] = column
+                    break
+        field_index = mapped_headers.get("field")
+        if field_index is None:
+            index += 2
+            continue
+        row_index = index + 2
+        while row_index < len(lines) and lines[row_index].startswith("|"):
+            cells = split_row(lines[row_index])
+            if len(cells) == len(headers):
+                field_name = cells[field_index].strip("` ")
+                if field_name:
+                    result[field_name] = {
+                        key: cells[column].strip("` ")
+                        for key, column in mapped_headers.items()
+                        if column < len(cells) and cells[column].strip()
+                    }
+            row_index += 1
+        index = row_index
+    return result
+
+
+def _enrich_with_dictionary(
+    items: list[dict[str, Any]], dictionary: dict[str, dict[str, str]]
+) -> list[dict[str, Any]]:
+    enriched = []
+    for item in items:
+        value = dict(item)
+        field_name = str(value.get("field") or value.get("key") or "")
+        metadata = dictionary.get(field_name, {})
+        if metadata:
+            if metadata.get("semantic_key") and not value.get("semantic_key"):
+                value["semantic_key"] = metadata["semantic_key"]
+            if metadata.get("name") and (
+                not value.get("name") or value.get("name") == value.get("key")
+            ):
+                value["name"] = metadata["name"]
+            for key in ("unit", "aggregation", "grain", "time_basis"):
+                if metadata.get(key) and not value.get(key):
+                    value[key] = metadata[key]
+        enriched.append(value)
+    return enriched
 
 
 def _legacy_query_model(
@@ -154,11 +255,15 @@ def _legacy_query_model(
     }
 
 
-def _schema_version(snapshot: Snapshot | dict[str, Any], runtime: dict[str, Any]) -> str:
+def _schema_version(
+    snapshot: Snapshot | dict[str, Any], runtime: dict[str, Any]
+) -> str:
     if isinstance(snapshot, Snapshot):
         return str(snapshot.schema_version or runtime.get("schema_version") or "")
     if isinstance(snapshot, dict):
-        return str(snapshot.get("schema_version") or runtime.get("schema_version") or "")
+        return str(
+            snapshot.get("schema_version") or runtime.get("schema_version") or ""
+        )
     return str(runtime.get("schema_version") or "")
 
 

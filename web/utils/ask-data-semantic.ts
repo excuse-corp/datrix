@@ -86,6 +86,7 @@ export const queryLimitDefinitions: Array<{
 export type SceneEditorValues = {
   name: string;
   description: string;
+  domain_id: string;
   data_source_name: string;
   view_name: string;
   data_dictionary_md: string;
@@ -117,6 +118,7 @@ export const buildSemanticMarkdown = (sceneId: string, values: SceneEditorValues
     scene_id: sceneId,
     name: values.name.trim(),
     description: values.description.trim(),
+    domain_id: values.domain_id?.trim() || null,
     keywords: [values.name.trim()],
     data_source: values.data_source_name.trim(),
     view: values.view_name.trim(),
@@ -167,6 +169,7 @@ export const parseSemanticMarkdown = (document: string): Partial<SceneEditorValu
     : body;
 
   return {
+    domain_id: typeof config.domain_id === 'string' ? config.domain_id : '',
     data_dictionary_md: dictionary,
     business_semantics_md: semantics,
     query_limits: normalizeQueryLimits(
@@ -177,5 +180,6 @@ export const parseSemanticMarkdown = (document: string): Partial<SceneEditorValu
 
 export const defaultSceneEditorValues: Partial<SceneEditorValues> = {
   data_source_name: defaultAskDataSourceName,
+  domain_id: '',
   query_limits: defaultQueryLimits,
 };

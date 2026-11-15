@@ -911,6 +911,7 @@ def configure_authentication(
         access_token = config.issue(user, session.session_id, auth_method="cas", provider_id=provider_id)
         response = RedirectResponse(return_to, status_code=302)
         response.set_cookie(config.cookie_name, access_token, max_age=config.ttl_seconds, httponly=True, secure=config.cookie_secure, samesite="lax", path="/")
+        response.set_cookie(f"{config.cookie_name}_refresh", session.refresh_token, max_age=config.refresh_ttl_seconds, httponly=True, secure=config.cookie_secure, samesite="lax", path="/api/v1/auth")
         return response
 
     @router.post("/refresh")

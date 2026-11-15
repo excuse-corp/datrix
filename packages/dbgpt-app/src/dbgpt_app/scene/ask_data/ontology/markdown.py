@@ -77,9 +77,7 @@ _FORBIDDEN_TERMS = re.compile(
     re.IGNORECASE,
 )
 
-_FRONTMATTER = re.compile(
-    r"\A\ufeff?\s*---\s*\n.*?\n\s*---\s*(?:\n|\Z)", re.DOTALL
-)
+_FRONTMATTER = re.compile(r"\A\ufeff?\s*---\s*\n.*?\n\s*---\s*(?:\n|\Z)", re.DOTALL)
 _EMPTY_CONFLICT_VALUES = {"", "无", "none", "n/a", "na", "-"}
 _NON_BUSINESS_SECTION_HEADERS = {
     "待管理员确认事项",
@@ -289,6 +287,7 @@ class OntologyMarkdownParser:
                     aliases=self._aliases(cell(row, "别名")),
                     description=cell(row, "定义", "说明"),
                     data={
+                        "domain_id": cell(row, "领域", "业务领域"),
                         "analysis_role": cell(row, "业务分析角色", "分析角色"),
                         "source_scenes": self._aliases(cell(row, "来源场景", "场景")),
                         "evidence": cell(row, "证据"),
@@ -318,8 +317,13 @@ class OntologyMarkdownParser:
                     type="metric",
                     name=name,
                     data={
+                        "domain_id": cell(row, "领域", "业务领域"),
                         "entity": entity,
                         "unit": cell(row, "单位"),
+                        "aggregation": cell(row, "聚合方式", "聚合"),
+                        "grain": self._aliases(cell(row, "统计粒度", "粒度")),
+                        "time_basis": cell(row, "时间依据", "统计时间依据"),
+                        "comparability": cell(row, "可比性", "比较条件"),
                         "formula": cell(row, "计算公式", "公式"),
                         "zero_policy": cell(row, "零值处理", "零值策略"),
                         "source_scene": source_scene,
@@ -491,6 +495,58 @@ class OntologyMarkdownParser:
                     )
                 )
                 continue
+            status = cell(row, "状态") or "candidate"
+            if status not in {
+                "candidate",
+                "in_review",
+                "confirmed",
+                "rejected",
+                "deprecated",
+            }:
+                issues.append(
+                    OntologyValidationIssue(
+                        code="CROSS_SCENE_STATUS_INVALID",
+                        message=f"跨场景路径 {identifier} 的状态无效：{status}。",
+                        line=line,
+                        path=identifier,
+                    )
+                )
+            scenes = self._aliases(cell(row, "涉及场景", "场景"))
+            join_keys = self._aliases(cell(row, "关联键"))
+            mapping_source = cell(row, "映射依据")
+            left_time_basis = cell(row, "左侧时间依据")
+            right_time_basis = cell(row, "右侧时间依据")
+            time_conditions = self._aliases(cell(row, "时间对齐条件"))
+            grain_alignment = self._aliases(cell(row, "粒度对齐条件"))
+            allowed_analyses = self._aliases(cell(row, "允许分析"))
+            forbidden_inferences = self._aliases(cell(row, "禁止推断"))
+            evidence = cell(row, "证据")
+            if status == "confirmed":
+                required = {
+                    "恰好两个不同的涉及场景": len(set(scenes)) == 2,
+                    "关系类型": bool(cell(row, "关系类型")),
+                    "关联键": bool(join_keys),
+                    "映射依据": bool(mapping_source),
+                    "左右时间依据": bool(left_time_basis and right_time_basis),
+                    "时间对齐条件": bool(time_conditions),
+                    "粒度对齐条件": bool(grain_alignment),
+                    "允许分析": bool(allowed_analyses),
+                    "禁止推断": bool(forbidden_inferences),
+                    "证据": bool(evidence),
+                }
+                missing = [name for name, present in required.items() if not present]
+                if missing:
+                    issues.append(
+                        OntologyValidationIssue(
+                            code="CONFIRMED_BRIDGE_INCOMPLETE",
+                            message=(
+                                f"已确认跨场景路径 {identifier} 缺少必要的分析契约信息："
+                                f"{'、'.join(missing)}。"
+                            ),
+                            line=line,
+                            path=identifier,
+                        )
+                    )
             add_node(
                 OntologyNode(
                     id=identifier,
@@ -498,10 +554,20 @@ class OntologyMarkdownParser:
                     name=topic,
                     description=cell(row, "推荐分析方式", "推荐分析"),
                     data={
-                        "scenes": self._aliases(cell(row, "涉及场景", "场景")),
+                        "status": status,
+                        "relation_type": cell(row, "关系类型"),
+                        "scenes": scenes,
                         "entities": self._aliases(cell(row, "关联实体", "实体")),
-                        "join_keys": self._aliases(cell(row, "关联键")),
+                        "join_keys": join_keys,
+                        "mapping_source": mapping_source,
+                        "left_time_basis": left_time_basis,
+                        "right_time_basis": right_time_basis,
+                        "time_alignment_conditions": time_conditions,
+                        "grain_alignment": grain_alignment,
+                        "allowed_analyses": allowed_analyses,
+                        "forbidden_inferences": forbidden_inferences,
                         "caveats": self._aliases(cell(row, "注意事项", "说明")),
+                        "evidence": evidence,
                     },
                 ),
                 line,
@@ -520,8 +586,63 @@ class OntologyMarkdownParser:
                     )
                 )
                 continue
+            if left == right:
+                issues.append(
+                    OntologyValidationIssue(
+                        code="CROSS_SCENE_ENDPOINTS_INVALID",
+                        message=f"跨场景关联 {identifier} 的左右场景必须不同。",
+                        line=line,
+                        path=identifier,
+                    )
+                )
             business_key = cell(row, "关联键")
             grain = cell(row, "粒度")
+            status = cell(row, "状态") or "candidate"
+            if status not in {
+                "candidate",
+                "in_review",
+                "confirmed",
+                "rejected",
+                "deprecated",
+            }:
+                issues.append(
+                    OntologyValidationIssue(
+                        code="CROSS_SCENE_STATUS_INVALID",
+                        message=f"跨场景关联 {identifier} 的状态无效：{status}。",
+                        line=line,
+                        path=identifier,
+                    )
+                )
+            bridge_contract = {
+                "业务实体": bool(cell(row, "业务实体", "实体")),
+                "关系类型": bool(cell(row, "关系类型")),
+                "关联键": bool(business_key),
+                "映射依据": bool(cell(row, "映射依据")),
+                "左右时间依据": bool(
+                    cell(row, "左侧时间依据") and cell(row, "右侧时间依据")
+                ),
+                "时间对齐条件": bool(cell(row, "时间对齐条件")),
+                "粒度对齐条件": bool(cell(row, "粒度对齐条件")),
+                "允许分析": bool(cell(row, "允许分析")),
+                "禁止推断": bool(cell(row, "禁止推断")),
+                "证据": bool(cell(row, "证据")),
+            }
+            if status == "confirmed":
+                missing = [
+                    name for name, present in bridge_contract.items() if not present
+                ]
+                if missing:
+                    issues.append(
+                        OntologyValidationIssue(
+                            code="CONFIRMED_BRIDGE_INCOMPLETE",
+                            message=(
+                                f"已确认跨场景关联 {identifier} 缺少必要的分析契约信息："
+                                f"{'、'.join(missing)}。"
+                            ),
+                            line=line,
+                            path=identifier,
+                        )
+                    )
             add_scene(left, line)
             add_scene(right, line)
             self._add_edge(
@@ -534,9 +655,22 @@ class OntologyMarkdownParser:
                     type="cross_scene_join",
                     name="跨场景关联",
                     data={
+                        "status": status,
+                        "scenes": [left, right],
                         "entity": cell(row, "业务实体", "实体"),
                         "business_key": business_key,
                         "grain": grain,
+                        "relation_type": cell(row, "关系类型"),
+                        "mapping_source": cell(row, "映射依据"),
+                        "left_time_basis": cell(row, "左侧时间依据"),
+                        "right_time_basis": cell(row, "右侧时间依据"),
+                        "time_alignment_conditions": self._aliases(
+                            cell(row, "时间对齐条件")
+                        ),
+                        "grain_alignment": self._aliases(cell(row, "粒度对齐条件")),
+                        "allowed_analyses": self._aliases(cell(row, "允许分析")),
+                        "forbidden_inferences": self._aliases(cell(row, "禁止推断")),
+                        "evidence": cell(row, "证据"),
                     },
                 ),
                 line,

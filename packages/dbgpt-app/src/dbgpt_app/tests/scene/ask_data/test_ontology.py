@@ -8,7 +8,11 @@ from dbgpt_app.scene.ask_data.ontology import (
     LEGACY_DEFAULT_ONTOLOGY_MARKDOWN,
     OntologyMarkdownParser,
 )
-from dbgpt_app.scene.ask_data.ontology.fragments import source_snapshot_refs
+from dbgpt_app.scene.ask_data.ontology.context import relevant_ontology_projection
+from dbgpt_app.scene.ask_data.ontology.fragments import (
+    build_scene_fragment,
+    source_snapshot_refs,
+)
 from dbgpt_app.scene.ask_data.ontology.generator import (
     generate_ontology_markdown_from_scene_sources,
     scene_semantic_keys_from_source,
@@ -17,19 +21,26 @@ from dbgpt_app.scene.ask_data.ontology.llm_generator import (
     OntologyLLMGenerationError,
     OntologyLLMGenerator,
 )
-from dbgpt_app.scene.ask_data.ontology.llm_schemas import OntologySceneSource
-from dbgpt_app.scene.ask_data.ontology.llm_validator import OntologyLLMValidationError
+from dbgpt_app.scene.ask_data.ontology.llm_schemas import (
+    OntologySceneSource,
+    SceneOntologyExtraction,
+)
+from dbgpt_app.scene.ask_data.ontology.llm_validator import (
+    OntologyLLMValidationError,
+    validate_scene_extraction,
+)
 from dbgpt_app.scene.ask_data.ontology.markdown import with_managed_frontmatter
 from dbgpt_app.scene.ask_data.ontology.repository import InMemoryOntologyRepository
-from dbgpt_app.scene.ask_data.ontology.schemas import OntologyRevisionStatus
-from dbgpt_app.scene.ask_data.ontology.context import relevant_ontology_projection
+from dbgpt_app.scene.ask_data.ontology.schemas import (
+    OntologyRevisionStatus,
+    OntologySnapshot,
+)
 from dbgpt_app.scene.ask_data.ontology.service import OntologyLifecycleService
 from dbgpt_app.scene.ask_data.schemas.snapshot import (
     Snapshot,
     SnapshotSourceHashes,
     SnapshotStatus,
 )
-from dbgpt_app.scene.ask_data.ontology.schemas import OntologySnapshot
 
 
 def test_default_ontology_is_empty_until_scenes_are_synchronized():
@@ -189,6 +200,41 @@ def test_source_refresh_must_be_accepted_before_publishing_active_scenes():
     assert snapshot.source_scene_snapshots[0]["semantic_md_hash"] == "sha256:semantic"
 
 
+def test_scene_fragment_only_adds_metrics_declared_in_semantic_document():
+    semantic_md = """---
+schema_version: "1"
+scene_id: contract_analysis
+name: 合同分析
+data_source: dataman_data
+view: public.contracts
+metrics:
+  - key: contract_amount
+    name: 合同金额
+    field: amount
+    aggregation: sum
+---
+"""
+    snapshot = _scene_snapshot("snap_contract_v1").model_copy(
+        update={
+            "routing_projection": {
+                "name": "合同分析",
+                "metrics": [
+                    {"key": "contract_amount", "name": "合同金额"},
+                    {"key": "sum_amount", "name": "金额合计"},
+                    {"key": "count_rows", "name": "记录数"},
+                ],
+            },
+            "runtime_config": {"documents": {"semantic_md": semantic_md}},
+        }
+    )
+
+    graph = build_scene_fragment(snapshot)
+
+    assert {node.id for node in graph.nodes if node.type == "metric"} == {
+        "contract_analysis__contract_amount"
+    }
+
+
 def test_source_manifest_uses_semantic_md_hash_name():
     scene = _scene_snapshot("snap_contract_v1")
 
@@ -257,13 +303,29 @@ def test_runtime_ontology_projection_hides_unassigned_and_unscoped_sources():
         },
         prompt_projection_json={
             "entities": [
-                {"id": "contract_entity", "name": "合同", "data": {"source_scenes": ["contracts"]}},
-                {"id": "payroll_entity", "name": "薪酬", "data": {"source_scenes": ["payroll"]}},
+                {
+                    "id": "contract_entity",
+                    "name": "合同",
+                    "data": {"source_scenes": ["contracts"]},
+                },
+                {
+                    "id": "payroll_entity",
+                    "name": "薪酬",
+                    "data": {"source_scenes": ["payroll"]},
+                },
                 {"id": "unscoped_entity", "name": "未标记实体", "data": {}},
             ],
             "metrics": [
-                {"id": "contract_amount", "name": "合同金额", "data": {"source_scene": "contracts"}},
-                {"id": "payroll_amount", "name": "薪酬金额", "data": {"source_scene": "payroll"}},
+                {
+                    "id": "contract_amount",
+                    "name": "合同金额",
+                    "data": {"source_scene": "contracts"},
+                },
+                {
+                    "id": "payroll_amount",
+                    "name": "薪酬金额",
+                    "data": {"source_scene": "payroll"},
+                },
             ],
             "analysis_dimensions": [],
             "metric_relations": [],
@@ -295,6 +357,317 @@ def test_runtime_ontology_projection_hides_unassigned_and_unscoped_sources():
     assert projection["clarification_rules"] == []
 
 
+def _cross_scene_bridge_markdown(status: str = "candidate") -> str:
+    return f"""# 企业业务本体
+
+## 跨场景分析路径
+
+| ID | 状态 | 关系类型 | 分析主题 | 涉及场景 | 关联实体 | 关联键 | 映射依据 | 左侧时间依据 | 右侧时间依据 | 时间对齐条件 | 粒度对齐条件 | 推荐分析方式 | 允许分析 | 禁止推断 | 注意事项 | 证据 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| project_finance_bridge | {status} | reconciles_with | 信息化项目经费执行与财务支付 | project, finance | project | project_code | 项目主数据映射表 | 项目执行年度 | 财务支付日期 | 同一财年 | 同一项目编码、年度 | 对比项目经费执行与财务支付差异 | 展示差异并解释口径 | 不得将预算执行直接等同于已支付 | 两指标确认时点不同 | project: 项目语义文档；finance: 财务口径文档 |
+
+## 跨场景关联
+
+| ID | 状态 | 关系类型 | 左侧场景 | 右侧场景 | 业务实体 | 关联键 | 映射依据 | 左侧时间依据 | 右侧时间依据 | 时间对齐条件 | 粒度 | 粒度对齐条件 | 业务含义 | 允许分析 | 禁止推断 | 证据 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| project_finance_bridge_join | {status} | reconciles_with | project | finance | project | project_code | 项目主数据映射表 | 项目执行年度 | 财务支付日期 | 同一财年 | 年 | 同一项目编码、年度 | 分析项目经费执行与支付差异 | 展示差异并解释口径 | 不得视为同一指标 | 项目主数据映射与场景语义文档 |
+"""
+
+
+def test_markdown_compiles_bridge_status_and_analysis_contract():
+    result = OntologyMarkdownParser().compile(_cross_scene_bridge_markdown())
+
+    path = result.prompt_projection["cross_scene_analysis_paths"][0]
+    edge = result.prompt_projection["cross_scene_joins"][0]
+    assert result.valid
+    assert path["data"]["status"] == "candidate"
+    assert path["data"]["mapping_source"] == "项目主数据映射表"
+    assert path["data"]["time_alignment_conditions"] == ["同一财年"]
+    assert path["data"]["forbidden_inferences"] == ["不得将预算执行直接等同于已支付"]
+    assert edge["data"]["status"] == "candidate"
+    assert edge["data"]["scenes"] == ["project", "finance"]
+
+
+def test_incomplete_confirmed_bridge_cannot_be_published():
+    markdown = _cross_scene_bridge_markdown().replace(
+        "| project_finance_bridge | candidate |",
+        "| project_finance_bridge | confirmed |",
+    )
+    markdown = markdown.replace("项目主数据映射表", "", 1)
+
+    result = OntologyMarkdownParser().compile(markdown)
+
+    assert not result.valid
+    assert any(issue.code == "CONFIRMED_BRIDGE_INCOMPLETE" for issue in result.issues)
+
+
+def test_candidate_cross_scene_bridge_is_never_recalled_for_analysis():
+    compilation = OntologyMarkdownParser().compile(_cross_scene_bridge_markdown())
+    snapshot = OntologySnapshot(
+        snapshot_id="onto_bridge_candidate",
+        ontology_id="ontology",
+        revision=1,
+        status="active",
+        content_hash="sha256:bridge",
+        graph_json=compilation.graph.model_dump(mode="json"),
+        prompt_projection_json=compilation.prompt_projection,
+    )
+
+    projection = relevant_ontology_projection(
+        snapshot,
+        "信息化项目经费执行与财务支付差异",
+        scene_ids=["project", "finance"],
+        result_profiles=[
+            {
+                "scene_id": "project",
+                "grain": ["project_id", "fiscal_year"],
+                "time_grain": "year",
+                "time_basis": "execution_year",
+            },
+            {
+                "scene_id": "finance",
+                "grain": ["project_id", "month"],
+                "time_grain": "month",
+                "time_basis": "payment_date",
+            },
+        ],
+    )
+
+    assert projection["cross_scene_analysis_paths"] == []
+    assert not any(
+        node["id"] == "project_finance_bridge" for node in projection["nodes"]
+    )
+    assert not any(edge["type"] == "cross_scene_join" for edge in projection["edges"])
+
+
+def test_confirmed_bridge_is_recalled_with_its_analysis_constraints():
+    compilation = OntologyMarkdownParser().compile(
+        _cross_scene_bridge_markdown("confirmed")
+    )
+    snapshot = OntologySnapshot(
+        snapshot_id="onto_bridge_confirmed",
+        ontology_id="ontology",
+        revision=1,
+        status="active",
+        content_hash="sha256:bridge",
+        graph_json=compilation.graph.model_dump(mode="json"),
+        prompt_projection_json=compilation.prompt_projection,
+    )
+
+    time_range = {
+        "start": "2025-01-01T00:00:00+00:00",
+        "end_exclusive": "2026-01-01T00:00:00+00:00",
+        "timezone": "UTC",
+    }
+    result_columns = [
+        {"scene_id": "project", "key": "execution_amount", "type": "metric"},
+        {"scene_id": "finance", "key": "paid_amount", "type": "metric"},
+    ]
+    result_profiles = [
+        {
+            "scene_id": "project",
+            "grain": ["project_id", "fiscal_year"],
+            "time_grain": "year",
+            "time_basis": "项目执行年度",
+            "time_range": time_range,
+        },
+        {
+            "scene_id": "finance",
+            "grain": ["project_id", "fiscal_year"],
+            "time_grain": "year",
+            "time_basis": "财务支付日期",
+            "time_range": time_range,
+        },
+    ]
+    projection = relevant_ontology_projection(
+        snapshot,
+        "信息化项目经费执行与财务支付差异",
+        scene_ids=["project", "finance"],
+        result_columns=result_columns,
+        result_profiles=result_profiles,
+    )
+
+    assert compilation.valid
+    assert len(projection["cross_scene_analysis_paths"]) == 1
+    assert projection["cross_scene_analysis_paths"][0]["data"]["mapping_source"]
+    assert (
+        projection["cross_scene_analysis_paths"][0]["data"]["alignment_status"]
+        == "verified"
+    )
+    assert (
+        len(projection["cross_scene_analysis_paths"][0]["data"]["result_profiles"]) == 2
+    )
+    assert any(edge["type"] == "cross_scene_join" for edge in projection["edges"])
+
+    authorized_projection = relevant_ontology_projection(
+        snapshot,
+        "信息化项目经费执行与财务支付差异",
+        scene_ids=["project", "finance"],
+        result_columns=result_columns,
+        result_profiles=result_profiles,
+        authorized_scene_ids=["project", "finance"],
+        is_platform_admin=False,
+    )
+    restricted_projection = relevant_ontology_projection(
+        snapshot,
+        "信息化项目经费执行与财务支付差异",
+        scene_ids=["project", "finance"],
+        result_columns=result_columns,
+        result_profiles=result_profiles,
+        authorized_scene_ids=["project"],
+        is_platform_admin=False,
+    )
+    assert len(authorized_projection["cross_scene_analysis_paths"]) == 1
+    assert restricted_projection["cross_scene_analysis_paths"] == []
+
+
+def test_confirmed_bridge_is_not_recalled_when_result_grain_or_time_does_not_align():
+    compilation = OntologyMarkdownParser().compile(
+        _cross_scene_bridge_markdown("confirmed")
+    )
+    snapshot = OntologySnapshot(
+        snapshot_id="onto_bridge_misaligned",
+        ontology_id="ontology",
+        revision=1,
+        status="active",
+        content_hash="sha256:bridge",
+        graph_json=compilation.graph.model_dump(mode="json"),
+        prompt_projection_json=compilation.prompt_projection,
+    )
+
+    projection = relevant_ontology_projection(
+        snapshot,
+        "信息化项目经费执行与财务支付差异",
+        scene_ids=["project", "finance"],
+        result_columns=[
+            {"scene_id": "project", "key": "execution_amount", "type": "metric"},
+            {"scene_id": "finance", "key": "paid_amount", "type": "metric"},
+        ],
+        result_profiles=[
+            {
+                "scene_id": "project",
+                "grain": ["project_id", "fiscal_year"],
+                "time_grain": "year",
+                "time_basis": "项目执行年度",
+                "time_range": {
+                    "start": "2025-01-01T00:00:00+00:00",
+                    "end_exclusive": "2026-01-01T00:00:00+00:00",
+                    "timezone": "UTC",
+                },
+            },
+            {
+                "scene_id": "finance",
+                "grain": ["project_id", "month"],
+                "time_grain": "month",
+                "time_basis": "财务支付日期",
+                "time_range": {
+                    "start": "2025-02-01T00:00:00+00:00",
+                    "end_exclusive": "2025-03-01T00:00:00+00:00",
+                    "timezone": "UTC",
+                },
+            },
+        ],
+    )
+
+    assert projection["cross_scene_analysis_paths"] == []
+    assert not any(edge["type"] == "cross_scene_join" for edge in projection["edges"])
+
+
+def test_result_metric_requires_an_explicit_scene_binding():
+    snapshot = OntologySnapshot(
+        snapshot_id="onto_binding",
+        ontology_id="ontology",
+        revision=1,
+        status="active",
+        content_hash="sha256:binding",
+        graph_json={
+            "nodes": [
+                {"id": "projects", "type": "scene", "name": "项目场景"},
+                {"id": "project.revenue", "type": "metric", "name": "项目收入"},
+            ],
+            "edges": [
+                {
+                    "id": "project_revenue_binding",
+                    "source": "projects",
+                    "target": "project.revenue",
+                    "type": "scene_binding",
+                    "name": "绑定",
+                    "data": {"semantic_key": "project.revenue"},
+                }
+            ],
+        },
+        prompt_projection_json={
+            "entities": [],
+            "metrics": [{"id": "project.revenue", "name": "项目收入", "data": {}}],
+            "edges": [
+                {
+                    "id": "project_revenue_binding",
+                    "source": "projects",
+                    "target": "project.revenue",
+                    "type": "scene_binding",
+                    "name": "绑定",
+                    "data": {"semantic_key": "project.revenue"},
+                }
+            ],
+            "analysis_dimensions": [],
+            "metric_relations": [],
+            "cross_scene_analysis_paths": [],
+            "result_analysis_rules": [],
+        },
+    )
+
+    projection = relevant_ontology_projection(
+        snapshot,
+        "项目收入",
+        scene_ids=["projects"],
+        result_columns=[
+            {
+                "key": "revenue_total",
+                "semantic_key": "project.revenue",
+                "type": "metric",
+            }
+        ],
+    )
+
+    assert projection["matched_bindings"][0]["matched_by"] == "semantic_key"
+    assert projection["matched_bindings"][0]["confidence"] == "exact"
+    assert projection["unmatched_columns"] == []
+
+
+def test_metric_id_collision_without_binding_stays_unmatched():
+    snapshot = OntologySnapshot(
+        snapshot_id="onto_unbound",
+        ontology_id="ontology",
+        revision=1,
+        status="active",
+        content_hash="sha256:unbound",
+        graph_json={
+            "nodes": [
+                {"id": "revenue", "type": "metric", "name": "收入"},
+            ],
+            "edges": [],
+        },
+        prompt_projection_json={
+            "entities": [],
+            "metrics": [{"id": "revenue", "name": "收入", "data": {}}],
+            "edges": [],
+            "analysis_dimensions": [],
+            "metric_relations": [],
+            "cross_scene_analysis_paths": [],
+            "result_analysis_rules": [],
+        },
+    )
+
+    projection = relevant_ontology_projection(
+        snapshot,
+        "收入",
+        result_columns=[{"key": "revenue", "type": "metric"}],
+    )
+
+    assert projection["matched_bindings"] == []
+    assert projection["unmatched_columns"] == ["revenue"]
+
+
 def test_scene_semantic_keys_include_business_binding_aliases():
     scene = _scene_snapshot("snap_project_v2").model_copy(
         update={"scene_id": "project_analysis", "revision_id": "2"}
@@ -306,15 +679,72 @@ def test_scene_semantic_keys_include_business_binding_aliases():
     )
 
     assert {
+        "contract.contract_amount",
+        "contract.contract_paid_amount",
+        "contract.budget",
+    }.issubset(keys)
+    assert not {
         "project.count",
-        "project.contract_amount",
-        "project.contract_paid_amount",
-        "project.budget_amount",
         "project.contract_paid_ratio",
         "project.contract_unpaid_balance",
         "project.amount_missing_count",
         "project.date_missing_count",
-    }.issubset(keys)
+    }.intersection(keys)
+
+
+def test_rules_generator_keeps_same_named_entities_in_domain_namespaces():
+    semantic_template = """---
+schema_version: "1"
+scene_id: {scene_id}
+name: 项目分析
+domain_id: {domain_id}
+data_source: ecology
+view: dbo.vw_projects
+dimensions:
+  - key: project_id
+    field: project_id
+metrics:
+  - key: project_amount
+    field: project_amount
+    aggregation: sum
+time:
+  field: updated_at
+  required: false
+---
+
+# 项目分析
+
+## 业务语义
+
+项目是业务管理对象。
+"""
+    sources = []
+    for scene_id, domain_id in (
+        ("project_analysis", "project"),
+        ("finance_project_analysis", "finance"),
+    ):
+        snapshot = _scene_snapshot(f"snap_{scene_id}").model_copy(
+            update={"scene_id": scene_id}
+        )
+        sources.append(
+            {
+                "snapshot": snapshot,
+                "semantic_md": semantic_template.format(
+                    scene_id=scene_id, domain_id=domain_id
+                ),
+            }
+        )
+
+    markdown = generate_ontology_markdown_from_scene_sources(sources, revision=2)
+    compilation = OntologyMarkdownParser().compile(markdown)
+    entity_ids = {node.id for node in compilation.graph.nodes if node.type == "entity"}
+    metric_ids = {node.id for node in compilation.graph.nodes if node.type == "metric"}
+
+    assert "project.project" in entity_ids
+    assert "finance.project" in entity_ids
+    assert "project.project.amount" in metric_ids
+    assert "finance.project.amount" in metric_ids
+    assert compilation.valid
 
 
 def test_publish_validation_accepts_business_scene_binding_aliases():
@@ -323,9 +753,27 @@ def test_publish_validation_accepts_business_scene_binding_aliases():
     scene = _scene_snapshot("snap_project_v2").model_copy(
         update={"scene_id": "project_analysis", "revision_id": "2"}
     )
+    semantic_md = _project_semantic_markdown_without_query_model().replace(
+        "view: sync.pcm_project_info\n---",
+        """view: sync.pcm_project_info
+metrics:
+  - key: count
+    name: 项目数量
+    field: project_id
+    aggregation: count_distinct
+  - key: contract_amount
+    name: 合同金额
+    field: project_contract_amount
+    aggregation: sum
+  - key: contract_paid_ratio
+    name: 合同已付比例
+    field: contract_paid_ratio
+    aggregation: none
+---""",
+    )
     source = {
         "snapshot": scene,
-        "semantic_md": _project_semantic_markdown_without_query_model(),
+        "semantic_md": semantic_md,
     }
     saved = service.save_draft(
         markdown=(
@@ -420,20 +868,16 @@ view: dbo.vw_contracts
         [{"snapshot": scene, "semantic_md": semantic_md}], revision=1
     )
 
-    expected = (
-        "| contract_amount | 合同金额 | contract | 元 |  | "
-        "contract_analysis | 无 |"
-    )
-    assert expected in markdown
+    assert "| contract_amount | 合同金额 |" not in markdown
     assert not markdown.lstrip().startswith("---")
     assert "草稿" not in markdown
     assert "人工确认" not in markdown
-    assert "| 状态 |" not in markdown
-    assert "| contract_analysis | contract_amount | contract_amount |" in markdown
+    assert "| ID | 状态 | 关系类型 | 左侧场景 |" in markdown
+    assert "| contract_analysis | contract_amount | contract_amount |" not in markdown
     assert "| contract_analysis | contract | contract |" not in markdown
 
 
-def test_scene_ontology_draft_reads_chinese_dictionary_headers_for_metrics():
+def test_scene_ontology_draft_does_not_infer_metrics_from_dictionary_fields():
     scene = _scene_snapshot("snap_project_v1").model_copy(
         update={"scene_id": "project_analysis"}
     )
@@ -464,12 +908,55 @@ view: sync.pcm_project_info
         [{"snapshot": scene, "semantic_md": semantic_md}], revision=1
     )
 
-    assert "| project_contract_amount | 项目合同金额 | project | 元 |" in markdown
-    assert "| contract_paid_amount | 合同已付金额 | contract | 元 |" in markdown
+    assert "project_contract_amount | 项目合同金额" not in markdown
+    assert "contract_paid_amount | 合同已付金额" not in markdown
+    assert "| project_analysis | project_contract_amount |" not in markdown
+
+
+def test_ontology_draft_preserves_custom_dictionary_semantic_key_and_metric_contract():
+    scene = _scene_snapshot("snap_finance_v1").model_copy(
+        update={"scene_id": "finance_analysis"}
+    )
+    semantic_md = """---
+schema_version: "1"
+scene_id: finance_analysis
+name: 财务分析
+domain_id: finance
+data_source: dataman_data
+view: sync.vw_contract_payment
+metrics:
+  - key: paid_amount
+    name: 合同支付金额
+    field: paid_amount
+    aggregation: sum
+---
+<!-- dataman:document=data-dictionary -->
+# 数据字典
+
+| 字段 | 业务名称 | 语义键 | 单位 | 聚合方式 | 粒度 | 时间依据 |
+| --- | --- | --- | --- | --- | --- | --- |
+| paid_amount | 合同支付金额 | finance.contract.paid_amount | 元 | sum | 合同 | payment_date |
+
+<!-- dataman:document=business-semantics -->
+# 业务语义说明
+
+合同支付金额按实际支付日期累计。
+"""
+
+    markdown = generate_ontology_markdown_from_scene_sources(
+        [{"snapshot": scene, "semantic_md": semantic_md}], revision=1
+    )
+    keys = scene_semantic_keys_from_source(
+        {"snapshot": scene, "semantic_md": semantic_md}
+    )
+
     assert (
-        "| project_analysis | project_contract_amount | "
-        "project_contract_amount |"
+        "| finance_analysis | finance.contract.paid_amount | "
+        "finance.contract.paid_amount |"
     ) in markdown
+    assert "| finance.contract.paid_amount | 合同支付金额 | finance |" in markdown
+    assert "| 元 | sum | 合同 | payment_date |" in markdown
+    assert "finance.contract.paid_amount" in keys
 
 
 def test_compile_check_treats_metric_conflict_note_as_business_context():
@@ -629,9 +1116,7 @@ async def test_llm_generator_outputs_compilable_analysis_markdown():
     async def generate(_: str) -> str:
         return next(responses)
 
-    result = await OntologyLLMGenerator(generate).generate(
-        [_llm_source()], revision=1
-    )
+    result = await OntologyLLMGenerator(generate).generate([_llm_source()], revision=1)
 
     assert result.mode == "llm"
     assert result.entity_count == 1
@@ -674,6 +1159,32 @@ async def test_llm_generator_rejects_unknown_metric_entity():
     assert exc_info.value.code == "ONTOLOGY_LLM_REFERENCE_INVALID"
 
 
+def test_llm_metric_must_be_explicitly_named_in_semantic_document():
+    extraction = _scene_extraction()
+    extraction["metrics"][0]["name"] = "合同支付率"
+
+    with pytest.raises(OntologyLLMValidationError) as exc_info:
+        validate_scene_extraction(
+            SceneOntologyExtraction.model_validate(extraction),
+            _llm_source(),
+        )
+
+    assert exc_info.value.code == "ONTOLOGY_METRIC_SOURCE_INVALID"
+
+
+def test_llm_metric_cannot_be_supported_by_dictionary_evidence():
+    extraction = _scene_extraction()
+    extraction["metrics"][0]["evidence"][0]["quote"] = "amount 合同金额 decimal"
+
+    with pytest.raises(OntologyLLMValidationError) as exc_info:
+        validate_scene_extraction(
+            SceneOntologyExtraction.model_validate(extraction),
+            _llm_source(),
+        )
+
+    assert exc_info.value.code == "ONTOLOGY_METRIC_SOURCE_INVALID"
+
+
 @pytest.mark.asyncio
 async def test_llm_generator_retries_global_synthesis_reference_errors():
     invalid = _global_synthesis()
@@ -701,9 +1212,7 @@ async def test_llm_generator_retries_global_synthesis_reference_errors():
         prompts.append(prompt)
         return next(responses)
 
-    result = await OntologyLLMGenerator(generate).generate(
-        [_llm_source()], revision=1
-    )
+    result = await OntologyLLMGenerator(generate).generate([_llm_source()], revision=1)
 
     assert result.mode == "llm"
     assert len(prompts) == 3
@@ -736,6 +1245,7 @@ view: dbo.vw_contracts
 # 业务语义说明
 
 一行表示一份合同。
+合同金额指合同签约金额。
 """,
         name="合同分析",
         description="合同金额和付款分析",
@@ -747,6 +1257,11 @@ def _scene_extraction() -> dict:
         "scene_id": "contract_analysis",
         "quote": "一行表示一份合同。",
         "section": "业务语义说明",
+    }
+    metric_evidence = {
+        "scene_id": "contract_analysis",
+        "quote": "合同金额指合同签约金额。",
+        "section": "语义文档",
     }
     return {
         "scene_id": "contract_analysis",
@@ -778,7 +1293,7 @@ def _scene_extraction() -> dict:
                 "positive_direction": "depends",
                 "common_anomalies": ["金额为空", "金额为零"],
                 "recommended_dimensions": ["部门", "负责人"],
-                "evidence": [evidence],
+                "evidence": [metric_evidence],
             }
         ],
         "relations": [],
@@ -802,6 +1317,11 @@ def _global_synthesis() -> dict:
         "scene_id": "contract_analysis",
         "quote": "一行表示一份合同。",
         "section": "业务语义说明",
+    }
+    metric_evidence = {
+        "scene_id": "contract_analysis",
+        "quote": "合同金额指合同签约金额。",
+        "section": "语义文档",
     }
     return {
         "entities": [
@@ -837,7 +1357,7 @@ def _global_synthesis() -> dict:
                     {"scene": "contract_analysis", "semantic_key": "contract_amount"}
                 ],
                 "conflict_note": None,
-                "evidence": [evidence],
+                "evidence": [metric_evidence],
             }
         ],
         "metric_relations": [],

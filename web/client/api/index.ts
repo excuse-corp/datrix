@@ -1,4 +1,5 @@
 import { getUserId } from '@/utils';
+import { installAxiosAuthRetry } from '@/utils/auth-session';
 import { HEADER_USER_ID_KEY } from '@/utils/constants/index';
 import axios, { AxiosError, AxiosRequestConfig, AxiosResponse } from 'axios';
 
@@ -18,6 +19,8 @@ export type FailedTuple<T = any, D = any> = [Error | AxiosError<T, D>, null, nul
 const ins = axios.create({
   baseURL: process.env.API_BASE_URL ?? '',
 });
+
+installAxiosAuthRetry(ins);
 
 const LONG_TIME_API: string[] = [
   '/db/add',

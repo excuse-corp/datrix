@@ -395,7 +395,7 @@ class DefaultModelWorker(ModelWorker):
         )
         if self.support_async():
             if not is_stream and self.llm_adapter.support_generate_function():
-                func = self.llm_adapter.get_generate_function(
+                func = self.llm_adapter.get_async_generate_function(
                     self.model, self._model_params
                 )
                 func_type = "async generate"

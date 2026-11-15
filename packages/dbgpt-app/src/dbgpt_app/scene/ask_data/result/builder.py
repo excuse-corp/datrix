@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..combine import ResultCombiner
-from ..ontology.context import relevant_ontology_projection
+from ..ontology.analysis_service import OntologyAnalysisService
 from ..ontology.schemas import OntologySnapshot
 from ..query.query_spec import SceneResult
 from ..schemas.result import ResultBundle, SceneResultSummary
@@ -122,18 +122,42 @@ class ResultBundleBuilder:
             return None
         scene_ids = sorted({result.scene_id for result in results if result.scene_id})
         result_columns = [
-            column.model_dump(mode="json")
+            {
+                **column.model_dump(mode="json"),
+                "scene_id": result.scene_id,
+            }
             for result in results
             for column in result.columns
         ]
-        return relevant_ontology_projection(
+        result_profiles = [
+            {
+                "scene_id": result.scene_id,
+                "grain": result.grain
+                or list((result.sql_explanation or {}).get("grain") or []),
+                "grain_semantic_keys": [
+                    column.semantic_key or column.key
+                    for column in result.columns
+                    if column.type == "dimension"
+                ],
+                "time_grain": result.time_grain,
+                "time_basis": result.time_basis,
+                "time_range": (
+                    result.time_range.model_dump(mode="json")
+                    if result.time_range
+                    else None
+                ),
+            }
+            for result in results
+        ]
+        return OntologyAnalysisService().build(
             ontology_snapshot,
             question,
-            max_nodes=16,
             scene_ids=scene_ids,
             authorized_scene_ids=authorized_scene_ids,
             is_platform_admin=is_platform_admin,
             result_columns=result_columns,
+            result_profiles=result_profiles,
+            max_nodes=16,
         )
 
     @staticmethod
@@ -160,8 +184,7 @@ class ResultBundleBuilder:
         ]
         if caliber_summaries:
             suffixes.append(
-                "数据口径："
-                + " ".join(summary[:800] for summary in caliber_summaries)
+                "数据口径：" + " ".join(summary[:800] for summary in caliber_summaries)
             )
         if warnings:
             suffixes.append("结果包含警告，请查看 warnings。")

@@ -67,7 +67,18 @@ export type SceneResult = {
   row_count?: number;
   truncated?: boolean;
   warnings?: string[];
-  columns?: Array<{ key: string; name?: string }>;
+  grain?: string[];
+  time_grain?: string | null;
+  time_basis?: string | null;
+  columns?: Array<{
+    key: string;
+    name?: string;
+    label?: string | null;
+    type?: string;
+    semantic_key?: string | null;
+    aggregation?: string | null;
+    unit?: string | null;
+  }>;
   rows?: Array<Record<string, unknown>>;
   sql?: string | null;
   sql_explanation?: SqlExplanation | null;
@@ -97,6 +108,36 @@ export type SqlExplanation = {
   business_rules?: string[];
 };
 export type Clarification = { question?: string; field?: string; options?: string[] };
+export type OntologyAnalysisContext = {
+  ontology_snapshot_id?: string;
+  revision?: number;
+  matched_scene_ids?: string[];
+  matched_column_keys?: string[];
+  matched_bindings?: Array<{
+    scene_id: string;
+    result_key: string;
+    semantic_key: string;
+    metric_id: string;
+    matched_by: string;
+    confidence?: string;
+    evidence?: string;
+  }>;
+  unmatched_columns?: string[];
+  result_profiles?: Array<{
+    scene_id: string;
+    grain?: string[];
+    time_grain?: string | null;
+    time_basis?: string | null;
+    time_range?: unknown;
+  }>;
+  metrics?: Array<Record<string, any>>;
+  entities?: Array<Record<string, any>>;
+  analysis_dimensions?: Array<Record<string, any>>;
+  metric_relations?: Array<Record<string, any>>;
+  edges?: Array<Record<string, any>>;
+  cross_scene_analysis_paths?: Array<Record<string, any>>;
+  result_analysis_rules?: Array<Record<string, any>>;
+};
 export type AskDataQueryResponse = {
   request_id?: string;
   status: AskDataStatus;
@@ -110,7 +151,11 @@ export type AskDataQueryResponse = {
   warnings?: Array<string | { code?: string; message?: string }>;
   errors?: AskDataError[];
   plan?: Record<string, unknown>;
-  data?: Record<string, unknown>;
+  ontology_context?: OntologyAnalysisContext | null;
+  data?: {
+    bundle?: { ontology_context?: OntologyAnalysisContext | null };
+    [key: string]: unknown;
+  };
 };
 export type QueryRun = {
   query_id: string;

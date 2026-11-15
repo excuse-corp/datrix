@@ -6,7 +6,10 @@ import hashlib
 from time import monotonic
 from typing import Any
 
-from .query.capabilities import metric_definition, metric_keys, schema_config
+from .query.capabilities import (
+    build_query_capabilities,
+    metric_keys,
+)
 from .query.compiler import CompiledQuery, QuerySpecCompiler
 from .query.executor import SafeSceneQueryExecutor
 from .query.query_spec import QuerySpec, ResultColumn, SceneResult
@@ -43,14 +46,8 @@ class SceneQueryService:
         keys, rows, truncated, query_duration = self.executor.execute(
             engine, compiled, snapshot
         )
-        columns = [
-            ResultColumn(
-                key=key,
-                type="metric" if key in metric_keys(snapshot) else "dimension",
-                unit=(metric_definition(snapshot, key) or {}).get("unit"),
-            )
-            for key in keys
-        ]
+        columns = [self._result_column(snapshot, key) for key in keys]
+        capabilities = build_query_capabilities(snapshot)
         return SceneResult(
             task_id=task_id,
             scene_id=snapshot.scene_id,
@@ -59,6 +56,11 @@ class SceneQueryService:
             status="succeeded",
             grain=list(spec.dimensions),
             time_grain=spec.time_grain,
+            time_basis=(
+                str(capabilities.time.get("field"))
+                if capabilities.time.get("field")
+                else None
+            ),
             time_range=spec.time_range,
             columns=columns,
             rows=rows,
@@ -100,26 +102,35 @@ class SceneQueryService:
             snapshot,
             enforce_row_limit=False,
         )
+        sql_explanation = build_sql_explanation(sql, snapshot)
+        sql_metrics = {
+            str(item.get("key")): item
+            for item in sql_explanation.get("metrics", [])
+            if isinstance(item, dict) and item.get("key")
+        }
         columns = [
-            ResultColumn(
-                key=key,
-                type=self._result_column_type(snapshot, key),
-            )
+            self._result_column(snapshot, key, sql_metric=sql_metrics.get(key))
             for key in keys
         ]
+        capabilities = build_query_capabilities(snapshot)
         return SceneResult(
             task_id=task_id,
             scene_id=snapshot.scene_id,
             scene_revision=snapshot.revision_id,
             snapshot_id=snapshot.snapshot_id,
             status="succeeded",
+            time_basis=(
+                str(capabilities.time.get("field"))
+                if capabilities.time.get("field")
+                else None
+            ),
             columns=columns,
             rows=rows,
             row_count=len(rows),
             truncated=truncated,
             rag=rag_result,
             sql=sql,
-            sql_explanation=build_sql_explanation(sql, snapshot),
+            sql_explanation=sql_explanation,
             query_spec_hash=compiled.query_spec_hash,
             compiler_version=compiled.compiler_version,
             sql_hash=sql_hash,
@@ -127,17 +138,58 @@ class SceneQueryService:
         )
 
     @staticmethod
-    def _result_column_type(snapshot: Snapshot, key: str) -> str:
-        if key in metric_keys(snapshot):
-            return "metric"
-        columns = schema_config(snapshot).get("columns", [])
-        for column in columns:
-            if not isinstance(column, dict) or column.get("name") != key:
-                continue
-            if column.get("normalized_type") == "number":
-                return "metric"
-            return "dimension"
-        return "dimension"
+    def _result_column(
+        snapshot: Snapshot, key: str, *, sql_metric: dict[str, Any] | None = None
+    ) -> ResultColumn:
+        """Attach stable semantic metadata to an executed result column.
+
+        The query compiler already knows which business capability produced a
+        result key. Keeping that metadata on the result avoids asking the
+        Ontology retriever to infer aggregation or meaning from SQL text.
+        """
+        capabilities = build_query_capabilities(snapshot)
+        metric = next(
+            (item for item in capabilities.metrics if str(item.get("key")) == key),
+            None,
+        )
+        dimension = next(
+            (item for item in capabilities.dimensions if str(item.get("key")) == key),
+            None,
+        )
+        if metric is None and key.endswith("_label"):
+            dimension_key = key[: -len("_label")]
+            dimension = next(
+                (
+                    item
+                    for item in capabilities.dimensions
+                    if str(item.get("key")) == dimension_key
+                ),
+                None,
+            )
+        item = metric or dimension or {}
+        is_metric = (
+            metric is not None or key in metric_keys(snapshot) or sql_metric is not None
+        )
+        return ResultColumn(
+            key=key,
+            type="metric" if is_metric else "dimension",
+            label_key=(
+                str(item.get("label_field")) if item.get("label_field") else None
+            ),
+            label=str(item.get("name") or (sql_metric or {}).get("label") or key),
+            semantic_key=str(item.get("semantic_key") or item.get("key") or key),
+            source_field=(str(item.get("field")) if item.get("field") else None),
+            aggregation=(
+                str(item.get("aggregation") or (sql_metric or {}).get("aggregation"))
+                if item.get("aggregation") or (sql_metric or {}).get("aggregation")
+                else None
+            ),
+            unit=(
+                str(item.get("unit") or (sql_metric or {}).get("unit"))
+                if item.get("unit") or (sql_metric or {}).get("unit")
+                else None
+            ),
+        )
 
     def _verify_knowledge(self, snapshot: Snapshot) -> None:
         if self.knowledge_manager is None:
@@ -145,8 +197,10 @@ class SceneQueryService:
         rag = snapshot.runtime_config.get("rag", {})
         space_name = rag.get("knowledge_space")
         knowledge_hash = rag.get("knowledge_hash")
-        if space_name and knowledge_hash and not self.knowledge_manager.verify(
-            space_name, knowledge_hash
+        if (
+            space_name
+            and knowledge_hash
+            and not self.knowledge_manager.verify(space_name, knowledge_hash)
         ):
             raise ValueError("RAG_KNOWLEDGE_DRIFT")
 

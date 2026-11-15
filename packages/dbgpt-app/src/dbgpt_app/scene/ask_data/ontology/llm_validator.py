@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 
+from ..scene.markdown import SemanticMarkdownParser, split_scene_documents
 from .generator import scene_semantic_keys_from_source
 from .llm_schemas import (
     GlobalOntologySynthesis,
@@ -37,9 +38,18 @@ def validate_scene_extraction(
             "ONTOLOGY_LLM_REFERENCE_INVALID",
             f"模型输出的 scene_id 与输入不一致：{extraction.scene_id}",
         )
+    if extraction.domain_id != source.domain_id:
+        raise OntologyLLMValidationError(
+            "ONTOLOGY_LLM_DOMAIN_INVALID",
+            f"场景 {source.scene_id} 的抽取结果必须保留 domain_id={source.domain_id!r}。",
+        )
     entity_ids = {entity.local_id for entity in extraction.entities}
     for metric in extraction.metrics:
-        if metric.owner_entity_local_id and metric.owner_entity_local_id not in entity_ids:
+        _assert_metric_evidence(metric.evidence, source, metric_name=metric.name)
+        if (
+            metric.owner_entity_local_id
+            and metric.owner_entity_local_id not in entity_ids
+        ):
             raise OntologyLLMValidationError(
                 "ONTOLOGY_LLM_REFERENCE_INVALID",
                 (
@@ -65,9 +75,9 @@ def validate_scene_extraction(
                 ),
             )
     for quote in _evidence_quotes(extraction):
-        if not _quote_matches(quote, source.semantic_md):
+        if not _quote_matches(quote, _source_corpus(source)):
             warnings.append(
-                f"场景 {source.scene_id} 的证据片段未在语义文档中直接命中：{quote[:32]}"
+                f"场景 {source.scene_id} 的证据片段未在场景原材料中直接命中：{quote[:32]}"
             )
     return warnings
 
@@ -82,13 +92,55 @@ def validate_global_synthesis(
 
     entity_ids = {entity.id for entity in synthesis.entities}
     metric_ids = {metric.id for metric in synthesis.metrics}
+    domain_by_scene = {source.scene_id: source.domain_id for source in sources}
+
+    def assert_domain_namespace(object_id: str, domain_id: str | None) -> None:
+        if domain_id and not object_id.startswith(f"{domain_id}."):
+            raise OntologyLLMValidationError(
+                "ONTOLOGY_LLM_DOMAIN_INVALID",
+                f"本体对象 {object_id} 必须使用领域命名空间 {domain_id}.。",
+            )
 
     for entity in synthesis.entities:
         _assert_scenes(entity.source_scenes, scene_ids, entity.id)
+        source_domains = {
+            domain_by_scene[scene_id]
+            for scene_id in entity.source_scenes
+            if domain_by_scene.get(scene_id)
+        }
+        if len(source_domains) > 1:
+            raise OntologyLLMValidationError(
+                "ONTOLOGY_LLM_DOMAIN_INVALID",
+                f"实体 {entity.id} 合并了多个领域的来源，必须拆分为领域内概念。",
+            )
+        effective_domain = entity.domain_id
+        if source_domains and effective_domain not in source_domains:
+            raise OntologyLLMValidationError(
+                "ONTOLOGY_LLM_DOMAIN_INVALID",
+                f"实体 {entity.id} 的领域与来源场景不一致。",
+            )
+        assert_domain_namespace(entity.id, effective_domain)
         warnings.extend(_evidence_warnings(entity.evidence, source_by_scene))
 
     for metric in synthesis.metrics:
         _assert_scenes(metric.source_scenes, scene_ids, metric.id)
+        source_domains = {
+            domain_by_scene[scene_id]
+            for scene_id in metric.source_scenes
+            if domain_by_scene.get(scene_id)
+        }
+        if len(source_domains) > 1:
+            raise OntologyLLMValidationError(
+                "ONTOLOGY_LLM_DOMAIN_INVALID",
+                f"指标 {metric.id} 合并了多个领域的来源，必须拆分为领域内指标。",
+            )
+        effective_domain = metric.domain_id
+        if source_domains and effective_domain not in source_domains:
+            raise OntologyLLMValidationError(
+                "ONTOLOGY_LLM_DOMAIN_INVALID",
+                f"指标 {metric.id} 的领域与来源场景不一致。",
+            )
+        assert_domain_namespace(metric.id, effective_domain)
         if metric.entity_id not in entity_ids:
             raise OntologyLLMValidationError(
                 "ONTOLOGY_LLM_REFERENCE_INVALID",
@@ -116,7 +168,31 @@ def validate_global_synthesis(
                         f"未在场景 {binding.scene} 中直接命中"
                     )
                 )
-        warnings.extend(_evidence_warnings(metric.evidence, source_by_scene))
+        if not metric.evidence:
+            raise OntologyLLMValidationError(
+                "ONTOLOGY_METRIC_SOURCE_INVALID",
+                f"指标 {metric.id} 缺少语义文档证据，不能作为本体指标。",
+            )
+        metric_sources = [
+            source_by_scene[scene_id]
+            for scene_id in metric.source_scenes
+            if scene_id in source_by_scene
+        ]
+        if not any(
+            _metric_name_is_declared(source, metric.name) for source in metric_sources
+        ):
+            raise OntologyLLMValidationError(
+                "ONTOLOGY_METRIC_SOURCE_INVALID",
+                f"指标 {metric.id} 的名称未在来源场景语义文档中明确出现，不能通过归纳或推导新增。",
+            )
+        for evidence in metric.evidence:
+            source = source_by_scene.get(evidence.scene_id)
+            if source is None:
+                raise OntologyLLMValidationError(
+                    "ONTOLOGY_LLM_REFERENCE_INVALID",
+                    f"指标 {metric.id} 的证据引用了不存在的场景：{evidence.scene_id}",
+                )
+            _assert_metric_evidence([evidence], source, metric_id=metric.id)
 
     for relation in synthesis.relations:
         if relation.source_entity_id not in entity_ids:
@@ -161,12 +237,21 @@ def validate_global_synthesis(
 
     for path in synthesis.cross_scene_analysis_paths:
         _assert_scenes(path.scenes, scene_ids, path.id)
+        if len(set(path.scenes)) != 2:
+            warnings.append(
+                f"跨场景路径 {path.id} 必须明确两个不同的来源场景；当前保持候选状态。"
+            )
+        if not path.mapping_source:
+            warnings.append(f"跨场景路径 {path.id} 缺少业务映射依据，保持候选状态。")
+        if not path.join_keys:
+            warnings.append(f"跨场景路径 {path.id} 未提供关联键，不能作为桥接使用。")
         unknown_entities = [item for item in path.entities if item not in entity_ids]
         if unknown_entities:
             raise OntologyLLMValidationError(
                 "ONTOLOGY_LLM_REFERENCE_INVALID",
                 f"跨场景路径 {path.id} 引用了不存在的实体：{', '.join(unknown_entities)}",
             )
+        warnings.extend(_evidence_warnings(path.evidence, source_by_scene))
 
     for rule in synthesis.result_analysis_rules:
         unknown_entities = [
@@ -204,11 +289,90 @@ def _evidence_warnings(evidence, source_by_scene: dict[str, OntologySceneSource]
                 "ONTOLOGY_LLM_REFERENCE_INVALID",
                 f"证据引用了不存在的场景：{item.scene_id}",
             )
-        if not _quote_matches(item.quote, source.semantic_md):
+        if not _quote_matches(item.quote, _source_corpus(source)):
             warnings.append(
-                f"场景 {item.scene_id} 的证据片段未在语义文档中直接命中：{item.quote[:32]}"
+                f"场景 {item.scene_id} 的证据片段未在场景原材料中直接命中：{item.quote[:32]}"
             )
     return warnings
+
+
+def _source_corpus(source: OntologySceneSource) -> str:
+    return "\n\n".join(
+        value
+        for value in (
+            source.semantic_md,
+            source.data_dictionary_md,
+            source.business_semantics_md,
+        )
+        if value
+    )
+
+
+def _metric_source_corpus(source: OntologySceneSource) -> str:
+    """Only the semantic document can substantiate a business metric."""
+    front_matter = re.match(
+        r"\A(?:\ufeff)?---[ \t]*\r?\n(?P<yaml>.*?)(?:\r?\n)"
+        r"(?:---|\.\.\.)[ \t]*(?:\r?\n|\Z)",
+        source.semantic_md,
+        re.DOTALL,
+    )
+    business_semantics = _business_semantics_document(source)
+    parts = [business_semantics]
+    if front_matter:
+        parts.append(front_matter.group("yaml"))
+    return "\n\n".join(part for part in parts if part)
+
+
+def _assert_metric_evidence(
+    evidence, source, *, metric_id: str = "指标", metric_name: str | None = None
+) -> None:
+    corpus = _metric_source_corpus(source)
+    if not evidence:
+        raise OntologyLLMValidationError(
+            "ONTOLOGY_METRIC_SOURCE_INVALID",
+            f"{metric_id} 缺少语义文档证据，不能作为本体指标。",
+        )
+    invalid = [
+        item.quote for item in evidence if not _quote_matches(item.quote, corpus)
+    ]
+    if invalid:
+        raise OntologyLLMValidationError(
+            "ONTOLOGY_METRIC_SOURCE_INVALID",
+            f"{metric_id} 的证据未命中语义文档，指标不能由数据字典或查询能力推断。",
+        )
+    if metric_name and not _metric_name_is_declared(source, metric_name):
+        raise OntologyLLMValidationError(
+            "ONTOLOGY_METRIC_SOURCE_INVALID",
+            f"指标 {metric_id} 的名称未在语义文档中明确出现，不能通过归纳或推导新增。",
+        )
+
+
+def _business_semantics_document(source: OntologySceneSource) -> str:
+    if source.business_semantics_md.strip():
+        return source.business_semantics_md
+    try:
+        parsed = SemanticMarkdownParser().parse(source.semantic_md)
+        return split_scene_documents(parsed.body_markdown).get(
+            "business_semantics_md", ""
+        )
+    except Exception:
+        return ""
+
+
+def _metric_name_is_declared(source: OntologySceneSource, name: str) -> bool:
+    normalized_name = _normalize_quote(name)
+    business_semantics = _normalize_quote(_business_semantics_document(source))
+    if normalized_name and normalized_name in business_semantics:
+        return True
+    try:
+        parsed = SemanticMarkdownParser().parse(source.semantic_md)
+    except Exception:
+        return False
+    return any(
+        normalized_name == _normalize_quote(metric.name or metric.key)
+        or normalized_name == _normalize_quote(metric.key)
+        for metric in parsed.config.metrics
+    )
 
 
 def _evidence_quotes(extraction: SceneOntologyExtraction) -> list[str]:

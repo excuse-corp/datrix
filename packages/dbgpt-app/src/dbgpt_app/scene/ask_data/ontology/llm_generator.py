@@ -9,6 +9,8 @@ from typing import Any
 from pydantic import ValidationError
 
 from .generator import _normalize_source
+from ..query.capabilities import build_query_capabilities
+from ..scene.markdown import SemanticMarkdownParser, split_scene_documents
 from .llm_prompts import build_global_synthesis_prompt, build_scene_extraction_prompt
 from .llm_renderer import render_ontology_markdown_from_synthesis
 from .llm_schemas import (
@@ -65,9 +67,7 @@ class OntologyLLMGenerator:
             for item in synthesis.unresolved_questions
             if str(item).strip()
         )
-        markdown = render_ontology_markdown_from_synthesis(
-            synthesis, revision=revision
-        )
+        markdown = render_ontology_markdown_from_synthesis(synthesis, revision=revision)
         return OntologyGenerationResult(
             markdown=markdown,
             synthesis=synthesis,
@@ -95,9 +95,7 @@ class OntologyLLMGenerator:
         current_prompt = prompt
         last_text = ""
         for attempt in range(2):
-            text = await self._safe_generate(
-                current_prompt, "ONTOLOGY_LLM_UNAVAILABLE"
-            )
+            text = await self._safe_generate(current_prompt, "ONTOLOGY_LLM_UNAVAILABLE")
             last_text = text
             try:
                 extraction = _parse_model_json(
@@ -128,9 +126,7 @@ class OntologyLLMGenerator:
         current_prompt = prompt
         last_text = ""
         for attempt in range(2):
-            text = await self._safe_generate(
-                current_prompt, "ONTOLOGY_LLM_UNAVAILABLE"
-            )
+            text = await self._safe_generate(current_prompt, "ONTOLOGY_LLM_UNAVAILABLE")
             last_text = text
             try:
                 synthesis = _parse_model_json(
@@ -176,13 +172,75 @@ def normalize_scene_sources(scene_sources: list[Any]) -> list[OntologySceneSourc
         if not scene_id:
             continue
         semantic_md = str(normalized.get("semantic_md") or "")
+        parsed = None
+        try:
+            parsed = (
+                SemanticMarkdownParser().parse(semantic_md)
+                if semantic_md.strip()
+                else None
+            )
+        except Exception:
+            parsed = None
+        documents = normalized.get("documents") or {}
+        split_documents = split_scene_documents(parsed.body_markdown) if parsed else {}
+        documents = {
+            **split_documents,
+            **{
+                key: value
+                for key, value in documents.items()
+                if isinstance(value, str) and value.strip()
+            },
+        }
+        config = parsed.config if parsed else None
+        capability_snapshot = {
+            "runtime_config": {
+                "documents": {
+                    **documents,
+                    "semantic_md": semantic_md,
+                }
+            }
+        }
+        capabilities = build_query_capabilities(capability_snapshot)
+        query_capabilities = {
+            "dimensions": [
+                {
+                    "key": item.get("key"),
+                    "name": item.get("name") or item.get("key"),
+                    "semantic_key": item.get("semantic_key") or item.get("key"),
+                    "aliases": list(item.get("aliases") or []),
+                }
+                for item in capabilities.dimensions
+            ],
+            "metrics": [
+                {
+                    "key": item.get("key"),
+                    "name": item.get("name") or item.get("key"),
+                    "semantic_key": item.get("semantic_key") or item.get("key"),
+                    "aggregation": item.get("aggregation"),
+                    "unit": item.get("unit"),
+                    "grain": item.get("grain"),
+                    "time_basis": item.get("time_basis"),
+                }
+                for item in capabilities.metrics
+            ],
+            "time": {
+                "name": capabilities.time.get("name"),
+                "granularities": list(capabilities.time.get("granularities") or []),
+            }
+            if config or capabilities.time
+            else {},
+        }
         sources.append(
             OntologySceneSource(
                 scene_id=scene_id,
+                domain_id=normalized.get("domain_id"),
                 snapshot_id=str(normalized.get("snapshot_id") or ""),
                 revision_id=str(normalized.get("revision_id") or ""),
                 semantic_md_hash=str(normalized.get("semantic_md_hash") or ""),
                 semantic_md=semantic_md,
+                data_dictionary_md=str(documents.get("data_dictionary_md") or ""),
+                business_semantics_md=str(documents.get("business_semantics_md") or ""),
+                query_capabilities=query_capabilities,
                 name=str(normalized.get("name") or "") or None,
                 description=str(normalized.get("description") or "") or None,
             )

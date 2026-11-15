@@ -4,6 +4,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+import dbgpt_app.auth.service as auth_service
 from dbgpt_app.auth.service import (
     AuthConfig,
     ProviderConfig,
@@ -161,6 +162,46 @@ def test_refresh_rotates_the_session(auth_app):
     assert refresh.status_code == 200
     assert refresh.json()["access_token"] != login.json()["access_token"]
     assert refresh.json()["refresh_token"] != login.json()["refresh_token"]
+
+
+def test_cas_login_sets_refresh_cookie(tmp_path, monkeypatch):
+    app = FastAPI()
+    provider = ProviderConfig(
+        provider_id="school-cas",
+        provider_type="cas",
+        display_name="School CAS",
+        base_url="https://cas.example.edu",
+        callback_path="/api/v1/auth/sso/school-cas/callback",
+    )
+    store = configure_authentication(
+        app,
+        database_url=f"sqlite:///{tmp_path / 'cas-auth.db'}",
+        secret="d" * 48,
+        providers=(provider,),
+        cookie_secure=False,
+    )
+    user = store.resolve_external_identity(
+        provider,
+        "alice-cas",
+        {"username": "alice", "display_name": "Alice"},
+        app.state.auth_config,
+    )
+    assert user is not None
+
+    async def validate_ticket(*_args):
+        return "alice-cas", {"username": "alice", "display_name": "Alice"}
+
+    monkeypatch.setattr(auth_service, "_validate_cas_ticket", validate_ticket)
+    state = store.create_login_transaction("school-cas", "/")
+    response = TestClient(app).get(
+        "/api/v1/auth/sso/school-cas/callback",
+        params={"ticket": "cas-ticket", "state": state},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.cookies.get("dataman_session")
+    assert response.cookies.get("dataman_session_refresh")
 
 
 def test_public_auth_endpoints_ignore_stale_access_cookie(auth_app):

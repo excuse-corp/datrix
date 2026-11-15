@@ -1,4 +1,4 @@
-import type { AskDataQueryResponse, SceneResult } from '@/utils/ask-data';
+import type { AskDataQueryResponse, OntologyAnalysisContext, SceneResult } from '@/utils/ask-data';
 import { Alert, Card, Collapse, Descriptions, Empty, Table, Tag, Typography } from 'antd';
 
 const renderTable = (rows: Array<Record<string, unknown>>, columns?: Array<{ key: string; name?: string }>) => {
@@ -154,7 +154,145 @@ function Conclusion({ response }: { response: AskDataQueryResponse }) {
             description={error.message}
           />
         ))}
+        <OntologyAnalysisBasis context={response.ontology_context ?? response.data?.bundle?.ontology_context} />
         <SceneResultTables results={response.results} />
+      </div>
+    </Card>
+  );
+}
+
+function OntologyAnalysisBasis({ context }: { context?: OntologyAnalysisContext | null }) {
+  if (!context) return null;
+  const bindings = context.matched_bindings ?? [];
+  const metrics = context.metrics ?? [];
+  const rules = context.result_analysis_rules ?? [];
+  const paths = context.cross_scene_analysis_paths ?? [];
+  const pathJoinIds = new Set(paths.map(path => `${String(path.id)}_join`));
+  const joinEdges = (context.edges ?? []).filter(
+    edge => edge.type === 'cross_scene_join' && !pathJoinIds.has(String(edge.id)),
+  );
+  const bridges = [...paths, ...joinEdges];
+  const unmatched = context.unmatched_columns ?? [];
+  if (!bindings.length && !metrics.length && !rules.length && !bridges.length && !unmatched.length) return null;
+
+  return (
+    <Card
+      size='small'
+      title='语义分析依据'
+      extra={context.revision ? <Typography.Text type='secondary'>Ontology v{context.revision}</Typography.Text> : null}
+    >
+      <div className='flex flex-col gap-3'>
+        {bindings.length > 0 && (
+          <div>
+            <Typography.Text strong>结果列绑定</Typography.Text>
+            <ul className='mb-0 mt-1 pl-5'>
+              {bindings.map(binding => (
+                <li key={`${binding.scene_id}-${binding.result_key}-${binding.metric_id}`}>
+                  {binding.scene_id}.{binding.result_key} → {binding.metric_id}
+                  <Typography.Text type='secondary'>（{binding.matched_by}）</Typography.Text>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {metrics.length > 0 && (
+          <div>
+            <Typography.Text strong>指标口径</Typography.Text>
+            <ul className='mb-0 mt-1 pl-5'>
+              {metrics.map(metric => {
+                const details = (metric.data ?? {}) as Record<string, unknown>;
+                const meaning = [
+                  metric.name,
+                  details.analysis_meaning,
+                  details.interpretation,
+                  details.aggregation ? `聚合：${details.aggregation}` : '',
+                  details.unit ? `单位：${details.unit}` : '',
+                  details.grain ? `粒度：${details.grain}` : '',
+                  details.time_basis ? `时间依据：${details.time_basis}` : '',
+                  details.conflict_note ? `口径冲突：${details.conflict_note}` : '',
+                ]
+                  .filter(Boolean)
+                  .join('；');
+                return <li key={String(metric.id ?? metric.name)}>{meaning}</li>;
+              })}
+            </ul>
+          </div>
+        )}
+        {rules.length > 0 && (
+          <div>
+            <Typography.Text strong>适用的分析规则</Typography.Text>
+            <ul className='mb-0 mt-1 pl-5'>
+              {rules.map(rule => (
+                <li key={String(rule.id)}>
+                  {String(
+                    (rule.data as Record<string, unknown> | undefined)?.guidance ?? rule.description ?? rule.name ?? '',
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {bridges.length > 0 && (
+          <div>
+            <Typography.Text strong>跨场景分析桥接</Typography.Text>
+            <ul className='mb-0 mt-1 pl-5'>
+              {bridges.map(bridge => {
+                const data = (bridge.data ?? {}) as Record<string, unknown>;
+                const items = (value: unknown) => (Array.isArray(value) ? value.map(String) : []);
+                const bridgeScenes = Array.isArray(data.scenes) ? data.scenes.map(String) : [];
+                const profiles = (
+                  Array.isArray(data.result_profiles)
+                    ? data.result_profiles
+                    : (context.result_profiles ?? []).filter(profile => bridgeScenes.includes(profile.scene_id))
+                ) as Array<Record<string, unknown>>;
+                return (
+                  <li key={String(bridge.id)}>
+                    {String(bridge.name ?? bridge.id)}；映射依据：{String(data.mapping_source ?? '未填写')}； 时间条件：
+                    {items(data.time_alignment_conditions).join('、') || '未填写'}； 粒度条件：
+                    {items(data.grain_alignment).join('、') || String(data.grain ?? '未填写')}。
+                    {items(data.forbidden_inferences).length > 0 && (
+                      <Typography.Text type='warning'>
+                        {' '}
+                        禁止推断：{items(data.forbidden_inferences).join('、')}
+                      </Typography.Text>
+                    )}
+                    {items(data.allowed_analyses).length > 0 && (
+                      <div className='text-xs text-gray-500'>允许分析：{items(data.allowed_analyses).join('、')}</div>
+                    )}
+                    {data.evidence ? <div className='text-xs text-gray-500'>证据：{String(data.evidence)}</div> : null}
+                    {profiles.length > 0 && (
+                      <div className='text-xs text-gray-500'>
+                        本次结果：
+                        {profiles
+                          .map(profile => {
+                            const grain = Array.isArray(profile.grain)
+                              ? profile.grain.map(String).join('、')
+                              : '未识别';
+                            return `${String(profile.scene_id)}（粒度 ${grain}；时间 ${String(profile.time_grain ?? '未识别')}；依据 ${String(profile.time_basis ?? '未识别')}）`;
+                          })
+                          .join('；')}
+                        。需先核对是否满足桥接条件。
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+        {unmatched.length > 0 && (
+          <Alert
+            type='warning'
+            showIcon
+            message='部分结果列没有已确认的本体指标绑定'
+            description={`${unmatched.join('、')}；这些列的解释依据仅来自查询结果和数据口径说明。`}
+          />
+        )}
+        {context.ontology_snapshot_id && (
+          <Typography.Text className='text-xs' type='secondary'>
+            快照：{context.ontology_snapshot_id}
+          </Typography.Text>
+        )}
       </div>
     </Card>
   );

@@ -31,7 +31,7 @@ import {
   UploadOutlined,
 } from '@ant-design/icons';
 import type { UploadProps } from 'antd';
-import { Alert, Button, Modal, Segmented, Spin, Tooltip, Upload, message } from 'antd';
+import { Alert, Button, Modal, Segmented, Spin, Tag, Tooltip, Upload, message } from 'antd';
 import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useState } from 'react';
 
@@ -40,6 +40,12 @@ const OntologyGraphCanvas = dynamic(() => import('@/components/ontology/Ontology
 const DiffEditor = dynamic(() => import('@monaco-editor/react').then(module => module.DiffEditor), { ssr: false });
 
 type ViewMode = 'split' | 'document' | 'graph';
+type BridgeReviewItem = {
+  pathId?: string;
+  joinRowId: string;
+  name: string;
+  data: Record<string, unknown>;
+};
 
 const issueText = (issues: OntologyIssue[]) =>
   issues
@@ -48,6 +54,53 @@ const issueText = (issues: OntologyIssue[]) =>
     .join('；');
 
 const sourceName = (source?: Partial<OntologySourceRef>) => source?.scene_name || source?.scene_id || '-';
+
+const markdownCells = (line: string) =>
+  line
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map(cell => cell.trim());
+
+function updateBridgeTableStatus(markdown: string, section: string, id: string, status: string) {
+  const lines = markdown.split('\n');
+  const headingIndex = lines.findIndex(line => new RegExp(`^#{2,3}\\s+${section}\\s*$`).test(line));
+  if (headingIndex < 0) return markdown;
+  let headerIndex = headingIndex + 1;
+  while (headerIndex < lines.length && !lines[headerIndex].trim().startsWith('|')) {
+    if (/^#{1,3}\s+/.test(lines[headerIndex])) return markdown;
+    headerIndex += 1;
+  }
+  if (!lines[headerIndex + 1]?.trim().startsWith('|')) return markdown;
+
+  const headers = markdownCells(lines[headerIndex]);
+  const separator = markdownCells(lines[headerIndex + 1]);
+  let statusIndex = headers.findIndex(header => header.replace(/[\s_（）()：:]/g, '').toLowerCase() === '状态');
+  if (statusIndex < 0) {
+    const idIndex = headers.findIndex(header => header.replace(/\s/g, '') === 'ID');
+    statusIndex = idIndex >= 0 ? idIndex + 1 : 0;
+    headers.splice(statusIndex, 0, '状态');
+    separator.splice(statusIndex, 0, '---');
+    lines[headerIndex] = `| ${headers.join(' | ')} |`;
+    lines[headerIndex + 1] = `| ${separator.join(' | ')} |`;
+  }
+
+  for (let index = headerIndex + 2; index < lines.length && lines[index].trim().startsWith('|'); index += 1) {
+    const cells = markdownCells(lines[index]);
+    if (cells[0] !== id) continue;
+    while (cells.length < headers.length) cells.push('');
+    cells[statusIndex] = status;
+    lines[index] = `| ${cells.join(' | ')} |`;
+  }
+  return lines.join('\n');
+}
+
+function setBridgeStatus(markdown: string, pathId: string | undefined, joinRowId: string, status: string) {
+  let updated = pathId ? updateBridgeTableStatus(markdown, '跨场景分析路径', pathId, status) : markdown;
+  updated = updateBridgeTableStatus(updated, '跨场景关联', joinRowId, status);
+  return updated;
+}
 
 const buildSourceRefreshNotice = (
   revision: OntologyRevision,
@@ -301,6 +354,15 @@ export default function OntologyPage() {
     return Upload.LIST_IGNORE;
   };
 
+  const reviewBridge = (
+    pathId: string | undefined,
+    joinRowId: string,
+    status: 'confirmed' | 'rejected' | 'candidate',
+  ) => {
+    setMarkdown(current => setBridgeStatus(current, pathId, joinRowId, status));
+    message.success('状态已写入本体草稿；保存并发布后生效');
+  };
+
   if (loading || !draft) return <Spin className='flex h-full items-center justify-center' />;
 
   const showDocument = mode !== 'graph';
@@ -316,6 +378,32 @@ export default function OntologyPage() {
       <ExclamationCircleFilled className='text-[15px] text-gray-400' />
     </Tooltip>
   );
+  const pathCandidates: BridgeReviewItem[] = (graph?.nodes ?? [])
+    .filter(node => node.type === 'analysis_path')
+    .map(node => ({ pathId: node.id, joinRowId: `${node.id}_join`, data: node.data ?? {}, name: node.name }));
+  const pathJoinIds = new Set(pathCandidates.map(item => item.joinRowId));
+  const edgeCandidates = (graph?.edges ?? [])
+    .filter(edge => edge.type === 'cross_scene_join' && !pathJoinIds.has(edge.id))
+    .map(edge => {
+      const data = edge.data ?? {};
+      const split = (value: unknown) =>
+        String(value ?? '')
+          .split(/[,，、;；]+/)
+          .map(item => item.trim())
+          .filter(Boolean);
+      return {
+        pathId: undefined,
+        joinRowId: edge.id,
+        name: `${edge.source} ↔ ${edge.target}`,
+        data: {
+          ...data,
+          scenes: Array.isArray(data.scenes) ? data.scenes : [edge.source, edge.target],
+          join_keys: split(data.business_key),
+          grain_alignment: Array.isArray(data.grain_alignment) ? data.grain_alignment : split(data.grain),
+        } as Record<string, unknown>,
+      };
+    }) as BridgeReviewItem[];
+  const bridgeCandidates = [...pathCandidates, ...edgeCandidates];
 
   return (
     <AskDataPageShell
@@ -414,6 +502,118 @@ export default function OntologyPage() {
             description={`模式：${lastGeneration.mode.toUpperCase()}；来源场景 ${lastGeneration.source_count} 个；实体 ${lastGeneration.entity_count} 个；指标 ${lastGeneration.metric_count} 个；关系 ${lastGeneration.relation_count} 个；分析规则 ${lastGeneration.analysis_rule_count} 条`}
           />
         )}
+        <div className='mx-4 mt-4 rounded-md border border-gray-200 p-4 dark:border-white/10'>
+          <div className='mb-3 flex items-center justify-between'>
+            <div>
+              <div className='font-medium'>跨场景分析桥接</div>
+              <div className='mt-1 text-xs text-gray-500'>
+                候选桥接只在本体页审核；只有状态为“已确认”且分析契约完整的桥接会进入查数后分析。
+              </div>
+            </div>
+            <Tag color={bridgeCandidates.some(item => item.data?.status === 'confirmed') ? 'green' : 'default'}>
+              {bridgeCandidates.filter(item => item.data?.status === 'confirmed').length} 已确认 /{' '}
+              {bridgeCandidates.length} 条
+            </Tag>
+          </div>
+          {bridgeCandidates.length ? (
+            <div className='space-y-3'>
+              {bridgeCandidates.map(bridge => {
+                const data = bridge.data ?? {};
+                const status = String(data.status ?? 'candidate');
+                const scenes = Array.isArray(data.scenes) ? data.scenes.map(String) : [];
+                const strings = (value: unknown) => (Array.isArray(value) ? value.map(String) : []);
+                const canConfirm = Boolean(
+                  scenes.length === 2 &&
+                    new Set(scenes).size === 2 &&
+                    strings(data.join_keys).length &&
+                    data.relation_type &&
+                    data.mapping_source &&
+                    data.left_time_basis &&
+                    data.right_time_basis &&
+                    strings(data.time_alignment_conditions).length &&
+                    strings(data.grain_alignment).length &&
+                    strings(data.allowed_analyses).length &&
+                    strings(data.forbidden_inferences).length &&
+                    data.evidence,
+                );
+                return (
+                  <div key={bridge.joinRowId} className='rounded border border-gray-100 p-3 dark:border-white/10'>
+                    <div className='flex flex-wrap items-center justify-between gap-2'>
+                      <div className='flex items-center gap-2'>
+                        <span className='font-medium'>{bridge.name}</span>
+                        <Tag color={status === 'confirmed' ? 'green' : status === 'rejected' ? 'red' : 'gold'}>
+                          {status === 'confirmed' ? '已确认' : status === 'rejected' ? '已驳回' : '待审核'}
+                        </Tag>
+                        {data.relation_type ? <Tag>{String(data.relation_type)}</Tag> : null}
+                      </div>
+                      <div className='flex gap-2'>
+                        {status !== 'confirmed' && (
+                          <Tooltip
+                            title={
+                              canConfirm
+                                ? '写入已确认状态，保存并发布后进入默认分析'
+                                : '请补齐关系类型、关联键、映射依据、时间/粒度条件、允许/禁止分析和证据'
+                            }
+                          >
+                            <span>
+                              <Button
+                                size='small'
+                                type='primary'
+                                disabled={!canConfirm}
+                                onClick={() => reviewBridge(bridge.pathId, bridge.joinRowId, 'confirmed')}
+                              >
+                                确认桥接
+                              </Button>
+                            </span>
+                          </Tooltip>
+                        )}
+                        {status === 'confirmed' ? (
+                          <Button
+                            size='small'
+                            onClick={() => reviewBridge(bridge.pathId, bridge.joinRowId, 'candidate')}
+                          >
+                            撤回确认
+                          </Button>
+                        ) : status !== 'rejected' ? (
+                          <Button
+                            size='small'
+                            danger
+                            onClick={() => reviewBridge(bridge.pathId, bridge.joinRowId, 'rejected')}
+                          >
+                            驳回
+                          </Button>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className='mt-2 text-sm text-gray-600 dark:text-gray-300'>
+                      涉及场景：{scenes.join('、') || '未填写'}；关联键：
+                      {strings(data.join_keys).join('、') || '未填写'}
+                    </div>
+                    <div className='mt-1 text-xs text-gray-500'>
+                      映射依据：{String(data.mapping_source || '未填写')}；时间：
+                      {String(data.left_time_basis || '未填写')} → {String(data.right_time_basis || '未填写')}
+                      ；粒度条件：{strings(data.grain_alignment).join('、') || '未填写'}
+                    </div>
+                    <div className='mt-1 text-xs text-gray-500'>
+                      时间对齐：{strings(data.time_alignment_conditions).join('、') || '未填写'}；允许分析：
+                      {strings(data.allowed_analyses).join('、') || '未填写'}
+                    </div>
+                    {strings(data.forbidden_inferences).length > 0 && (
+                      <div className='mt-1 text-xs text-amber-700'>
+                        禁止推断：{strings(data.forbidden_inferences).join('、')}
+                      </div>
+                    )}
+                    {data.evidence ? (
+                      <div className='mt-1 text-xs text-gray-500'>证据：{String(data.evidence)}</div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className='text-sm text-gray-500'>当前草稿没有跨场景分析路径。</div>
+          )}
+        </div>
         <div className={`grid min-h-[680px] ${showDocument && showGraph ? 'lg:grid-cols-2' : 'grid-cols-1'}`}>
           <div
             className={`${showDocument ? 'flex' : 'hidden'} ${showGraph ? 'border-b lg:border-r lg:border-b-0' : ''} min-h-[680px] flex-col border-gray-100 dark:border-white/10`}

@@ -358,11 +358,6 @@ const isAskDataFormattingStep = (step: any): boolean =>
     .toLowerCase()
     .includes('-formatting');
 
-const isAskDataAwaitingFinalAnswer = (step: any): boolean =>
-  step?.stage === 'query' &&
-  step?.status === 'running' &&
-  ['succeeded', 'partial_succeeded'].includes(String(step?.result?.status || '').toLowerCase());
-
 const normalizeAskDataActionInput = (value: unknown): string => {
   if (value && typeof value === 'object') {
     const question = (value as Record<string, unknown>).question;
@@ -400,7 +395,7 @@ const buildAskDataFallbackSteps = (resultPayload: any, sceneNameById: AskDataSce
     {
       id: getAskDataStageId(callId, 'routing'),
       title: '业务场景语义选择完成',
-      detail: '基于用户问题和场景 Snapshot 完成判断',
+      detail: `已选择场景：${sceneNames.join('、')}`,
       action: 'ask_data_stage',
       status: 'done',
       askDataCallId: callId,
@@ -409,7 +404,7 @@ const buildAskDataFallbackSteps = (resultPayload: any, sceneNameById: AskDataSce
         {
           stage: 'routing',
           title: '业务场景语义选择完成',
-          detail: '基于用户问题和场景 Snapshot 完成判断',
+          detail: `已选择场景：${sceneNames.join('、')}`,
           status: resultPayload.status,
           resultPayload,
         },
@@ -882,6 +877,7 @@ interface ExecutionStep {
   actionInput?: string;
   errorType?: string;
   errorMessage?: string;
+  retryResolved?: boolean;
   askDataCallId?: string;
   askDataReused?: boolean;
   parentId?: string;
@@ -917,6 +913,16 @@ interface ActiveRun {
   taskPlanVersion?: { planId: string; revision: number; sequence: number };
   seenTaskPlanIds: Set<string>;
 }
+
+const getTodoProgressMeta = (tasks: TaskItem[]): NonNullable<ExecutionStep['todoMeta']> => {
+  const total = tasks.length;
+  const done = tasks.filter(task => task.status === 'completed').length;
+  return {
+    state: total > 0 && done === total ? 'done' : done === 0 ? 'init' : 'progress',
+    done,
+    total,
+  };
+};
 
 const CANCELLED_RESPONSE_TEXT = '任务已取消。';
 
@@ -1089,6 +1095,7 @@ const convertToManusFormat = (
       return 'skill';
     if (actionLower === 'shell_interpreter') return 'bash';
     if (actionLower === 'ask_data_stage') return 'task';
+    if (actionLower === 'final_response_thought') return 'task';
     if (actionLower === 'question') return 'question';
 
     const lower = (title || '').toLowerCase();
@@ -1156,8 +1163,12 @@ const convertToManusFormat = (
         title: displayStep.title || `Step ${step.step}`,
         subtitle: cleanDetail?.split('\n')[0]?.slice(0, 80),
         description: cleanDetail || undefined,
+        parentId: displayStep.action === 'final_response' ? undefined : step.parentId,
+        action: displayStep.action,
         phase: (displayStep as any).phase,
         status: getStepStatus(step.status),
+        errorMessage: step.errorMessage,
+        retryResolved: step.retryResolved,
         durationMs: step.durationMs,
         startedAt: step.startedAt,
         confirmationStatus: step.confirmationStatus,
@@ -1313,6 +1324,14 @@ const Playground: NextPage = () => {
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(true);
   const [rightPanelView, setRightPanelView] = useState<PanelView>('execution');
+  const selectedStepIdRef = useRef(selectedStepId);
+  const rightPanelViewRef = useRef(rightPanelView);
+  useEffect(() => {
+    selectedStepIdRef.current = selectedStepId;
+  }, [selectedStepId]);
+  useEffect(() => {
+    rightPanelViewRef.current = rightPanelView;
+  }, [rightPanelView]);
   const [previewArtifact, setPreviewArtifact] = useState<Artifact | null>(null);
 
   // Active round tracking: which view message is currently selected for the right panel
@@ -2641,6 +2660,36 @@ const Playground: NextPage = () => {
           persistContextStatus(nextContextStatus);
           return;
         }
+        if (payload.type === 'final.chunk') {
+          const content = typeof payload.content === 'string' ? payload.content : '';
+          if (!content) return;
+          setExecutionMap(prev => {
+            const current = prev[responseId];
+            if (!current) return prev;
+            const parent = current.steps.find(step => step.action === 'final_response');
+            if (!parent) return prev;
+            const steps = current.steps.map(step =>
+              step.action === 'final_response_thought' && step.parentId === parent.id
+                ? { ...step, status: 'done' as const, detail: t('click_to_view_thinking') }
+                : step,
+            );
+            return { ...prev, [responseId]: { ...current, steps } };
+          });
+          setMessages(prev =>
+            prev.map(msg =>
+              msg.id === responseId && msg.role === 'view'
+                ? { ...msg, context: `${msg.context || ''}${content}` }
+                : msg,
+            ),
+          );
+          setStreamingSummary(prev => `${prev}${content}`);
+          setSummaryComplete(false);
+          if (!selectedStepIdRef.current || rightPanelViewRef.current !== 'execution') {
+            setRightPanelTab('summary');
+            setRightPanelView('summary');
+          }
+          return;
+        }
         if (payload.type === 'attachment.status') {
           const statuses = Array.isArray(payload.attachments) ? payload.attachments : [];
           setMessages(prev =>
@@ -2701,25 +2750,30 @@ const Playground: NextPage = () => {
                     ? 'failed'
                     : 'running';
           const stageResultStatus = String(payload.result?.status || '').toLowerCase();
-          const waitingForFinalAnswer =
-            isQueryLifecycleStage &&
+          const deferFormattingCompletion = payload.stage === 'formatting' && stageStatus === 'done';
+          const successfulQueryTerminal =
+            payload.stage === 'query' &&
             stageStatus === 'done' &&
-            (payload.stage === 'formatting' || ['succeeded', 'partial_succeeded'].includes(stageResultStatus));
-          const visibleStageStatus: ExecutionStep['status'] = waitingForFinalAnswer ? 'running' : stageStatus;
-          const visibleStageTitle = waitingForFinalAnswer
-            ? '查询成功，结果整理中'
-            : payload.stage === 'query' && stageStatus === 'running'
-              ? '正在查询业务数据'
+            ['succeeded', 'partial_succeeded'].includes(stageResultStatus);
+          const visibleStageStatus: ExecutionStep['status'] = deferFormattingCompletion ? 'running' : stageStatus;
+          const visibleStageTitle = deferFormattingCompletion
+            ? '正在整理查询结果'
+            : successfulQueryTerminal
+              ? stageResultStatus === 'partial_succeeded'
+                ? '查询部分成功'
+                : '查询成功'
+              : payload.stage === 'query' && stageStatus === 'running'
+                ? '正在查询业务数据'
+                : payload.stage === 'formatting' && stageStatus === 'running'
+                  ? '正在整理查询结果'
+                  : stageTitle;
+          const visibleStageDetail = deferFormattingCompletion
+            ? '查询结果已整理，正在完成查询'
+            : successfulQueryTerminal
+              ? '查询已完成，正在汇总结果信息'
               : payload.stage === 'formatting' && stageStatus === 'running'
-                ? '查询成功，结果整理中'
-                : stageTitle;
-          const visibleStageDetail = waitingForFinalAnswer
-            ? payload.stage === 'formatting'
-              ? '查询结果已整理，正在组织最终答复'
-              : '查询完成，正在整理最终答复'
-            : payload.stage === 'formatting' && stageStatus === 'running'
-              ? '正在整理查询结果'
-              : stageDetailText;
+                ? '正在整理查询结果'
+                : stageDetailText;
           const stageDetail = visibleStageDetail || 'AskData';
           const stageOutputs = buildAskDataStageOutput(
             {
@@ -2762,8 +2816,12 @@ const Playground: NextPage = () => {
                         taskId: payload.task_id,
                         startedAt:
                           isQueryLifecycleStage && payload.stage === 'formatting' ? step.startedAt : payload.started_at,
-                        endedAt: payload.ended_at,
-                        durationMs: typeof payload.duration_ms === 'number' ? payload.duration_ms : step.durationMs,
+                        endedAt: deferFormattingCompletion ? step.endedAt : payload.ended_at || step.endedAt,
+                        durationMs: deferFormattingCompletion
+                          ? step.durationMs
+                          : typeof payload.duration_ms === 'number'
+                            ? payload.duration_ms
+                            : step.durationMs,
                         result: payload.result || step.result,
                         error: payload.error || step.error,
                         scene: eventSceneId ? { scene_id: eventSceneId, name: eventSceneName } : step.scene,
@@ -2860,10 +2918,9 @@ const Playground: NextPage = () => {
                     if (['succeeded', 'partial_succeeded'].includes(resultStatus)) {
                       return {
                         ...step,
-                        title:
-                          resultStatus === 'partial_succeeded' ? '查询部分成功，结果整理中' : '查询成功，结果整理中',
+                        title: resultStatus === 'partial_succeeded' ? '查询部分成功' : '查询成功',
                         detail: `已获取 ${resultScenes.length} 个场景、${resultRowCount} 行结果`,
-                        status: 'running',
+                        status: 'done',
                         result: askDataResult,
                       };
                     }
@@ -2935,6 +2992,27 @@ const Playground: NextPage = () => {
             }
             const nextTasks = payload.tasks as TaskItem[];
             setTaskPlan(nextTasks);
+            const todoMeta = getTodoProgressMeta(nextTasks);
+            const { done, total } = todoMeta;
+            setExecutionMap(prev => {
+              const current = prev[responseId];
+              if (!current) return prev;
+              let latestTodoIndex = -1;
+              for (let index = current.steps.length - 1; index >= 0; index -= 1) {
+                const step = current.steps[index];
+                if (step.action === 'todowrite' || step.title?.startsWith('TODO::')) {
+                  latestTodoIndex = index;
+                  break;
+                }
+              }
+              if (latestTodoIndex < 0) return prev;
+              const steps = current.steps.map((step, index) =>
+                index === latestTodoIndex
+                  ? { ...step, title: `TODO::${todoMeta.state}:${done}/${total}`, todoMeta }
+                  : step,
+              );
+              return { ...prev, [responseId]: { ...current, steps } };
+            });
             setMessages(prev =>
               prev.map(msg => {
                 if (msg.id !== responseId || msg.role !== 'view') return msg;
@@ -2983,18 +3061,14 @@ const Playground: NextPage = () => {
                       todoMeta: payload.todo_meta || step.todoMeta,
                       status: 'running' as const,
                     }
-                  : step.status === 'running' && !isAskDataAwaitingFinalAnswer(step)
+                  : step.status === 'running'
                     ? { ...step, status: 'done' as const }
                     : step,
               );
             } else {
               // New step - mark running steps as done and add new step
               nextSteps = [
-                ...current.steps.map(item =>
-                  item.status === 'running' && !isAskDataAwaitingFinalAnswer(item)
-                    ? { ...item, status: 'done' as const }
-                    : item,
-                ),
+                ...current.steps.map(item => (item.status === 'running' ? { ...item, status: 'done' as const } : item)),
                 {
                   id,
                   step: payload.step,
@@ -3074,16 +3148,13 @@ const Playground: NextPage = () => {
                 todoMeta: payload.todo_meta || item.todoMeta,
               };
             });
-            // Route model-provided action display fields to the subtle status row.
-            const displayThought = payload.action_intention
-              ? payload.action_reason
-                ? `${payload.action_intention}\n${payload.action_reason}`
-                : payload.action_intention
-              : payload.thought;
+            // Only explicit thought-stream events populate the thought bubble.
+            // Action intention and reason remain execution metadata.
+            const displayThought = typeof payload.thought === 'string' ? payload.thought : '';
             const nextThoughts = displayThought
               ? {
                   ...current.stepThoughts,
-                  [payload.id]: displayThought,
+                  [payload.id]: current.stepThoughts?.[payload.id] || displayThought,
                 }
               : current.stepThoughts;
             let nextActiveStepId = payload.action ? payload.id : current.activeStepId;
@@ -3169,9 +3240,32 @@ const Playground: NextPage = () => {
             const targetId = id || current.activeStepId;
             if (!targetId) return prev;
             const nextSteps = current.steps.map(item =>
-              item.id === targetId ? { ...item, status: payload.status || 'done' } : item,
+              item.id === targetId
+                ? {
+                    ...item,
+                    status: payload.status || 'done',
+                    errorType: payload.error_type || item.errorType,
+                    errorMessage: payload.error_message || item.errorMessage,
+                  }
+                : item.parentId === targetId && item.action === 'final_response_thought'
+                  ? { ...item, status: 'done' as const, detail: t('click_to_view_thinking') }
+                  : item,
             );
             return { ...prev, [responseId]: { ...current, steps: nextSteps } };
+          });
+        } else if (payload.type === 'step.retry_resolved') {
+          const id = payload.id;
+          if (!id) return;
+          setExecutionMap(prev => {
+            const current = prev[responseId];
+            if (!current) return prev;
+            return {
+              ...prev,
+              [responseId]: {
+                ...current,
+                steps: current.steps.map(item => (item.id === id ? { ...item, retryResolved: true } : item)),
+              },
+            };
           });
         } else if (payload.type === 'step.thought') {
           const content = payload.content || '';
@@ -3195,6 +3289,50 @@ const Playground: NextPage = () => {
               const current = prev[responseId];
               if (!current) return prev;
               const targetId = payload.id || current.activeStepId || 'initial';
+              const parent = current.steps.find(step => step.id === targetId && step.action === 'final_response');
+              if (parent) {
+                const thoughtStepId = `${parent.id}-thought`;
+                const existingThought = current.steps.find(step => step.id === thoughtStepId);
+                const existingOutput = (current.outputs[thoughtStepId] || []).find(
+                  output => output.output_type === 'markdown',
+                );
+                const thoughtText = `${String(existingOutput?.content || '')}${normalizedThought}`;
+                const thoughtStep: ExecutionStep = existingThought
+                  ? {
+                      ...existingThought,
+                      detail: t('thinking_process_streaming'),
+                      status: 'running',
+                    }
+                  : {
+                      id: thoughtStepId,
+                      step: parent.step + 1,
+                      title: t('thinking_process'),
+                      detail: t('thinking_process_streaming'),
+                      status: 'running',
+                      action: 'final_response_thought',
+                      parentId: parent.id,
+                    };
+                const steps = [...current.steps];
+                const thoughtIndex = steps.findIndex(step => step.id === thoughtStepId);
+                if (thoughtIndex >= 0) {
+                  steps[thoughtIndex] = thoughtStep;
+                } else {
+                  const parentIndex = steps.findIndex(step => step.id === parent.id);
+                  steps.splice(parentIndex + 1, 0, thoughtStep);
+                }
+                const numberedSteps = steps.map((step, index) => ({ ...step, step: index + 1 }));
+                return {
+                  ...prev,
+                  [responseId]: {
+                    ...current,
+                    steps: numberedSteps,
+                    outputs: {
+                      ...current.outputs,
+                      [thoughtStepId]: [{ output_type: 'markdown', content: thoughtText }],
+                    },
+                  },
+                };
+              }
               return {
                 ...prev,
                 [responseId]: {
@@ -3216,74 +3354,14 @@ const Playground: NextPage = () => {
                 ? 'cancelled'
                 : 'done';
           settleResponseState(finalStepStatus);
-          setExecutionMap(prev => {
-            const current = prev[responseId];
-            if (!current) return prev;
-            const endedAt = new Date().toISOString();
-            const steps = current.steps.map(step => {
-              if (step.stage !== 'query' || !step.result) return step;
-              const result = step.result as AskDataQueryResponse;
-              const resultStatus = String(result.status || '').toLowerCase();
-              if (!['succeeded', 'partial_succeeded'].includes(resultStatus)) return step;
-              const resultScenes = getAskDataSceneResults(result);
-              const resultRowCount = resultScenes.reduce(
-                (total: number, scene: any) => total + (Number(scene?.row_count) || 0),
-                0,
-              );
-              const title =
-                finalStepStatus === 'done'
-                  ? resultStatus === 'partial_succeeded'
-                    ? '查询部分成功'
-                    : '查询成功'
-                  : finalStepStatus === 'cancelled'
-                    ? '查询已完成，答复已取消'
-                    : '查询成功，答复生成失败';
-              const startedAt = step.startedAt ? Date.parse(step.startedAt) : Number.NaN;
-              return {
-                ...step,
-                title,
-                detail: `返回 ${resultScenes.length} 个场景、${resultRowCount} 行结果`,
-                status: finalStepStatus,
-                endedAt,
-                durationMs: Number.isFinite(startedAt) ? Math.max(0, Date.parse(endedAt) - startedAt) : step.durationMs,
-              };
-            });
-            const completedQuerySteps = steps.filter(
-              step =>
-                step.stage === 'query' &&
-                ['succeeded', 'partial_succeeded'].includes(String(step.result?.status || '').toLowerCase()),
-            );
-            if (!completedQuerySteps.length) return prev;
-            const outputs = { ...current.outputs };
-            completedQuerySteps.forEach(step => {
-              outputs[step.id] = [
-                {
-                  output_type: 'markdown',
-                  content:
-                    finalStepStatus === 'done'
-                      ? '最终答复已生成。'
-                      : finalStepStatus === 'cancelled'
-                        ? '最终答复已取消。'
-                        : '最终答复未能完成。',
-                },
-              ];
-            });
-            return {
-              ...prev,
-              [responseId]: {
-                ...current,
-                steps,
-                outputs,
-              },
-            };
-          });
           notifyChatDialogueRefresh();
+          const summaryText = cleanFinalContent(payload.content || '');
           setMessages(prev =>
             prev.map(msg => {
               if (msg.id !== responseId || msg.role !== 'view') return msg;
               return {
                 ...msg,
-                context: cleanFinalContent(payload.content || ''),
+                context: summaryText,
                 thinking: false,
                 runStatus: normalizeReactRunStatus(payload.status) || msg.runStatus,
                 terminationReason:
@@ -3294,89 +3372,76 @@ const Playground: NextPage = () => {
           );
           setTaskPlan([]);
           setActiveMessageId(responseId);
+          setStreamingSummary(summaryText);
+          setSummaryComplete(true);
 
-          if (payload.content && payload.content.trim()) {
-            setStreamingSummary('');
-            setSummaryComplete(false);
-            setRightPanelTab('summary');
-            setRightPanelView('summary');
+          if (summaryText) {
+            if (!selectedStepIdRef.current || rightPanelViewRef.current !== 'execution') {
+              setRightPanelTab('summary');
+              setRightPanelView('summary');
+            }
 
-            const summaryText = cleanFinalContent(payload.content);
-            const streamInterval = setInterval(() => {
-              setStreamingSummary(prev => {
-                if (prev.length >= summaryText.length) {
-                  clearInterval(streamInterval);
-                  setSummaryComplete(true);
+            setExecutionMap(currentExecMap => {
+              const execution = currentExecMap[responseId];
+              const deduped = buildArtifactsFromExecution(
+                responseId,
+                execution || { steps: [], outputs: {} },
+                summaryText,
+                uploadedFilePath,
+              );
 
-                  setExecutionMap(currentExecMap => {
-                    const execution = currentExecMap[responseId];
-                    const deduped = buildArtifactsFromExecution(
-                      responseId,
-                      execution || { steps: [], outputs: {} },
-                      summaryText,
-                      uploadedFilePath,
-                    );
+              setArtifacts(prevArtifacts => {
+                const filtered = prevArtifacts.filter(a => a.messageId !== responseId);
+                const newArtifacts = [...filtered, ...deduped];
 
-                    setArtifacts(prevArtifacts => {
-                      const filtered = prevArtifacts.filter(a => a.messageId !== responseId);
-                      const newArtifacts = [...filtered, ...deduped];
-
-                      // Auto-select the first HTML artifact for preview, or image if no HTML
-                      const htmlArtifact = deduped.find(a => a.type === 'html');
-                      if (htmlArtifact) {
-                        setPreviewArtifact(htmlArtifact as Artifact);
-                        setRightPanelView('html-preview');
-                      } else {
-                        const imgArtifact = deduped.find(a => a.type === 'image');
-                        if (imgArtifact) {
-                          setPreviewArtifact(imgArtifact as Artifact);
-                          setRightPanelView('image-preview');
-                        }
-                      }
-
-                      return newArtifacts;
-                    });
-
-                    // Detect skill creation from shell_interpreter steps
-                    if (execution) {
-                      const isSkillPackageStep = (s: ExecutionStep) => {
-                        if (s.action !== 'shell_interpreter') return false;
-                        // Check detail, actionInput, and outputs for package_skill/init_skill
-                        const detailHas = s.detail?.includes('package_skill') || s.detail?.includes('init_skill');
-                        const inputHas =
-                          s.actionInput?.includes('package_skill') || s.actionInput?.includes('init_skill');
-                        const outputTexts = (execution.outputs[s.id] || []).map(o => String(o.content)).join(' ');
-                        const outputHas =
-                          outputTexts.includes('package_skill') ||
-                          outputTexts.includes('init_skill') ||
-                          outputTexts.includes('Successfully packaged');
-                        return detailHas || inputHas || outputHas;
-                      };
-                      const skillStep = (execution.steps || []).find(isSkillPackageStep);
-                      if (skillStep) {
-                        // Extract skill name from actionInput, detail, or outputs
-                        const allText = [
-                          skillStep.actionInput || '',
-                          skillStep.detail || '',
-                          ...(execution.outputs[skillStep.id] || []).map(o => String(o.content)),
-                        ].join(' ');
-                        const skillName = extractCreatedSkillName(allText);
-                        if (skillName) {
-                          setCreatedSkillNames(prev => ({ ...prev, [responseId]: skillName }));
-                          setRightPanelView('skill-preview');
-                        }
-                      }
-                    }
-
-                    return currentExecMap;
-                  });
-
-                  return prev;
+                // Auto-select the first HTML artifact for preview, or image if no HTML
+                const htmlArtifact = deduped.find(a => a.type === 'html');
+                if (htmlArtifact) {
+                  setPreviewArtifact(htmlArtifact as Artifact);
+                  setRightPanelView('html-preview');
+                } else {
+                  const imgArtifact = deduped.find(a => a.type === 'image');
+                  if (imgArtifact) {
+                    setPreviewArtifact(imgArtifact as Artifact);
+                    setRightPanelView('image-preview');
+                  }
                 }
-                const chunkSize = Math.min(3, summaryText.length - prev.length);
-                return prev + summaryText.slice(prev.length, prev.length + chunkSize);
+
+                return newArtifacts;
               });
-            }, 15);
+
+              // Detect skill creation from shell_interpreter steps
+              if (execution) {
+                const isSkillPackageStep = (s: ExecutionStep) => {
+                  if (s.action !== 'shell_interpreter') return false;
+                  // Check detail, actionInput, and outputs for package_skill/init_skill
+                  const detailHas = s.detail?.includes('package_skill') || s.detail?.includes('init_skill');
+                  const inputHas = s.actionInput?.includes('package_skill') || s.actionInput?.includes('init_skill');
+                  const outputTexts = (execution.outputs[s.id] || []).map(o => String(o.content)).join(' ');
+                  const outputHas =
+                    outputTexts.includes('package_skill') ||
+                    outputTexts.includes('init_skill') ||
+                    outputTexts.includes('Successfully packaged');
+                  return detailHas || inputHas || outputHas;
+                };
+                const skillStep = (execution.steps || []).find(isSkillPackageStep);
+                if (skillStep) {
+                  // Extract skill name from actionInput, detail, or outputs
+                  const allText = [
+                    skillStep.actionInput || '',
+                    skillStep.detail || '',
+                    ...(execution.outputs[skillStep.id] || []).map(o => String(o.content)),
+                  ].join(' ');
+                  const skillName = extractCreatedSkillName(allText);
+                  if (skillName) {
+                    setCreatedSkillNames(prev => ({ ...prev, [responseId]: skillName }));
+                    setRightPanelView('skill-preview');
+                  }
+                }
+              }
+
+              return currentExecMap;
+            });
           }
         } else if (payload.type === 'done') {
           settleResponseState();
@@ -3455,6 +3520,12 @@ const Playground: NextPage = () => {
 
         if (payload && (payload.version === 1 || payload.version === 2) && payload.type === 'react-agent') {
           const historyPayloadSteps = expandAskDataHistorySteps(payload.steps || [], askDataSceneNameByIdRef.current);
+          const restoredTaskPlan: TaskItem[] = Array.isArray(payload.task_plan)
+            ? payload.task_plan
+            : Array.isArray(payload.tasks)
+              ? payload.tasks
+              : [];
+          const restoredTodoMeta = getTodoProgressMeta(restoredTaskPlan);
           const steps: ExecutionStep[] = historyPayloadSteps.map((s: any, idx: number) => {
             const historyStatus: ExecutionStep['status'] =
               s.status === 'done' || s.status === 'completed'
@@ -3468,10 +3539,11 @@ const Playground: NextPage = () => {
               title: s.title || s.action || `Step ${idx + 1}`,
               detail: s.detail || '',
               status: s.status === 'running' && s.action === 'ask_data_stage' ? 'failed' : historyStatus,
-              action: s.action,
+              action: s.kind === 'final_response' ? 'final_response' : s.action,
               actionInput: s.action_input || undefined,
               errorType: s.error_type || undefined,
               errorMessage: s.error_message || undefined,
+              retryResolved: Boolean(s.retry_resolved),
               askDataCallId: s.ask_data_call_id || undefined,
               askDataReused: Boolean(s.ask_data_reused),
               parentId: s.parent_id || undefined,
@@ -3487,6 +3559,18 @@ const Playground: NextPage = () => {
               todoMeta: s.todo_meta || undefined,
             };
           });
+          if (restoredTaskPlan.length > 0) {
+            for (let index = steps.length - 1; index >= 0; index -= 1) {
+              if (steps[index].action === 'todowrite' || steps[index].title?.startsWith('TODO::')) {
+                steps[index] = {
+                  ...steps[index],
+                  title: `TODO::${restoredTodoMeta.state}:${restoredTodoMeta.done}/${restoredTodoMeta.total}`,
+                  todoMeta: restoredTodoMeta,
+                };
+                break;
+              }
+            }
+          }
 
           const outputs: Record<string, ExecutionOutput[]> = {};
           const stepThoughts: Record<string, string> = {};
@@ -3513,25 +3597,39 @@ const Playground: NextPage = () => {
                 }
               }
             }
-            const historyThought = s.action_intention
-              ? s.action_reason
-                ? `${s.action_intention}\n${s.action_reason}`
-                : s.action_intention
-              : s.thought;
+            const historyThought = s.kind === 'final_response' ? s.thought : undefined;
             if (historyThought) {
+              let thoughtText = '';
               if (typeof historyThought === 'string') {
-                stepThoughts[stepId] = historyThought;
+                thoughtText = historyThought;
               } else if (typeof historyThought === 'object') {
                 const todoValue = (historyThought as Record<string, unknown>).TODO;
                 if (typeof todoValue === 'string') {
-                  stepThoughts[stepId] = todoValue;
+                  thoughtText = todoValue;
                 } else {
                   try {
-                    stepThoughts[stepId] = JSON.stringify(historyThought);
+                    thoughtText = JSON.stringify(historyThought);
                   } catch {
-                    stepThoughts[stepId] = String(historyThought);
+                    thoughtText = String(historyThought);
                   }
                 }
+              }
+              const parent = steps.find(step => step.id === stepId && step.action === 'final_response');
+              if (parent && thoughtText) {
+                const thoughtStepId = `${stepId}-thought`;
+                const parentIndex = steps.findIndex(step => step.id === stepId);
+                steps.splice(parentIndex + 1, 0, {
+                  id: thoughtStepId,
+                  step: parent.step + 1,
+                  title: t('thinking_process'),
+                  detail: t('click_to_view_thinking'),
+                  status: 'done',
+                  action: 'final_response_thought',
+                  parentId: stepId,
+                });
+                const numberedSteps = steps.map((step, stepIndex) => ({ ...step, step: stepIndex + 1 }));
+                steps.splice(0, steps.length, ...numberedSteps);
+                outputs[thoughtStepId] = [{ output_type: 'markdown', content: thoughtText }];
               }
             }
           });
@@ -3580,11 +3678,7 @@ const Playground: NextPage = () => {
             context: finalContent,
             order: msg.order,
             thinking: false,
-            taskPlan: Array.isArray(payload.task_plan)
-              ? payload.task_plan
-              : Array.isArray(payload.tasks)
-                ? payload.tasks
-                : undefined,
+            taskPlan: restoredTaskPlan.length > 0 ? restoredTaskPlan : undefined,
             runStatus: normalizeReactRunStatus(payload.status),
             terminationReason: typeof payload.termination_reason === 'string' ? payload.termination_reason : undefined,
             errorMessage: typeof payload.error_message === 'string' ? payload.error_message : undefined,
@@ -3793,6 +3887,7 @@ const Playground: NextPage = () => {
                               setActiveViewMsgId(round.viewMsg.id);
                               setSelectedStepId(stepId);
                               setRightPanelCollapsed(false);
+                              setRightPanelView('execution');
                               setExecutionMap(prev => ({
                                 ...prev,
                                 [round.viewMsg!.id!]: {

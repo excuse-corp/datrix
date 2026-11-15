@@ -493,6 +493,9 @@ def register_proxy_model_adapter(
         def support_async(self) -> bool:
             return is_async_stream or is_async
 
+        def support_generate_function(self) -> bool:
+            return generate_function is not None
+
         def match(
             self,
             _provider: str,

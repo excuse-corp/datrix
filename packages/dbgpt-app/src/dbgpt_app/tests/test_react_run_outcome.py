@@ -57,6 +57,35 @@ def test_react_stream_idle_timeout_is_configurable(monkeypatch):
     assert api._react_stream_idle_timeout() == 17
 
 
+def test_react_parse_error_limit_defaults_to_one_correction_retry(monkeypatch):
+    monkeypatch.delenv("DATAMAN_REACT_PARSE_ERROR_LIMIT", raising=False)
+
+    assert api._react_parse_error_limit() == 2
+
+
+def test_recovered_parse_error_keeps_original_failure_details():
+    history = [
+        {
+            "id": "step-parse",
+            "status": "failed",
+            "error_type": api.REACT_REASON_PARSE_ERROR,
+            "error_message": "No Action line found",
+        },
+        {
+            "id": "step-tool",
+            "status": "failed",
+            "error_type": api.REACT_REASON_TOOL_ERROR,
+            "error_message": "tool failed",
+        },
+    ]
+
+    assert api._mark_recovered_parse_errors(history) == ["step-parse"]
+    assert history[0]["status"] == "failed"
+    assert history[0]["error_message"] == "No Action line found"
+    assert history[0]["retry_resolved"] is True
+    assert "retry_resolved" not in history[1]
+
+
 def test_open_plan_at_max_steps_preserves_max_steps_reason():
     outcome = api._compute_react_run_outcome(
         _reply(action_report=_action_report()),

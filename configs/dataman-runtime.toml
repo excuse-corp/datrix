@@ -16,19 +16,7 @@ path = "pilot/meta_data/dataman.db"
 type = "chroma"
 persist_path = "pilot/data"
 
-[models]
-[[models.llms]]
-name = "${env:LLM_MODEL_NAME:-Qwen/Qwen2.5-Coder-32B-Instruct}"
-provider = "${env:LLM_MODEL_PROVIDER:-proxy/siliconflow}"
-api_key = "${env:SILICONFLOW_API_KEY}"
-
-[[models.embeddings]]
-name = "${env:EMBEDDING_MODEL_NAME:-BAAI/bge-large-zh-v1.5}"
-provider = "${env:EMBEDDING_MODEL_PROVIDER:-proxy/openai}"
-api_url = "${env:EMBEDDING_MODEL_API_URL:-https://api.siliconflow.cn/v1/embeddings}"
-api_key = "${env:SILICONFLOW_API_KEY}"
-
-[[models.rerankers]]
-name = "BAAI/bge-reranker-v2-m3"
-provider = "proxy/siliconflow"
-api_key = "${env:SILICONFLOW_API_KEY}"
+# LLM, embedding, and reranker configurations are managed in dbgpt_serve_model.
+# The worker manager restores enabled model entries from the database at startup.
+# Keep provider credentials and endpoints in that database configuration instead
+# of duplicating them here as environment-variable-backed model deployments.

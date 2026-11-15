@@ -57,6 +57,10 @@ class ResultColumn(BaseModel):
     key: str
     type: str
     label_key: str | None = None
+    label: str | None = None
+    semantic_key: str | None = None
+    source_field: str | None = None
+    aggregation: str | None = None
     unit: str | None = None
 
 
@@ -70,6 +74,7 @@ class SceneResult(BaseModel):
     status: str
     grain: list[str] = Field(default_factory=list)
     time_grain: str | None = None
+    time_basis: str | None = None
     time_range: TimeRange | None = None
     columns: list[ResultColumn] = Field(default_factory=list)
     rows: list[dict[str, Any]] = Field(default_factory=list)

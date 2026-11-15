@@ -10,36 +10,6 @@ from ..scene.markdown import SemanticMarkdownParser, split_scene_documents
 from ..schemas.semantic import ParsedSemanticDocument, SemanticConfig
 from .markdown import with_managed_frontmatter
 
-_METRIC_HINTS = (
-    "金额",
-    "数量",
-    "总数",
-    "合计",
-    "均值",
-    "平均",
-    "比例",
-    "比率",
-    "率",
-    "预算",
-    "成本",
-    "费用",
-    "收入",
-    "回款",
-    "amount",
-    "count",
-    "qty",
-    "quantity",
-    "rate",
-    "ratio",
-    "total",
-    "sum",
-    "cost",
-    "revenue",
-    "price",
-    "budget",
-    "fee",
-)
-
 _KEY_HINTS = ("id", "code", "no", "key", "编号", "编码", "标识")
 _ENTITY_RULES = (
     (
@@ -122,16 +92,23 @@ def generate_ontology_markdown_from_scene_sources(
 
         for metric in _metric_candidates(config, field_rows):
             entity_id = metric.get("entity_id") or _metric_entity_id(
-                metric, scene_entities, primary_entity_id
+                metric,
+                scene_entities,
+                primary_entity_id,
+                source.get("domain_id"),
             )
-            metric_id = _metric_id(entity_id, metric["key"])
+            metric_id = _metric_id(entity_id, metric["key"], source.get("domain_id"))
             item = metrics.setdefault(
                 metric_id,
                 {
                     "id": metric_id,
                     "name": metric["name"],
+                    "domain_id": source.get("domain_id") or "",
                     "entity_id": entity_id,
                     "unit": metric.get("unit", ""),
+                    "aggregation": metric.get("aggregation", ""),
+                    "grain": metric.get("grain", ""),
+                    "time_basis": metric.get("time_basis", ""),
                     "formula": metric.get("formula", ""),
                     "sources": set(),
                 },
@@ -147,6 +124,7 @@ def generate_ontology_markdown_from_scene_sources(
     entity_rows = [
         [
             item["id"],
+            item.get("domain_id", ""),
             item["name"],
             item.get("aliases", ""),
             item.get("definition", ""),
@@ -165,8 +143,12 @@ def generate_ontology_markdown_from_scene_sources(
         [
             item["id"],
             item["name"],
+            item.get("domain_id", ""),
             item["entity_id"],
             item.get("unit", ""),
+            item.get("aggregation", ""),
+            item.get("grain", ""),
+            item.get("time_basis", ""),
             item.get("formula", ""),
             "、".join(sorted(item["sources"])),
             "无",
@@ -179,7 +161,10 @@ def generate_ontology_markdown_from_scene_sources(
         "",
         "## 业务实体",
         "",
-        _table(["ID", "名称", "别名", "定义", "来源场景", "证据"], entity_rows),
+        _table(
+            ["ID", "领域", "名称", "别名", "定义", "来源场景", "证据"],
+            entity_rows,
+        ),
         "",
         "## 实体关系",
         "",
@@ -191,8 +176,12 @@ def generate_ontology_markdown_from_scene_sources(
             [
                 "ID",
                 "名称",
+                "领域",
                 "所属实体",
                 "单位",
+                "聚合方式",
+                "统计粒度",
+                "时间依据",
                 "计算公式",
                 "来源场景",
                 "冲突说明",
@@ -209,12 +198,22 @@ def generate_ontology_markdown_from_scene_sources(
         _table(
             [
                 "ID",
+                "状态",
+                "关系类型",
                 "左侧场景",
                 "右侧场景",
                 "业务实体",
                 "关联键",
+                "映射依据",
+                "左侧时间依据",
+                "右侧时间依据",
+                "时间对齐条件",
                 "粒度",
+                "粒度对齐条件",
                 "业务含义",
+                "允许分析",
+                "禁止推断",
+                "证据",
             ],
             cross_scene_rows,
         ),
@@ -259,13 +258,20 @@ def _entity_candidates(
         " ".join(f"{row.get('field', '')} {row.get('name', '')}" for row in field_rows),
     ]
     haystack = " ".join(str(part) for part in text_parts)
-    primary_id = _candidate_entity_id(source, config)
+    domain_id = str(source.get("domain_id") or "").strip()
+
+    def qualify(entity_id: str) -> str:
+        return f"{domain_id}.{entity_id}" if domain_id else entity_id
+
+    primary_id = qualify(_candidate_entity_id(source, config))
     candidates: dict[str, dict[str, str]] = {}
     for entity_id, name, tokens, definition in _ENTITY_RULES:
         if not any(token.lower() in haystack.lower() for token in tokens):
             continue
+        entity_id = qualify(entity_id)
         candidates[entity_id] = {
             "id": entity_id,
+            "domain_id": domain_id,
             "name": name,
             "aliases": "",
             "definition": definition,
@@ -273,6 +279,7 @@ def _entity_candidates(
     if primary_id not in candidates:
         candidates[primary_id] = {
             "id": primary_id,
+            "domain_id": domain_id,
             "name": _candidate_entity_name(source, config),
             "aliases": "待确认",
             "definition": _first_sentence(
@@ -302,18 +309,32 @@ def _entity_rule_name(entity_id: str) -> str:
 
 
 def _metric_entity_id(
-    metric: dict[str, str], entities: list[dict[str, str]], fallback: str
+    metric: dict[str, str],
+    entities: list[dict[str, str]],
+    fallback: str,
+    domain_id: str | None = None,
 ) -> str:
     text = f"{metric.get('key', '')} {metric.get('name', '')} {metric.get('field', '')}"
     detected = _entity_rule_id(text)
     available = {entity["id"] for entity in entities}
+    qualified = f"{domain_id}.{detected}" if domain_id and detected else detected
+    if qualified in available:
+        return qualified
     if detected in available:
         return detected
     return fallback
 
 
-def _metric_id(entity_id: str, key: str) -> str:
+def _metric_id(entity_id: str, key: str, domain_id: str | None = None) -> str:
     normalized = _stable_id(key)
+    if domain_id:
+        prefix = f"{domain_id}."
+        local_entity_id = (
+            entity_id[len(prefix) :] if entity_id.startswith(prefix) else entity_id
+        )
+        if normalized.startswith(f"{local_entity_id}_"):
+            normalized = normalized[len(local_entity_id) + 1 :]
+        return f"{domain_id}.{local_entity_id}.{normalized}"
     return (
         normalized
         if normalized.startswith(f"{entity_id}_")
@@ -322,7 +343,7 @@ def _metric_id(entity_id: str, key: str) -> str:
 
 
 def _entity_relation_candidates(
-    entities_by_scene: dict[str, set[str]]
+    entities_by_scene: dict[str, set[str]],
 ) -> list[list[str]]:
     """Suggest co-occurring entity relations for human review."""
     seen: set[str] = set()
@@ -357,10 +378,15 @@ def _normalize_source(source: Any) -> dict[str, Any]:
     projection = getattr(snapshot, "routing_projection", {}) or {}
     runtime = getattr(snapshot, "runtime_config", {}) or {}
     documents = runtime.get("documents", {}) if isinstance(runtime, dict) else {}
-    if (
-        not isinstance(semantic_md, str)
-        or not semantic_md.strip()
-    ) and isinstance(documents, dict):
+    source_documents = source.get("documents") if isinstance(source, dict) else None
+    if isinstance(source_documents, dict):
+        documents = {
+            **(documents if isinstance(documents, dict) else {}),
+            **source_documents,
+        }
+    if (not isinstance(semantic_md, str) or not semantic_md.strip()) and isinstance(
+        documents, dict
+    ):
         semantic_md = documents.get("semantic_md")
     source_hashes = getattr(snapshot, "source_hashes", None)
     scene_id = getattr(snapshot, "scene_id", "")
@@ -376,6 +402,12 @@ def _normalize_source(source: Any) -> dict[str, Any]:
         "description": str(projection.get("description") or ""),
         "semantic_md": semantic_md,
         "documents": documents if isinstance(documents, dict) else {},
+        "domain_id": (
+            str(parsed.config.domain_id).strip()
+            if (parsed := _parse_semantic(str(semantic_md or "")))
+            and parsed.config.domain_id
+            else None
+        ),
     }
 
 
@@ -391,11 +423,23 @@ def _parse_semantic(markdown: str) -> ParsedSemanticDocument | None:
 def _source_documents(
     source: dict[str, Any], parsed: ParsedSemanticDocument | None
 ) -> dict[str, str]:
-    if parsed is not None:
-        return split_scene_documents(parsed.body_markdown)
     documents = (
         source.get("documents") if isinstance(source.get("documents"), dict) else {}
     )
+    if parsed is not None:
+        split = split_scene_documents(parsed.body_markdown)
+        return {
+            "data_dictionary_md": str(
+                documents.get("data_dictionary_md")
+                or split.get("data_dictionary_md")
+                or ""
+            ),
+            "business_semantics_md": str(
+                documents.get("business_semantics_md")
+                or split.get("business_semantics_md")
+                or ""
+            ),
+        }
     return {
         "data_dictionary_md": str(documents.get("data_dictionary_md") or ""),
         "business_semantics_md": str(documents.get("business_semantics_md") or ""),
@@ -426,34 +470,27 @@ def _metric_candidates(
     config: SemanticConfig | None,
     dictionary_rows: list[dict[str, str]],
 ) -> list[dict[str, str]]:
-    candidates: list[dict[str, str]] = []
-    if config is not None:
-        for metric in config.metrics:
-            key = metric.key
-            candidates.append(
-                {
-                    "key": key,
-                    "semantic_key": key,
-                    "name": metric.name or key,
-                    "unit": metric.unit or "",
-                    "formula": "",
-                }
-            )
-    if candidates:
-        return candidates
+    """Return only metrics declared in the scene semantic document.
 
-    for row in dictionary_rows:
-        field = row.get("field", "")
-        name = row.get("name") or row.get("description") or field
-        haystack = f"{field} {name} {row.get('type', '')}".lower()
-        if not any(hint.lower() in haystack for hint in _METRIC_HINTS):
-            continue
+    Dictionary rows may enrich a declared metric's field mapping and metadata,
+    but a field name or description alone must never create a business metric.
+    """
+    candidates: list[dict[str, str]] = []
+    for metric in config.metrics if config is not None else []:
+        key = metric.key
+        field = metric.field or key
+        dictionary = next(
+            (row for row in dictionary_rows if row.get("field") == field), {}
+        )
         candidates.append(
             {
-                "key": _stable_id(field or name),
-                "semantic_key": "",
-                "name": name,
-                "unit": _infer_unit(name),
+                "key": key,
+                "semantic_key": dictionary.get("semantic_key") or key,
+                "name": metric.name or key,
+                "unit": metric.unit or dictionary.get("unit") or "",
+                "aggregation": metric.aggregation,
+                "grain": dictionary.get("grain", ""),
+                "time_basis": dictionary.get("time_basis", ""),
                 "formula": "",
             }
         )
@@ -477,25 +514,26 @@ def scene_semantic_keys_from_source(source: Any) -> set[str]:
     if config is not None:
         keys.update(str(item.key) for item in config.dimensions if item.key)
         keys.update(str(item.key) for item in config.metrics if item.key)
-    amount_fields = False
-    date_fields = False
     for row in field_rows:
         field = row.get("field") or row.get("name") or ""
         if not field:
             continue
         field_key = _stable_id(field)
         keys.add(field_key)
-        amount_fields = amount_fields or _is_amount_like_field(row)
-        date_fields = date_fields or _is_date_like_field(row)
+        if row.get("semantic_key"):
+            keys.add(str(row["semantic_key"]))
         for entity_id in binding_entity_ids:
-            for suffix in _field_binding_suffixes(entity_id, field_key, row):
+            for suffix in _field_binding_suffixes(entity_id, field_key):
                 keys.add(f"{entity_id}.{suffix}")
     metric_candidates = _metric_candidates(config, field_rows)
     for metric in metric_candidates:
         entity_id = metric.get("entity_id") or _metric_entity_id(
-            metric, scene_entities, primary_entity_id
+            metric,
+            scene_entities,
+            primary_entity_id,
+            normalized.get("domain_id"),
         )
-        metric_id = _metric_id(entity_id, metric["key"])
+        metric_id = _metric_id(entity_id, metric["key"], normalized.get("domain_id"))
         keys.add(metric.get("semantic_key") or metric_id)
         keys.add(metric_id)
         keys.add(metric["key"])
@@ -503,22 +541,8 @@ def scene_semantic_keys_from_source(source: Any) -> set[str]:
             for suffix in _field_binding_suffixes(
                 alias_entity_id,
                 _stable_id(metric["key"]),
-                metric,
             ):
                 keys.add(f"{alias_entity_id}.{suffix}")
-    for entity_id in binding_entity_ids:
-        keys.add(f"{entity_id}.count")
-        if amount_fields:
-            keys.add(f"{entity_id}.amount_missing_count")
-            keys.add(f"{entity_id}.missing_amount_count")
-        if date_fields:
-            keys.add(f"{entity_id}.date_missing_count")
-            keys.add(f"{entity_id}.missing_date_count")
-        if _has_contract_amount(field_rows) and _has_paid_amount(field_rows):
-            keys.add(f"{entity_id}.contract_paid_ratio")
-            keys.add(f"{entity_id}.contract_unpaid_balance")
-            keys.add(f"{entity_id}.paid_ratio")
-            keys.add(f"{entity_id}.unpaid_balance")
     return {key for key in keys if key}
 
 
@@ -527,21 +551,23 @@ def _binding_primary_entity_id(
 ) -> str:
     available = {entity["id"] for entity in entities}
     scores = {entity_id: 0 for entity_id in available}
+    domain_id = fallback.split(".", 1)[0] if "." in fallback else ""
     for row in field_rows:
         text = " ".join(
             str(row.get(key) or "") for key in ("field", "name", "description")
         ).lower()
         for entity_id, _, tokens, _ in _ENTITY_RULES:
-            if entity_id not in scores:
+            candidate_id = f"{domain_id}.{entity_id}" if domain_id else entity_id
+            if candidate_id not in scores:
                 continue
             if any(token.lower() in text for token in tokens):
-                scores[entity_id] += 1
-    known_ids = {entity_id for entity_id, *_ in _ENTITY_RULES}
+                scores[candidate_id] += 1
     ranked = sorted(
         (
             (score, entity_id)
             for entity_id, score in scores.items()
-            if entity_id in known_ids
+            if entity_id.split(".", 1)[-1]
+            in {known_id for known_id, *_ in _ENTITY_RULES}
         ),
         key=lambda item: (-item[0], item[1]),
     )
@@ -558,20 +584,21 @@ def _binding_entity_ids(
     entities: list[dict[str, str]], primary_entity_id: str
 ) -> list[str]:
     known_ids = {entity_id for entity_id, *_ in _ENTITY_RULES}
+    domain_id = primary_entity_id.split(".", 1)[0] if "." in primary_entity_id else ""
     ordered = [primary_entity_id]
     ordered.extend(
         sorted(
             entity["id"]
             for entity in entities
-            if entity["id"] in known_ids and entity["id"] != primary_entity_id
+            if entity["id"].split(".", 1)[-1] in known_ids
+            and entity["id"] != primary_entity_id
+            and (not domain_id or entity["id"].startswith(f"{domain_id}."))
         )
     )
     return list(dict.fromkeys(item for item in ordered if item))
 
 
-def _field_binding_suffixes(
-    entity_id: str, field_key: str, row: dict[str, str]
-) -> set[str]:
+def _field_binding_suffixes(entity_id: str, field_key: str) -> set[str]:
     suffixes = {field_key}
     for prefix, *_ in _ENTITY_RULES:
         marker = f"{prefix}_"
@@ -580,63 +607,7 @@ def _field_binding_suffixes(
     marker = f"{entity_id}_"
     if field_key.startswith(marker):
         suffixes.add(field_key[len(marker) :])
-    if _is_amount_like_field(row):
-        for suffix in list(suffixes):
-            if suffix and not suffix.endswith("_amount"):
-                suffixes.add(f"{suffix}_amount")
     return {suffix for suffix in suffixes if suffix}
-
-
-def _is_amount_like_field(row: dict[str, str]) -> bool:
-    text = " ".join(
-        str(row.get(key) or "") for key in ("field", "name", "description")
-    ).lower()
-    return any(
-        token in text
-        for token in (
-            "金额",
-            "预算",
-            "成本",
-            "费用",
-            "收入",
-            "回款",
-            "付款",
-            "amount",
-            "budget",
-            "cost",
-            "fee",
-            "revenue",
-            "paid",
-            "payment",
-            "price",
-        )
-    )
-
-
-def _is_date_like_field(row: dict[str, str]) -> bool:
-    text = " ".join(
-        str(row.get(key) or "") for key in ("field", "name", "type", "description")
-    ).lower()
-    return any(token in text for token in ("日期", "时间", "date", "time"))
-
-
-def _has_contract_amount(field_rows: list[dict[str, str]]) -> bool:
-    return any(
-        "contract" in _stable_id(row.get("field") or row.get("name") or "")
-        and _is_amount_like_field(row)
-        for row in field_rows
-    )
-
-
-def _has_paid_amount(field_rows: list[dict[str, str]]) -> bool:
-    return any(
-        any(
-            token in _stable_id(row.get("field") or row.get("name") or "")
-            for token in ("paid", "payment")
-        )
-        and _is_amount_like_field(row)
-        for row in field_rows
-    )
 
 
 def _dictionary_rows(markdown: str) -> list[dict[str, str]]:
@@ -683,6 +654,21 @@ def _dictionary_rows(markdown: str) -> list[dict[str, str]]:
                             "描述",
                             "说明",
                         ),
+                        "semantic_key": _first(
+                            mapped,
+                            "semantic_key",
+                            "semantic key",
+                            "语义键",
+                            "指标语义键",
+                        ),
+                        "unit": _first(mapped, "unit", "单位", "计量单位"),
+                        "aggregation": _first(
+                            mapped, "aggregation", "聚合", "聚合方式", "计算口径"
+                        ),
+                        "grain": _first(mapped, "grain", "粒度", "统计粒度"),
+                        "time_basis": _first(
+                            mapped, "time basis", "时间依据", "统计时间依据"
+                        ),
                         "type": _first(mapped, "type", "类型", "数据类型", "datatype"),
                         "description": _first(
                             mapped,
@@ -702,7 +688,7 @@ def _dictionary_rows(markdown: str) -> list[dict[str, str]]:
 
 
 def _cross_scene_candidates(
-    fields_by_scene: dict[str, list[dict[str, str]]]
+    fields_by_scene: dict[str, list[dict[str, str]]],
 ) -> list[list[str]]:
     by_key: dict[str, list[tuple[str, str]]] = {}
     for scene_id, rows in fields_by_scene.items():
@@ -723,12 +709,22 @@ def _cross_scene_candidates(
         candidates.append(
             [
                 _stable_id(f"{left}_{right}_{key}"),
+                "candidate",
+                "related_but_not_equivalent",
                 left,
                 right,
                 "待确认",
                 key,
+                "仅发现同名字段，主数据映射尚未确认",
+                "",
+                "",
+                "",
                 "未明确",
+                "",
                 "同名或相似键跨场景共现，业务含义需结合实际口径判断",
+                "",
+                "不得将字段同名视为同一业务对象或直接比较指标",
+                "候选由数据字典字段名共现生成，需业务确认",
             ]
         )
     return candidates
@@ -757,30 +753,6 @@ def _unique_id(candidate: str, seen: set[str], salt: str) -> str:
         counter += 1
     seen.add(value)
     return value
-
-
-def _infer_unit(name: str) -> str:
-    text = name.lower()
-    if any(token in text for token in ("率", "比例", "rate", "ratio", "%")):
-        return "%"
-    if any(
-        token in text
-        for token in (
-            "金额",
-            "成本",
-            "费用",
-            "收入",
-            "预算",
-            "amount",
-            "cost",
-            "revenue",
-            "price",
-            "budget",
-            "fee",
-        )
-    ):
-        return "元"
-    return ""
 
 
 def _first_sentence(value: str, max_len: int = 120) -> str:

@@ -207,6 +207,15 @@ async def chatgpt_generate_stream(
         yield r
 
 
+async def chatgpt_generate(
+    model: ProxyModel, tokenizer, params, device, context_len=2048
+) -> ModelOutput:
+    """Generate a complete response without opening a provider stream."""
+    client: OpenAILLMClient = model.proxy_llm_client
+    request = parse_model_request(params, client.default_model, stream=False)
+    return await client.generate(request)
+
+
 @register_resource(
     label=_("OpenAI LLM Client"),
     name="openai_llm_client",
@@ -338,6 +347,11 @@ class OpenAILLMClient(ProxyLLMClient):
                 generate stream function
         """
         return chatgpt_generate_stream
+
+    @classmethod
+    def generate_function(cls):
+        """Use a single completion for requests that do not need streaming."""
+        return chatgpt_generate
 
     @property
     def client(self) -> "ClientType":
@@ -496,7 +510,8 @@ class OpenAILLMClient(ProxyLLMClient):
         message_obj = chat_completion.choices[0].message
         reasoning_content = _message_reasoning_text(message_obj)
         text = chat_completion.choices[0].message.content or ""
-        usage = chat_completion.usage.dict()
+        usage_obj = getattr(chat_completion, "usage", None)
+        usage = usage_obj.dict() if usage_obj is not None else None
         return ModelOutput.build(text, reasoning_content, usage=usage)
 
     async def generate_stream_v1(

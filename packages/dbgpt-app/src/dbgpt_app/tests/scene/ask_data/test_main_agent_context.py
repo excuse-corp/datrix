@@ -40,11 +40,17 @@ def test_main_agent_result_context_passes_scene_ids_and_columns(monkeypatch):
     captured = {}
 
     def fake_ontology_context(
-        question, *, scene_ids=None, principal=None, result_columns=None
+        question,
+        *,
+        scene_ids=None,
+        principal=None,
+        result_columns=None,
+        result_profiles=None,
     ):
         captured["question"] = question
         captured["scene_ids"] = scene_ids
         captured["result_columns"] = result_columns
+        captured["result_profiles"] = result_profiles
         captured["principal"] = principal
         return "ontology-context"
 
@@ -87,5 +93,20 @@ def test_main_agent_result_context_passes_scene_ids_and_columns(monkeypatch):
     assert captured["scene_ids"] == ["contracts"]
     assert captured["principal"].authz_version == 3
     assert captured["result_columns"] == [
-        {"key": "contract_amount", "type": "metric", "unit": "元"}
+        {
+            "key": "contract_amount",
+            "type": "metric",
+            "unit": "元",
+            "scene_id": "contracts",
+        }
+    ]
+    assert captured["result_profiles"] == [
+        {
+            "scene_id": "contracts",
+            "grain": [],
+            "grain_semantic_keys": [],
+            "time_grain": None,
+            "time_basis": None,
+            "time_range": None,
+        }
     ]

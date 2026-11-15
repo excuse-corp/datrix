@@ -8,8 +8,10 @@ and business-semantics document.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections.abc import Awaitable, Callable
+from time import monotonic
 
 import sqlglot
 from pydantic import ValidationError
@@ -20,6 +22,8 @@ from ..query.query_spec import QuerySpec
 from ..query.validator import QuerySpecValidator
 from ..schemas.snapshot import Snapshot
 from .context import build_scene_agent_context, build_scene_sql_context
+
+logger = logging.getLogger(__name__)
 
 _TEXT_DATA_TYPE_HINTS = ("char", "clob", "string", "text", "varchar")
 _NATURAL_TEXT_COLUMN_HINTS = (
@@ -142,6 +146,12 @@ class SceneQueryAgent:
         try:
             response = await self._generate(prompt)
         except Exception as exc:
+            logger.warning(
+                "AskData scene selection failed prompt_chars=%d error_type=%s",
+                len(prompt),
+                type(exc).__name__,
+                exc_info=True,
+            )
             raise SceneQueryAgentError(
                 "SCENE_ROUTER_UNAVAILABLE",
                 "场景路由 Agent 暂时不可用。",
@@ -167,7 +177,27 @@ class SceneQueryAgent:
     ) -> str:
         """Generate one read-only SQL statement for a single selected Scene."""
         prompt = self._sql_prompt(snapshot, question, dialect=dialect)
-        sql = await self._generate_valid_sql(prompt, snapshot, dialect=dialect)
+        attempt_started = monotonic()
+        try:
+            sql = await self._generate_valid_sql(prompt, snapshot, dialect=dialect)
+        except Exception as exc:
+            logger.warning(
+                "AskData SQL attempt failed scene_id=%s attempt=1 prompt_chars=%d "
+                "elapsed_ms=%d error_type=%s",
+                snapshot.scene_id,
+                len(prompt),
+                int((monotonic() - attempt_started) * 1000),
+                type(exc).__name__,
+            )
+            raise
+        logger.info(
+            "AskData SQL attempt completed scene_id=%s attempt=1 prompt_chars=%d "
+            "sql_chars=%d validated=true elapsed_ms=%d",
+            snapshot.scene_id,
+            len(prompt),
+            len(sql),
+            int((monotonic() - attempt_started) * 1000),
+        )
         narrow_columns = self._narrow_text_equality_columns(
             sql,
             snapshot,
@@ -178,11 +208,33 @@ class SceneQueryAgent:
             return sql
 
         retry_prompt = self._sql_matching_retry_prompt(prompt, narrow_columns)
-        return await self._generate_valid_sql(
-            retry_prompt,
-            snapshot,
-            dialect=dialect,
+        attempt_started = monotonic()
+        try:
+            retry_sql = await self._generate_valid_sql(
+                retry_prompt,
+                snapshot,
+                dialect=dialect,
+            )
+        except Exception as exc:
+            logger.warning(
+                "AskData SQL attempt failed scene_id=%s attempt=2 prompt_chars=%d "
+                "elapsed_ms=%d error_type=%s",
+                snapshot.scene_id,
+                len(retry_prompt),
+                int((monotonic() - attempt_started) * 1000),
+                type(exc).__name__,
+            )
+            raise
+        logger.info(
+            "AskData SQL attempt completed scene_id=%s attempt=2 prompt_chars=%d "
+            "sql_chars=%d validated=true elapsed_ms=%d retry_columns=%d",
+            snapshot.scene_id,
+            len(retry_prompt),
+            len(retry_sql),
+            int((monotonic() - attempt_started) * 1000),
+            len(narrow_columns),
         )
+        return retry_sql
 
     async def _generate_valid_sql(
         self, prompt: str, snapshot: Snapshot, *, dialect: str | None = None

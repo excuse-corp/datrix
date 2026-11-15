@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..scene.markdown import SemanticMarkdownParser
 from .schemas import OntologyEdge, OntologyGraph, OntologyNode
 
 
@@ -12,9 +13,17 @@ def scene_snapshot(source: Any) -> Any:
 
 
 def build_scene_fragment(snapshot: Any) -> OntologyGraph:
-    """Expose Scene capabilities, never its Markdown, schema or physical fields."""
+    """Expose declared semantic metrics, never inferred query capabilities."""
     snapshot = scene_snapshot(snapshot)
     projection = getattr(snapshot, "routing_projection", {}) or {}
+    runtime_config = getattr(snapshot, "runtime_config", {}) or {}
+    documents = runtime_config.get("documents", {})
+    semantic_md = str(documents.get("semantic_md") or "")
+    try:
+        semantic_config = SemanticMarkdownParser().parse(semantic_md).config
+        declared_metric_keys = {item.key for item in semantic_config.metrics}
+    except Exception:
+        declared_metric_keys = set()
     scene_id = str(getattr(snapshot, "scene_id", ""))
     snapshot_id = str(getattr(snapshot, "snapshot_id", ""))
     if not scene_id:
@@ -32,7 +41,11 @@ def build_scene_fragment(snapshot: Any) -> OntologyGraph:
     ]
     edges = []
     for metric in projection.get("metrics", []):
-        if not isinstance(metric, dict) or not metric.get("key"):
+        if (
+            not isinstance(metric, dict)
+            or not metric.get("key")
+            or str(metric["key"]) not in declared_metric_keys
+        ):
             continue
         semantic_key = str(metric["key"])
         metric_id = f"{scene_id}__{semantic_key}"

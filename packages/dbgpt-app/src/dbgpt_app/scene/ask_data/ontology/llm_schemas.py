@@ -14,10 +14,14 @@ class OntologySceneSource(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     scene_id: str = Field(min_length=1)
+    domain_id: str | None = None
     snapshot_id: str = ""
     revision_id: str = ""
     semantic_md_hash: str = ""
     semantic_md: str = Field(min_length=1)
+    data_dictionary_md: str = ""
+    business_semantics_md: str = ""
+    query_capabilities: dict[str, Any] = Field(default_factory=dict)
     name: str | None = None
     description: str | None = None
 
@@ -59,6 +63,9 @@ class SceneMetricCandidate(BaseModel):
     name: str = Field(min_length=1)
     aliases: list[str] = Field(default_factory=list)
     unit: str | None = None
+    aggregation: str | None = None
+    grain: list[str] = Field(default_factory=list)
+    time_basis: str | None = None
     formula: str | None = None
     owner_entity_local_id: str | None = None
     semantic_key: str | None = None
@@ -96,6 +103,7 @@ class SceneOntologyExtraction(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     scene_id: str = Field(min_length=1)
+    domain_id: str | None = None
     scene_name: str = Field(min_length=1)
     entities: list[SceneEntityCandidate] = Field(default_factory=list)
     metrics: list[SceneMetricCandidate] = Field(default_factory=list)
@@ -117,6 +125,7 @@ class GlobalEntity(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: str = Field(min_length=1)
+    domain_id: str | None = None
     name: str = Field(min_length=1)
     aliases: list[str] = Field(default_factory=list)
     definition: str = Field(min_length=1)
@@ -129,10 +138,15 @@ class GlobalMetric(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: str = Field(min_length=1)
+    domain_id: str | None = None
     name: str = Field(min_length=1)
     aliases: list[str] = Field(default_factory=list)
     entity_id: str = Field(min_length=1)
     unit: str | None = None
+    aggregation: str | None = None
+    grain: list[str] = Field(default_factory=list)
+    time_basis: str | None = None
+    comparability: str | None = None
     formula: str | None = None
     analysis_meaning: str = Field(min_length=1)
     interpretation: str = Field(min_length=1)
@@ -191,12 +205,31 @@ class CrossSceneAnalysisPath(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: str = Field(min_length=1)
+    status: Literal["candidate"] = "candidate"
+    relation_type: Literal[
+        "same_subject",
+        "maps_to",
+        "related_but_not_equivalent",
+        "contributes_to",
+        "reconciles_with",
+        "precedes",
+        "follows",
+        "not_comparable",
+    ] = "related_but_not_equivalent"
     topic: str = Field(min_length=1)
     scenes: list[str] = Field(default_factory=list)
     entities: list[str] = Field(default_factory=list)
     join_keys: list[str] = Field(default_factory=list)
+    mapping_source: str | None = None
+    left_time_basis: str | None = None
+    right_time_basis: str | None = None
+    time_alignment_conditions: list[str] = Field(default_factory=list)
+    grain_alignment: list[str] = Field(default_factory=list)
     recommended_analysis: str = Field(min_length=1)
+    allowed_analyses: list[str] = Field(default_factory=list)
+    forbidden_inferences: list[str] = Field(default_factory=list)
     caveats: list[str] = Field(default_factory=list)
+    evidence: list[Evidence] = Field(default_factory=list)
 
 
 class ResultAnalysisRule(BaseModel):

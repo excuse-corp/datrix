@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from asyncio import CancelledError, Semaphore, gather
 from datetime import datetime, timezone
@@ -14,6 +15,8 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 from dbgpt.agent.resource.tool.base import tool
 
 from dbgpt_app.scene.ask_data.security import AskDataPrincipal
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from dbgpt_app.scene.ask_data.agents import SceneQueryAgent
@@ -26,6 +29,7 @@ _ASK_DATA_RESULT_ANALYSIS_GUIDANCE = [
     "数据口径说明只能依据 sql_explanation；缺失的内容明确说未识别，不要根据常识臆测。",
     "面向不懂数据库的用户表达，不要直接复述 SQL、表名、字段名、聚合、粒度等数据库术语；优先使用 sql_explanation 中已经翻译好的中文说明。",
     "结合 ontology_context_for_analysis 中的实体、指标含义、指标关系和分析规则分析结果。",
+    "跨场景桥接只定义业务映射和分析条件，不代表本次查询已满足条件；必须先核对桥接两侧本次结果的时间依据、时间范围和统计粒度。条件未满足或无法确认时，不做直接比较或比值推断。",
     "只分析用户明确询问的范围；不要为了补充未要求的字段再次查询。",
     "存在空值、零值、极端值或查询警告时，提示可能的数据质量、口径或业务风险。",
     "只基于查询结果给结论；未命中的场景只能作为后续分析方向，不要当作事实。",
@@ -81,7 +85,10 @@ def _stage_node_id(call_id: str, stage: str, task_id: str | None = None) -> str:
     parts = ["ask-data", call_id, stage]
     if task_id:
         parts.append(task_id)
-    return "-".join("".join(char if char.isalnum() or char in "-_" else "_" for char in part) for part in parts)
+    return "-".join(
+        "".join(char if char.isalnum() or char in "-_" else "_" for char in part)
+        for part in parts
+    )
 
 
 def _scene_display_name(scene_id: str, snapshot: Any | None = None) -> str:
@@ -320,6 +327,7 @@ def make_ask_data_tools(
             started_monotonic=routing_started,
         )
         plan = None
+        routing_terminal = False
         formatting_started: float | None = None
         formatting_started_at: str | None = None
         try:
@@ -330,15 +338,47 @@ def make_ask_data_tools(
                 max_scenes=10,
             )
             scenes._require_plan_scene_access(principal, plan)
+            routing_rejected = plan.action == "reject"
+            selected_scene_names = list(
+                dict.fromkeys(
+                    _scene_display_name(str(task.scene_id)) for task in plan.tasks
+                )
+            )
+            routing_detail = (
+                f"已选择场景：{'、'.join(selected_scene_names)}"
+                if selected_scene_names
+                else "基于用户问题和场景 Snapshot 完成判断"
+            )
             await emit_stage(
                 "routing",
-                status="done",
-                title="业务场景语义选择完成",
-                detail="基于用户问题和场景 Snapshot 完成判断",
+                status="failed" if routing_rejected else "done",
+                title=(
+                    "业务场景语义选择失败"
+                    if routing_rejected
+                    else "业务场景语义选择完成"
+                ),
+                detail=(
+                    plan.message or "场景路由未能继续"
+                    if routing_rejected
+                    else routing_detail
+                ),
                 started_at=routing_started_at,
                 started_monotonic=routing_started,
-                result={"action": plan.action, "task_count": len(plan.tasks)},
+                result=(
+                    None
+                    if routing_rejected
+                    else {"action": plan.action, "task_count": len(plan.tasks)}
+                ),
+                error=(
+                    {
+                        "code": plan.reason_code or "SCENE_ROUTING_REJECTED",
+                        "message": plan.message or "场景路由未能继续",
+                    }
+                    if routing_rejected
+                    else None
+                ),
             )
+            routing_terminal = True
             sql_by_task = await _build_scene_sqls(
                 plan,
                 scene_query_agent,
@@ -417,7 +457,7 @@ def make_ask_data_tools(
             )
             payload = scenes._query_response(query, result, plan)
         except CancelledError:
-            if plan is None:
+            if not routing_terminal:
                 await emit_stage(
                     "routing",
                     status="cancelled",
@@ -426,6 +466,7 @@ def make_ask_data_tools(
                     started_at=routing_started_at,
                     started_monotonic=routing_started,
                 )
+                routing_terminal = True
             if formatting_started is not None and formatting_started_at is not None:
                 await emit_stage(
                     "formatting",
@@ -445,6 +486,24 @@ def make_ask_data_tools(
             )
             raise
         except Exception as exc:
+            logger.warning(
+                "AskData query failed call_id=%s stage=%s error_type=%s",
+                call_id,
+                "routing" if not routing_terminal else "execution",
+                type(exc).__name__,
+                exc_info=True,
+            )
+            if not routing_terminal:
+                await emit_stage(
+                    "routing",
+                    status="failed",
+                    title="业务场景语义选择失败",
+                    detail=str(exc) or "场景路由失败",
+                    started_at=routing_started_at,
+                    started_monotonic=routing_started,
+                    error={"code": type(exc).__name__, "message": str(exc)},
+                )
+                routing_terminal = True
             if formatting_started is not None and formatting_started_at is not None:
                 await emit_stage(
                     "formatting",
@@ -453,16 +512,6 @@ def make_ask_data_tools(
                     detail=str(exc),
                     started_at=formatting_started_at,
                     started_monotonic=formatting_started,
-                    error={"code": type(exc).__name__, "message": str(exc)},
-                )
-            if plan is None:
-                await emit_stage(
-                    "routing",
-                    status="failed",
-                    title="业务场景语义选择失败",
-                    detail=str(exc),
-                    started_at=routing_started_at,
-                    started_monotonic=routing_started,
                     error={"code": type(exc).__name__, "message": str(exc)},
                 )
             payload = {
@@ -507,7 +556,11 @@ def make_ask_data_tools(
             error = (payload.get("errors") or [{}])[0]
             content = error.get("message") or "业务查询未能完成。"
 
-        if formatting_started is not None and formatting_started_at is not None and payload.get("status") != "failed":
+        if (
+            formatting_started is not None
+            and formatting_started_at is not None
+            and payload.get("status") != "failed"
+        ):
             await emit_stage(
                 "formatting",
                 status="done",
@@ -569,9 +622,9 @@ def make_ask_data_tools(
 
     # Do not expose `query` in the public tool schema.  This parser is an
     # execution-time compatibility shim for older prompts/model outputs only.
-    getattr(ask_data_query, "_tool")._parse_execute_args_func = (
-        _parse_ask_data_query_args
-    )
+    getattr(
+        ask_data_query, "_tool"
+    )._parse_execute_args_func = _parse_ask_data_query_args
 
     @tool(
         description=(
@@ -602,7 +655,11 @@ async def _route_ask_data_plan(
     scene_query_agent: "SceneQueryAgent | None",
     max_scenes: int,
 ) -> "MainAgentPlan":
-    from dbgpt_app.scene.ask_data.schemas.plan import CombinePlan, MainAgentPlan, PlanTask
+    from dbgpt_app.scene.ask_data.schemas.plan import (
+        CombinePlan,
+        MainAgentPlan,
+        PlanTask,
+    )
     from dbgpt_app.scene.ask_data.snapshot.runtime import query_metrics
 
     normalized_question = question.strip()
@@ -786,18 +843,38 @@ def _main_agent_result_content(
     *,
     principal: AskDataPrincipal | None = None,
 ) -> str:
-    scene_items = [item for item in payload.get("results", []) if isinstance(item, dict)]
+    scene_items = [
+        item for item in payload.get("results", []) if isinstance(item, dict)
+    ]
     scene_ids = [
-        str(item.get("scene_id"))
-        for item in scene_items
-        if item.get("scene_id")
+        str(item.get("scene_id")) for item in scene_items if item.get("scene_id")
     ]
     result_columns = [
-        column
+        {**column, "scene_id": str(item.get("scene_id") or "")}
         for item in scene_items
         for column in item.get("columns", [])
         if isinstance(column, dict)
     ]
+    result_profiles = []
+    for item in scene_items:
+        caliber = item.get("sql_explanation")
+        caliber = caliber if isinstance(caliber, dict) else {}
+        result_profiles.append(
+            {
+                "scene_id": str(item.get("scene_id") or ""),
+                "grain": item.get("grain") or caliber.get("grain") or [],
+                "grain_semantic_keys": [
+                    str(column.get("semantic_key") or column.get("key"))
+                    for column in item.get("columns", [])
+                    if isinstance(column, dict)
+                    and str(column.get("type") or "").lower() == "dimension"
+                    and (column.get("semantic_key") or column.get("key"))
+                ],
+                "time_grain": item.get("time_grain"),
+                "time_basis": item.get("time_basis"),
+                "time_range": item.get("time_range") or caliber.get("time_scope"),
+            }
+        )
     compact = {
         "status": payload.get("status"),
         "query_id": payload.get("query_id"),
@@ -832,10 +909,10 @@ def _main_agent_result_content(
         scene_ids=scene_ids,
         principal=principal,
         result_columns=result_columns,
+        result_profiles=result_profiles,
     )
     has_data_caliber = any(
-        isinstance(scene.get("data_caliber"), dict)
-        for scene in compact["scenes"]
+        isinstance(scene.get("data_caliber"), dict) for scene in compact["scenes"]
     )
     if ontology_context:
         compact["ontology_context_for_analysis"] = ontology_context
@@ -861,7 +938,9 @@ def _main_agent_result_content(
     while len(encoded) > max_chars and compact["scenes"]:
         largest = max(
             compact["scenes"],
-            key=lambda item: len(json.dumps(item.get("rows", []), ensure_ascii=False, default=str)),
+            key=lambda item: len(
+                json.dumps(item.get("rows", []), ensure_ascii=False, default=str)
+            ),
         )
         rows = largest.get("rows") or []
         if not isinstance(rows, list) or not rows:
@@ -921,14 +1000,15 @@ def _active_ontology_analysis_context(
     scene_ids: list[str] | None = None,
     principal: AskDataPrincipal | None = None,
     result_columns: list[dict[str, Any]] | None = None,
+    result_profiles: list[dict[str, Any]] | None = None,
 ) -> str:
     try:
         from dbgpt_app.scene.ask_data.api.ontology import get_ontology_service
-        from dbgpt_app.scene.ask_data.ontology.context import (
-            render_main_agent_ontology_context,
+        from dbgpt_app.scene.ask_data.ontology.analysis_service import (
+            OntologyAnalysisService,
         )
 
-        return render_main_agent_ontology_context(
+        return OntologyAnalysisService().render(
             get_ontology_service().active_snapshot(),
             question,
             scene_ids=scene_ids,
@@ -939,6 +1019,7 @@ def _active_ontology_analysis_context(
                 principal.is_platform_admin if principal is not None else False
             ),
             result_columns=result_columns,
+            result_profiles=result_profiles,
         )
     except Exception:
         return ""
@@ -981,6 +1062,7 @@ async def reply_to_ask_data_query(
             max_scenes=10,
         )
         scenes._require_plan_scene_access(principal, plan)
+
         async def noop_stream(_event_type: str, _payload: dict[str, Any]) -> None:
             return None
 

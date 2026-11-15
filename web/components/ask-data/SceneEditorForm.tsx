@@ -88,6 +88,13 @@ export default function SceneEditorForm({
               placeholder='说明该场景可查询的业务范围，供主 Agent 选择场景'
             />
           </Form.Item>
+          <Form.Item
+            name='domain_id'
+            label='所属业务领域'
+            extra='用于本体领域内归并；相同名称但不同领域的概念会保持独立。'
+          >
+            <Input allowClear placeholder='例如：project、finance、research、asset' />
+          </Form.Item>
         </div>
 
         <SectionTitle icon={<DatabaseOutlined />} title='数据绑定' description='关联已配置的数据源与业务表或视图' />
@@ -142,8 +149,8 @@ export default function SceneEditorForm({
             className='lg:col-span-2'
             type='info'
             showIcon
-            message='业务语义文档用于解释业务关系、粒度、口径和边界。'
-            description='无需填写查询指标或查询维度表。系统会根据绑定对象的实际 Schema 和这两份文档生成单场景 SQL；文档只会在命中本场景后提供给对应的场景子 Agent。'
+            message='业务语义文档用于解释业务关系、粒度、口径、结果分析规则和边界。'
+            description='数据字典和业务语义文档同时为场景问数和全局本体提供原材料。本体只在查数完成后参与分析，不参与 SQL 生成。'
           />
           <div className='min-w-0'>
             <div className='mb-3 flex items-center justify-between gap-3'>
@@ -151,7 +158,7 @@ export default function SceneEditorForm({
                 <h3 className='m-0 text-sm font-medium text-gray-900 dark:text-gray-100'>
                   <span className='mr-1 text-red-500'>*</span>数据字典
                 </h3>
-                <p className='mt-1 mb-0 text-xs text-gray-500'>字段含义、类型、枚举值和数据口径</p>
+                <p className='mt-1 mb-0 text-xs text-gray-500'>字段含义、语义键、业务角色、单位、粒度和空值语义</p>
               </div>
               <Upload accept='.md' showUploadList={false} beforeUpload={importDocument('data_dictionary_md')}>
                 <Button icon={<UploadOutlined />}>上传</Button>
@@ -162,7 +169,7 @@ export default function SceneEditorForm({
                 spellCheck={false}
                 className='!min-h-[420px] !resize-y !font-mono !text-[13px] !leading-6'
                 placeholder={
-                  '## 字段说明\n\n| 字段 | 类型 | 含义 |\n| --- | --- | --- |\n| contract_id | string | 合同编号 |'
+                  '## 字段说明\n\n| 字段 | 类型 | 业务名称 | semantic_key | 业务角色 | 单位 | 时间依据 | 空值语义 |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n| contract_id | string | 合同编号 | contract_id | identifier |  |  | 空值表示未知 |'
                 }
               />
             </Form.Item>
@@ -184,7 +191,7 @@ export default function SceneEditorForm({
                 spellCheck={false}
                 className='!min-h-[420px] !resize-y !font-mono !text-[13px] !leading-6'
                 placeholder={
-                  '## 业务范围\n\n- 一行表示一个项目及其合同补充信息。\n\n## 业务关系\n\n- 项目联系人负责日常实施和跟进；项目负责人是制度责任人。\n\n## 业务口径\n\n- “某人的项目”默认按项目联系人查询。\n- 金额为空时不可按零处理。\n\n## 边界\n\n- 不推断未同步或缺失的数据。'
+                  '## 业务范围与数据粒度\n\n- 一行代表一个项目及其合同补充信息。\n\n## 业务关系\n\n- 项目联系人负责日常实施和跟进；项目负责人是制度责任人。\n\n## 指标口径\n\n| 指标语义键 | 业务名称 | 计算口径 | 统计粒度 | 时间依据 | 可比性条件 |\n| --- | --- | --- | --- | --- | --- |\n\n## 结果解释规则\n\n- 金额下降时，先核对统计时间范围和项目状态。\n- 金额为空表示未同步，不按零处理。\n\n## 跨领域线索\n\n- 可记录相关业务概念和可能的映射依据；未审核前只作为候选。\n\n## 边界\n\n- 不推断未同步或缺失的数据。'
                 }
               />
             </Form.Item>

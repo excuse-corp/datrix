@@ -1,10 +1,12 @@
 import { ChatContext, ChatContextProvider } from '@/app/chat-context';
 import SideBar from '@/components/layout/side-bar';
+import { installAxiosAuthRetry, installFetchAuthRetry, isAuthExpiryRedirecting } from '@/utils/auth-session';
 import { STORAGE_LANG_KEY, STORAGE_USERINFO_KEY } from '@/utils/constants/index';
 import { getInterfaceStyle, isDashboardStyle, type InterfaceStyle } from '@/utils/interface-style';
 import { App, ConfigProvider, MappingAlgorithm, theme } from 'antd';
 import enUS from 'antd/locale/en_US';
 import zhCN from 'antd/locale/zh_CN';
+import axios from 'axios';
 import classNames from 'classnames';
 import type { AppProps } from 'next/app';
 import Head from 'next/head';
@@ -16,6 +18,11 @@ import '../app/i18n';
 import '../nprogress.css';
 import '../styles/globals.css';
 // import TopProgressBar from '@/components/layout/top-progress-bar';
+
+if (typeof window !== 'undefined') {
+  installFetchAuthRetry();
+  installAxiosAuthRetry(axios);
+}
 
 const antdDarkTheme: MappingAlgorithm = (seedToken, mapToken) => {
   return {
@@ -101,7 +108,9 @@ function LayoutWrapper({ children }: { children: React.ReactNode }) {
         if (active) {
           setIsAuthenticated(false);
           localStorage.removeItem(STORAGE_USERINFO_KEY);
-          router.replace({ pathname: '/login', query: { return_to: router.asPath } });
+          if (!isAuthExpiryRedirecting()) {
+            router.replace({ pathname: '/login', query: { return_to: router.asPath } });
+          }
         }
       });
     return () => {

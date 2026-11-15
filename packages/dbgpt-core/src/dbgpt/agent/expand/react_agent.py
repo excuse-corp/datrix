@@ -45,6 +45,30 @@ selecting the right ACTION from the ACTION SPACE as best as you can.
 {{ action_space_simple_desc }}
 """
 
+REACT_OUTPUT_FORMAT_INSTRUCTIONS = """\
+# ReAct response format
+Every response must contain exactly one executable action. Optional reasoning and
+status text must not replace the action block. A vis-thinking block is not an action.
+Never output tool arguments as a standalone JSON object.
+
+Use this structure. Thought, Action Intention, and Action Reason are optional; the
+Action and Action Input lines are mandatory. Copy the tool name from ACTION SPACE
+and provide valid JSON arguments (use {} when the tool has no arguments):
+Thought: ...
+Action Intention: ...
+Action Reason: ...
+Action: <one tool name from ACTION SPACE>
+Action Input: {"parameter": "value"}
+
+If the previous observation reports a ReAct parse error, correct the response
+format and continue the intended step. Keep exactly one Action and one Action Input.
+For a completed task, use:
+Thought: ...
+Action: terminate
+Action Input: {"result": "final answer"}
+Put the complete final answer only in Action Input.result.
+"""
+
 _REACT_SYSTEM_TEMPLATE = """\
 You are a {{ role }}, {% if name %}named {{ name }}. {% endif %}\
 {{ goal }}
@@ -52,37 +76,7 @@ task. For each step, you must output an Action; it cannot be empty. The maximum 
 of steps you can take is {{ max_steps }}.
 Do not output an empty string!
 {{ action_space }}
-# RESPONSE FORMAT # 
-IMPORTANT:
-- You must never answer directly outside the ReAct format.
-- Every response must contain exactly one Action and one Action Input.
-- If the task is complete, use exactly:
-Thought: ...
-Phase: 返回最终结果
-Action Intention: 返回答案
-Action Reason: 任务已完成
-Action: terminate
-Action Input: {"result": "final answer"}
-- Do not put the final answer as plain markdown outside Action Input.
-
-For each task input, your response should contain:
-1. One analysis of the task and the current environment, reasoning to determine the \
-next action (prefix "Thought: ").
-2. What this step is trying to do (prefix "Action Intention: "), short and \
-user-facing.
-3. Why this action is needed now (prefix "Action Reason: "), short and \
-user-facing.
-4. One action string in the ACTION SPACE (prefix "Action: "), should be one of \
-[{{ action_space_names }}].
-5. One action input (prefix "Action Input: "), empty if no input is required.
-# EXAMPLE INTERACTION #
-Thought: ...(Your analysis of the task and reasoning for the next action.)
-Action Intention: ...(What this step will do, e.g. "探索数据结构")
-Action Reason: ...(Why this action is needed now)
-Action: ...
-Action Input: ...
-Observation: ...(This is output provided by the external environment or Action output, \
-you are not allowed to generate it.)
+""" + REACT_OUTPUT_FORMAT_INSTRUCTIONS + """
 {% if task_progress %}
 {{ task_progress }}
 You MUST NOT repeat any action already listed above as ✅ completed.
@@ -270,13 +264,25 @@ class ReActAgent(ConversableAgent):
         try:
             steps = self.parser.parse_current_step(message_content)
             err_msg = None
-            if not steps:
+            if not steps or not any(step.action for step in steps):
                 err_msg = (
-                    "No correct response found. Please check your response, which must"
-                    " be in the format indicated in the system prompt."
+                    "ReAct parse error: no executable Action was found, so no tool "
+                    "was invoked. Retry the intended step with exactly one `Action:` "
+                    "line and one `Action Input:` line containing valid JSON. Do not "
+                    "output tool arguments as a standalone JSON object."
                 )
             elif len(steps) != 1:
-                err_msg = "Only one action is allowed each time."
+                err_msg = (
+                    "ReAct parse error: only one action is allowed per response. "
+                    "Retry with exactly one Action and one Action Input."
+                )
+            elif steps[0].action_input is None or steps[0].action_input == "":
+                err_msg = (
+                    "ReAct parse error: the Action Input line is missing, so no tool "
+                    "was invoked. Retry with exactly one `Action:` line and one "
+                    "`Action Input:` line containing valid JSON (use {} when there "
+                    "are no arguments)."
+                )
             if err_msg:
                 return ActionOutput(
                     is_exe_success=False,

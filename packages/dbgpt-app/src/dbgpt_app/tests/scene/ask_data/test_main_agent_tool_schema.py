@@ -101,6 +101,62 @@ async def test_ask_data_route_rejects_when_llm_selector_is_unavailable():
 
 
 @pytest.mark.asyncio
+async def test_rejected_scene_route_emits_failed_routing_stage(monkeypatch):
+    plan = SimpleNamespace(
+        action="reject",
+        reason_code="SCENE_ROUTER_UNAVAILABLE",
+        message="Scene router failed: 场景路由 Agent 暂时不可用。",
+        tasks=[],
+    )
+    events = []
+
+    async def stream_callback(event_type, payload):
+        events.append((event_type, payload))
+
+    async def fake_route(*_args, **_kwargs):
+        return plan
+
+    async def fake_build_scene_sqls(*_args, **_kwargs):
+        return {}
+
+    class FakeRunService:
+        async def execute(self, **_kwargs):
+            return object(), object()
+
+    monkeypatch.setattr(ask_data_tools, "_route_ask_data_plan", fake_route)
+    monkeypatch.setattr(ask_data_tools, "_build_scene_sqls", fake_build_scene_sqls)
+    monkeypatch.setattr(scenes, "_require_plan_scene_access", lambda *_args: None)
+    monkeypatch.setattr(scenes, "get_run_service", lambda: FakeRunService())
+    monkeypatch.setattr(
+        scenes,
+        "_query_response",
+        lambda *_args: {
+            "status": "failed",
+            "errors": [{"code": plan.reason_code, "message": plan.message}],
+        },
+    )
+
+    query_tool, _ = make_ask_data_tools(
+        {},
+        stream_callback,
+        AskDataPrincipal(user_id="user-1"),
+        scene_query_agent=object(),
+    )
+    await getattr(query_tool, "_tool").async_execute(
+        question="任博寒项目情况"
+    )
+
+    routing_events = [
+        payload
+        for event_type, payload in events
+        if event_type == "ask_data.stage" and payload["stage"] == "routing"
+    ]
+    assert [event["status"] for event in routing_events] == ["running", "failed"]
+    assert routing_events[-1]["error"]["code"] == "SCENE_ROUTER_UNAVAILABLE"
+    assert routing_events[-1]["detail"] == plan.message
+
+
+@pytest.mark.asyncio
 async def test_build_scene_sqls_emits_a_failed_terminal_for_the_started_node(monkeypatch):
     snapshot_service = InMemorySnapshotService()
     snapshot = build_test_snapshot("contracts", "r1")
@@ -282,6 +338,12 @@ async def test_ask_data_query_reuses_success_in_same_turn_before_sql(monkeypatch
         assert isinstance(stage_pair[-1]["duration_ms"], int)
     sql_exec = next(event for event in stage_events if event["stage"] == "sql_exec" and event["status"] == "done")
     assert sql_exec["duration_ms"] == 42
+    routing_done = next(
+        event
+        for event in stage_events
+        if event["stage"] == "routing" and event["status"] == "done"
+    )
+    assert routing_done["detail"] == "已选择场景：projects"
     assert not any(event["stage"] == "planning" for event in stage_events)
 
 

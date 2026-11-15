@@ -1,3 +1,4 @@
+import { isAuthExpiredResponse } from '@/utils/auth-session';
 import { notification } from 'antd';
 import { AxiosError } from 'axios';
 import { ApiResponse, FailedTuple, ResponseType, SuccessTuple } from '../';
@@ -32,6 +33,10 @@ export const apiInterceptors = <T = any, D = any>(
       return [null, data.data, data, response];
     })
     .catch<FailedTuple<T, D>>((err: Error | AxiosError<T, D>) => {
+      if (err instanceof AxiosError && isAuthExpiredResponse(err.response?.status)) {
+        return [err, null, null, null];
+      }
+
       let errMessage = err.message;
       if (err instanceof AxiosError) {
         try {

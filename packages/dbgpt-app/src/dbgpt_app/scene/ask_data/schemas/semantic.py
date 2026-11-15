@@ -89,6 +89,7 @@ class SemanticConfig(_SemanticModel):
     scene_id: str = Field(min_length=1)
     name: str = Field(min_length=1)
     description: str = ""
+    domain_id: str | None = None
     keywords: list[str] = Field(default_factory=list)
     data_source: str = Field(min_length=1)
     view: str = Field(min_length=1)

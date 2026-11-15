@@ -58,6 +58,9 @@ from dbgpt_app.openapi.api_v1.react_session_state import (
     update_attachment_parse_metadata,
     update_react_session_after_turn,
 )
+from dbgpt_app.openapi.api_v1.react_finalization import (
+    build_react_final_answer_request,
+)
 from dbgpt_app.scene.conversation_context import (
     DEFAULT_CONTEXT_TOKEN_BUDGET,
     build_conversation_context,
@@ -189,7 +192,8 @@ def _react_llm_error_limit() -> int:
 
 
 def _react_parse_error_limit() -> int:
-    return _env_int("DATAMAN_REACT_PARSE_ERROR_LIMIT", 3, min_value=1)
+    # One initial response plus one format-correction retry.
+    return _env_int("DATAMAN_REACT_PARSE_ERROR_LIMIT", 2, min_value=1)
 
 
 def _react_same_action_repeat_limit() -> int:
@@ -221,6 +225,72 @@ def _has_open_task_plan(todo_list: List[Dict[str, Any]]) -> bool:
     )
 
 
+async def _resolve_llm_model_name(
+    llm_client: Any, preferred_model_name: Optional[str]
+) -> Optional[str]:
+    """Use the conversation's selected model without an unnecessary model-list call."""
+    if preferred_model_name:
+        return preferred_model_name
+    models = await llm_client.models()
+    return models[0].model if models else None
+
+
+def _todo_is_report_like(value: Optional[str]) -> bool:
+    text = (value or "").strip().lower()
+    return any(
+        keyword in text
+        for keyword in (
+            "report",
+            "html",
+            "dashboard",
+            "visual",
+            "visualization",
+            "图表",
+            "报告",
+            "报表",
+            "可视化",
+            "渲染",
+            "展示",
+        )
+    )
+
+
+def _should_advance_todo_after_action(
+    todo_list: List[Dict[str, Any]], action_name: Optional[str], observation: Any
+) -> bool:
+    """Only infer report-task completion from a successful HTML render.
+
+    Other plan items require an explicit todowrite status update. A planned
+    transition or an unrelated tool call is not evidence that a task finished.
+    """
+    if (action_name or "").strip().lower() != "html_interpreter":
+        return False
+
+    active_todo = next(
+        (item for item in todo_list if item.get("status") == "in_progress"), None
+    )
+    if not active_todo or not _todo_is_report_like(active_todo.get("content")):
+        return False
+
+    parsed = observation
+    if isinstance(observation, str):
+        try:
+            parsed = json.loads(observation)
+        except (TypeError, ValueError):
+            return False
+    if not isinstance(parsed, dict):
+        return False
+
+    chunks = parsed.get("chunks")
+    return isinstance(chunks, list) and any(
+        isinstance(chunk, dict)
+        and chunk.get("output_type") == "html"
+        and isinstance(chunk.get("content"), str)
+        and bool(chunk["content"].strip())
+        for chunk in chunks
+    )
+
+
 def _last_failed_step_error_type(history_steps: List[Dict[str, Any]]) -> Optional[str]:
     for item in reversed(history_steps):
         if item.get("status") != "failed":
@@ -245,6 +315,23 @@ def _last_failed_step_error_type(history_steps: List[Dict[str, Any]]) -> Optiona
             return REACT_REASON_PARSE_ERROR
         return REACT_REASON_TOOL_ERROR
     return None
+
+
+def _mark_recovered_parse_errors(
+    history_steps: List[Dict[str, Any]],
+) -> List[str]:
+    """Mark prior parse failures as recovered while preserving their error records."""
+    recovered_ids = []
+    for item in history_steps:
+        if (
+            item.get("status") == "failed"
+            and item.get("error_type") == REACT_REASON_PARSE_ERROR
+            and not item.get("retry_resolved")
+        ):
+            item["retry_resolved"] = True
+            if item.get("id"):
+                recovered_ids.append(str(item["id"]))
+    return recovered_ids
 
 
 def _react_outcome_payload(
@@ -1642,7 +1729,10 @@ async def _react_agent_stream_impl(
         GptsMemory,
     )
     from dbgpt.agent.expand.actions.react_action import Terminate
-    from dbgpt.agent.expand.react_agent import ReActAgent
+    from dbgpt.agent.expand.react_agent import (
+        REACT_OUTPUT_FORMAT_INSTRUCTIONS,
+        ReActAgent,
+    )
     from dbgpt.agent.resource import ToolPack
     from dbgpt.agent.resource.manage import get_resource_manager
     from dbgpt.agent.util.llm.llm import LLMConfig, LLMStrategyType
@@ -1788,7 +1878,9 @@ async def _react_agent_stream_impl(
         "on",
     }
 
-    def build_step(title: str, detail: str, phase: str = None):
+    def build_step(
+        title: str, detail: str, phase: str = None, action: str = None
+    ):
         nonlocal step
         step += 1
         step_id = f"step-{step}"
@@ -1801,6 +1893,8 @@ async def _react_agent_stream_impl(
         }
         if phase:
             event_data["phase"] = phase
+        if action:
+            event_data["action"] = action
         return step_id, _sse_event(event_data)
 
     def step_output(detail: str):
@@ -1917,68 +2011,6 @@ async def _react_agent_stream_impl(
         text = text.strip(" .,:;，。；：")
         if not text:
             return None
-        return text
-
-    def summarize_thought(
-        thought: Optional[str], action: Optional[str] = None
-    ) -> Optional[str]:
-        """Fallback compressor when the model does not provide a short status."""
-        if not thought:
-            return None
-
-        text = re.sub(r"\s+", " ", thought).strip()
-        text = re.sub(r"^(thought|phase)\s*:\s*", "", text, flags=re.I).strip()
-        if not text:
-            return None
-
-        split_markers = [
-            r"\baction\b\s*:",
-            r"\bobservation\b\s*:",
-            r"\bphase\b\s*:",
-            r"\bnow i need to\b",
-            r"\bnext,?\b",
-            r"\bthen\b",
-            r"现在需要",
-            r"下一步",
-            r"接下来",
-            r"然后",
-        ]
-        marker_pattern = "|".join(split_markers)
-        text = re.split(marker_pattern, text, maxsplit=1, flags=re.I)[0].strip(
-            " .,:;，。；："
-        )
-
-        prefixes = [
-            "the user wants me to ",
-            "i need to ",
-            "i should ",
-            "let me ",
-            "i will ",
-            "现在我需要",
-            "我需要",
-            "接下来我需要",
-            "让我",
-            "现在开始",
-            "好的，",
-            "好，",
-        ]
-        lowered = text.lower()
-        for prefix in prefixes:
-            if lowered.startswith(prefix.lower()):
-                text = text[len(prefix) :].strip(" .,:;，。；：")
-                lowered = text.lower()
-                break
-
-        action_lower = (action or "").lower()
-        if action_lower == "code_interpreter":
-            return "正在生成分析代码"
-        if action_lower == "html_interpreter":
-            return "正在生成并渲染 HTML 报告"
-        if action_lower == "todowrite":
-            return "正在更新任务计划"
-        if action_lower in {"execute_skill_script", "execute_skill_script_file"}:
-            return "正在执行分析脚本"
-
         return text
 
     skills_dir = DEFAULT_SKILLS_DIR
@@ -2599,6 +2631,7 @@ print(json.dumps(summary, ensure_ascii=False))
     ask_data_tools = []
     ask_data_prompt_context = ""
     scene_query_agent = None
+    final_llm_client = None
     if ask_data_enabled:
         from dbgpt_app.scene.ask_data.agents import SceneQueryAgent
         from dbgpt_app.scene.ask_data.security import AskDataPrincipal
@@ -2609,30 +2642,12 @@ print(json.dumps(summary, ensure_ascii=False))
             ).create(),
             auto_convert_message=True,
         )
+        final_llm_client = llm_client
 
         async def generate_scene_query_spec(prompt: str) -> str:
-            models = await llm_client.models()
-            model_name = dialogue.model_name or (models[0].model if models else None)
-            if not model_name:
-                raise RuntimeError("No models available for SceneQueryAgent")
-            request = ModelRequest.build_request(
-                model_name,
-                messages=[
-                    ModelMessage(
-                        role=ModelMessageRoleType.HUMAN,
-                        content=prompt,
-                    )
-                ],
-                temperature=0,
+            model_name = await _resolve_llm_model_name(
+                llm_client, dialogue.model_name
             )
-            response = await llm_client.generate(request)
-            if not response.success or not response.has_text:
-                raise RuntimeError("SceneQueryAgent model generation failed")
-            return response.text
-
-        async def generate_scene_sql(prompt: str) -> str:
-            models = await llm_client.models()
-            model_name = dialogue.model_name or (models[0].model if models else None)
             if not model_name:
                 raise RuntimeError("No models available for SceneQueryAgent")
             request = ModelRequest.build_request(
@@ -2646,7 +2661,130 @@ print(json.dumps(summary, ensure_ascii=False))
                 temperature=0,
                 reasoning_effort="medium",
             )
-            response = await llm_client.generate(request)
+            inference_started = monotonic()
+            try:
+                response = await llm_client.generate(request)
+            except Exception as exc:
+                logger.warning(
+                    "AskData scene router model call raised model=%s "
+                    "requested_reasoning_effort=%s inference_ms=%d "
+                    "prompt_chars=%d error_type=%s",
+                    model_name,
+                    request.reasoning_effort,
+                    int((monotonic() - inference_started) * 1000),
+                    len(prompt),
+                    type(exc).__name__,
+                    exc_info=True,
+                )
+                raise
+            inference_ms = int((monotonic() - inference_started) * 1000)
+            logger.info(
+                "AskData scene router model call completed model=%s "
+                "requested_reasoning_effort=%s inference_ms=%d prompt_chars=%d "
+                "output_chars=%d success=%s error_code=%s",
+                model_name,
+                request.reasoning_effort,
+                inference_ms,
+                len(prompt),
+                len(response.text or "") if response.has_text else 0,
+                response.success,
+                response.error_code,
+            )
+            if not response.success or not response.has_text:
+                raise RuntimeError(
+                    "SceneQueryAgent model generation failed "
+                    f"(success={response.success}, error_code={response.error_code})"
+                )
+            return response.text
+
+        async def generate_scene_sql(prompt: str) -> str:
+            model_lookup_started = monotonic()
+            try:
+                model_name = await _resolve_llm_model_name(
+                    llm_client, dialogue.model_name
+                )
+            except Exception as exc:
+                logger.warning(
+                    "AskData SQL model lookup failed model_lookup_ms=%d "
+                    "prompt_chars=%d error_type=%s",
+                    int((monotonic() - model_lookup_started) * 1000),
+                    len(prompt),
+                    type(exc).__name__,
+                    exc_info=True,
+                )
+                raise
+            model_lookup_ms = int((monotonic() - model_lookup_started) * 1000)
+            if not model_name:
+                raise RuntimeError("No models available for SceneQueryAgent")
+            request = ModelRequest.build_request(
+                model_name,
+                messages=[
+                    ModelMessage(
+                        role=ModelMessageRoleType.HUMAN,
+                        content=prompt,
+                    )
+                ],
+                temperature=0,
+                reasoning_effort="medium",
+            )
+            inference_started = monotonic()
+            try:
+                response = await llm_client.generate(request)
+            except Exception as exc:
+                logger.warning(
+                    "AskData SQL model inference raised model=%s "
+                    "requested_reasoning_effort=%s model_lookup_ms=%d "
+                    "inference_ms=%d prompt_chars=%d error_type=%s",
+                    model_name,
+                    request.reasoning_effort,
+                    model_lookup_ms,
+                    int((monotonic() - inference_started) * 1000),
+                    len(prompt),
+                    type(exc).__name__,
+                )
+                raise
+            inference_ms = int((monotonic() - inference_started) * 1000)
+            usage = {
+                key: value
+                for key, value in (response.usage or {}).items()
+                if isinstance(value, (int, float)) and not isinstance(value, bool)
+            }
+            metrics = response.metrics
+            inference_metrics = {}
+            if metrics is not None:
+                for key in (
+                    "prompt_tokens",
+                    "completion_tokens",
+                    "total_tokens",
+                    "speed_per_second",
+                ):
+                    value = getattr(metrics, key, None)
+                    if isinstance(value, (int, float)):
+                        inference_metrics[key] = value
+                start_time_ms = getattr(metrics, "start_time_ms", None)
+                first_token_time_ms = getattr(metrics, "first_token_time_ms", None)
+                if isinstance(start_time_ms, (int, float)) and isinstance(
+                    first_token_time_ms, (int, float)
+                ):
+                    inference_metrics["first_token_latency_ms"] = max(
+                        0, first_token_time_ms - start_time_ms
+                    )
+            logger.info(
+                "AskData SQL model call completed model=%s "
+                "requested_reasoning_effort=%s model_lookup_ms=%d inference_ms=%d "
+                "prompt_chars=%d output_chars=%d success=%s error_code=%s "
+                "usage=%s metrics=%s",
+                model_name,
+                request.reasoning_effort,
+                model_lookup_ms,
+                inference_ms,
+                len(prompt),
+                len(response.text or "") if response.has_text else 0,
+                response.success,
+                response.error_code,
+                usage,
+                inference_metrics,
+            )
             if not response.success or not response.has_text:
                 raise RuntimeError("SceneQueryAgent SQL generation failed")
             return response.text
@@ -2717,106 +2855,18 @@ print(json.dumps(summary, ensure_ascii=False))
                 return idx
         return None
 
-    def _normalize_text(value: Optional[str]) -> str:
-        return (value or "").strip().lower()
-
-    def _is_report_like(text: str) -> bool:
-        keywords = [
-            "report",
-            "html",
-            "dashboard",
-            "visual",
-            "visualization",
-            "图表",
-            "报告",
-            "报表",
-            "可视化",
-            "渲染",
-            "展示",
-        ]
-        return any(keyword in text for keyword in keywords)
-
     def should_advance_todo(
         action_name: Optional[str],
-        thought: Optional[str] = None,
         observation_text: Optional[str] = None,
     ) -> bool:
-        """Heuristically decide whether the current todo is actually complete."""
-        if not _todo_list:
-            return False
+        """Advance only when a planned report has actually rendered.
 
-        active_idx = _active_todo_index()
-        if active_idx is None:
-            return False
-
-        action_lower = _normalize_text(action_name)
-        thought_lower = _normalize_text(thought)
-        observation_lower = _normalize_text(observation_text)
-        current_todo = _normalize_text(_todo_list[active_idx].get("content"))
-        next_todo = (
-            _normalize_text(_todo_list[active_idx + 1].get("content"))
-            if active_idx + 1 < len(_todo_list)
-            else ""
+        All other task boundaries are explicit todowrite updates. Thoughts about
+        the next step and unrelated tool output cannot prove completion.
+        """
+        return _should_advance_todo_after_action(
+            _todo_list, action_name, observation_text
         )
-
-        transition_markers = [
-            "next step",
-            "now i need",
-            "now i should",
-            "now let me",
-            "现在需要",
-            "下一步",
-            "接下来",
-            "然后",
-            "接着",
-            "接下来我将",
-        ]
-        if next_todo and any(marker in thought_lower for marker in transition_markers):
-            if any(token and token in thought_lower for token in next_todo.split()):
-                return True
-
-        if action_lower == "html_interpreter":
-            return True
-
-        if action_lower in {
-            "load_skill",
-            "execute_skill_script",
-            "execute_skill_script_file",
-        }:
-            if next_todo and next_todo in thought_lower:
-                return True
-            if _is_report_like(next_todo) and _is_report_like(thought_lower):
-                return True
-
-            if current_todo and not _is_report_like(current_todo):
-                completion_markers = [
-                    "enough information",
-                    "collected enough",
-                    "gathered enough",
-                    "completed metadata",
-                    "obtained the overview",
-                    "获取了足够",
-                    "已经获取了足够",
-                    "已完成",
-                    "已获取",
-                    "整理一下",
-                ]
-                if any(marker in thought_lower for marker in completion_markers):
-                    return True
-
-            return False
-
-        if action_lower in {"code_interpreter", "execute_tool", "shell_interpreter"}:
-            if _is_report_like(current_todo):
-                return False
-            if next_todo and any(
-                token and token in thought_lower for token in next_todo.split()
-            ):
-                return True
-            if observation_lower and _is_report_like(observation_lower):
-                return True
-
-        return False
 
     def advance_todo_list() -> Optional[List[Dict[str, str]]]:
         """Advance one todo when the current task appears substantively complete."""
@@ -3004,6 +3054,7 @@ print(json.dumps(summary, ensure_ascii=False))
         language="zh",
         max_new_tokens=8000,
         temperature=dialogue.temperature or 0.2,
+        reasoning_effort="medium",
         enable_context_management=True,
     )
 
@@ -3105,8 +3156,8 @@ Please always response in the same language as the user's input language.
 
 ## Autonomous Decision Principles
 1. Strictly follow the instructions of the loaded skill.
-2. For each step, output Thought -> Action Intention -> Action Reason -> Action
-   -> Action Input.
+2. Every response must select one tool and provide its input in the ReAct format
+   defined at the end of this prompt.
 3. Wait for the system to return Observation before deciding on the next step.
 4. **[Mandatory Rule] If the task requires generating an analysis report, you MUST
 call `html_interpreter` for HTML rendering.** By default, generate complete HTML
@@ -3124,6 +3175,10 @@ returning the final answer, or terminating. Before terminate, compare the final
 result with the original user request. If a plan item is no longer applicable,
 mark it cancelled; if a requested result is still missing, continue working or
 explain the blocker instead of terminating.
+7. Strict TODO sequence: complete the current item and update it with `todowrite`
+before starting work from a later item. Mentioning a next step or making a tool
+call does not complete the current item. Use `html_interpreter` only when the
+report or rendering item is active and all earlier items are completed.
 
 {skill_prompt_context}
 {execution_instruction}
@@ -3237,27 +3292,14 @@ use it for simple single-step tasks.
 Todo status is advisory progress metadata and must not override a valid answer
 to the user's request. Judge completion against the original request, not only
 whether every planned item was mechanically marked completed.
+Before starting the next TODO's work, explicitly mark the current TODO completed
+and the next TODO in_progress with `todowrite`. Do not generate or render a
+report while an earlier data-gathering or comparison TODO is still active.
 
 {file_context}
 {session_context}
 {{{{ task_progress }}}}
 {ask_data_prompt_context}
-## ReAct Output Format
-Must output for each interaction round:
-Thought: Analyze current task status and think about what to do next
-Action Intention: What this step will do, plain text, MUST be concise and fit in
-<= 18 Chinese chars or <= 8 English words. If too long, rewrite shorter.
-Do not use ellipsis.
-Action Reason: Why this action is needed now, plain text, MUST be concise and fit in
-<= 30 Chinese chars or <= 12 English words. If too long, rewrite shorter.
-Do not use ellipsis.
-Output exactly one `Action:` line per interaction round. Put descriptions only in
-`Action Intention:` or `Action Reason:`. The `Action:` line must contain only one
-tool name from the list above (no explanation, no second `Action:` line).
-Action: The selected tool name (must be one of the tools listed above)
-Action Input: The JSON format of tool parameters
-For final answers, use `Action: terminate` and put the complete user-facing answer
-only inside `Action Input.result`.
 """.strip()
 
         tool_pack = ToolPack(
@@ -3287,8 +3329,8 @@ Please always response in the same language as the user's input language.
 1. Carefully analyze the user's task requirements.
 2. Autonomously select required tools based on requirements (do not follow a fixed
 order, select as needed).
-3. For each step, output Thought -> Action Intention -> Action Reason -> Action
-   -> Action Input.
+3. Every response must select one tool and provide its input in the ReAct format
+   defined at the end of this prompt.
 4. Wait for the system to return Observation before deciding on the next step.
 5. When the task is completed, call the terminate tool to return the final result.
 The Action Input format must be {{"result": "final answer"}}.
@@ -3304,6 +3346,10 @@ returning the final answer, or terminating. Before terminate, compare the final
 result with the original user request. If a plan item is no longer applicable,
 mark it cancelled; if a requested result is still missing, continue working or
 explain the blocker instead of terminating.
+8. Strict TODO sequence: complete the current item and update it with `todowrite`
+before starting work from a later item. Mentioning a next step or making a tool
+call does not complete the current item. Use `html_interpreter` only when the
+report or rendering item is active and all earlier items are completed.
 
 ## Task Management
 For complex tasks that require 3 or more steps, decide which skills, tools,
@@ -3319,6 +3365,9 @@ for simple single-step tasks.
 Todo status is advisory progress metadata and must not override a valid answer
 to the user's request. Judge completion against the original request, not only
 whether every planned item was mechanically marked completed.
+Before starting the next TODO's work, explicitly mark the current TODO completed
+and the next TODO in_progress with `todowrite`. Do not generate or render a
+report while an earlier data-gathering or comparison TODO is still active.
 
 ## Available Skills List (Pre-loaded)
 {skills_context}
@@ -3403,23 +3452,6 @@ Parameters: {{"todos": [{{...}}]}}
 {session_context}
 {{{{ task_progress }}}}
 {ask_data_prompt_context}
-
-## ReAct Output Format
-Must output for each interaction round:
-Thought: Analyze current task status and think about what to do next
-Action Intention: What this step will do, plain text, MUST be concise and fit in
-<= 18 Chinese chars or <= 8 English words. If too long, rewrite shorter.
-Do not use ellipsis.
-Action Reason: Why this action is needed now, plain text, MUST be concise and fit in
-<= 30 Chinese chars or <= 12 English words. If too long, rewrite shorter.
-Do not use ellipsis.
-Output exactly one `Action:` line per interaction round. Put descriptions only in
-`Action Intention:` or `Action Reason:`. The `Action:` line must contain only one
-tool name from the list above (no explanation, no second `Action:` line).
-Action: The selected tool name
-Action Input: The JSON format of tool parameters
-For final answers, use `Action: terminate` and put the complete user-facing answer
-only inside `Action Input.result`.
 """.strip()
 
         tool_pack = ToolPack(
@@ -3530,6 +3562,10 @@ only inside `Action Input.result`.
         pass  # graceful degradation
     # --- End connector system prompt injection ---
 
+    # Keep one canonical output contract at the end of both skill and regular
+    # prompts so model-specific reasoning text cannot replace the executable step.
+    workflow_prompt += "\n\n" + REACT_OUTPUT_FORMAT_INSTRUCTIONS
+
     # Convert workflow_prompt to PromptTemplate so it is used as system prompt
     # Use jinja2 format to avoid issues with JSON braces { } in the prompt
     workflow_prompt_template = PromptTemplate(
@@ -3579,9 +3615,6 @@ only inside `Action Input.result`.
 
     agent_task = asyncio.create_task(run_agent())
     round_step_map: Dict[int, str] = {}
-    pending_thoughts: Dict[
-        int, List[str]
-    ] = {}  # Buffer thinking content for delayed step creation
     pending_action_intentions: Dict[int, str] = {}
     pending_action_reasons: Dict[int, str] = {}
     # --- History persistence: collect step data during streaming ---
@@ -3881,32 +3914,21 @@ only inside `Action Input.result`.
             # Forward human-in-the-loop question events to frontend as-is.
             yield _sse_event(event)
         elif event_type == "thinking":
-            # Parse thinking content but don't create step yet
-            # Step will be created when 'act' event arrives with confirmed
-            # action
+            # Keep only the short action status for execution-step metadata.
+            # ReAct reasoning stays private; final-response reasoning is streamed
+            # by the dedicated finalizer after the task completes.
             round_num = int(event.get("round") or (len(round_step_map) + 1))
             llm_reply = event.get("llm_reply") or ""
-            thought = None
             action_intention = None
             action_reason = None
-            action = None
-            action_input = None
             try:
                 steps = parser.parse(llm_reply)
                 if steps:
-                    thought = steps[0].thought
                     action_intention = steps[0].action_intention
                     action_reason = steps[0].action_reason
-                    action = steps[0].action
-                    action_input = steps[0].action_input
             except Exception:
                 pass
 
-            # Store parsed thinking info in pending_thoughts for later use
-            if round_num not in pending_thoughts:
-                pending_thoughts[round_num] = []
-            if thought:
-                pending_thoughts[round_num].append(thought)
             intention_text = normalize_display_text(action_intention)
             if intention_text:
                 pending_action_intentions[round_num] = intention_text
@@ -3916,42 +3938,26 @@ only inside `Action Input.result`.
             # Don't emit anything yet - wait for 'act' event to create step
 
         elif event_type == "thinking_chunk":
-            round_num = int(event.get("round") or (len(round_step_map) + 1))
-            delta_thinking = event.get("delta_thinking") or ""
-            delta_text = event.get("delta_text") or ""
-
-            chunk = delta_thinking or delta_text
-            if chunk:
-                # Clean chunk: remove Action Input JSON to keep thought pure
-                # Split on Action Input pattern and keep only thought part
-                clean_chunk = re.split(
-                    r"\n\s*Action\s*Input\s*:\s*\{", chunk, maxsplit=1
-                )[0]
-                # Also remove Action: lines
-                clean_chunk = re.sub(r"\n\s*Action\s*:\s*\w+", "", clean_chunk)
-                # Remove Thought: prefix if present
-                if clean_chunk.startswith("Thought:"):
-                    clean_chunk = clean_chunk[len("Thought:") :].strip()
-                if clean_chunk:
-                    if round_num not in pending_thoughts:
-                        pending_thoughts[round_num] = []
-                    pending_thoughts[round_num].append(clean_chunk)
-                    if round_num not in round_step_map:
-                        pending_step_id, pending_step_event = build_step(
-                            "思考中",
-                            "Thought/Action/Observation",
-                        )
-                        round_step_map[round_num] = pending_step_id
-                        yield pending_step_event
+            # ReAct planning and tool-selection reasoning is intentionally not
+            # exposed. Only the dedicated final-answer request emits thought
+            # chunks to the existing thought bubble.
+            continue
 
         elif event_type == "act":
             # Create step ONLY when action is confirmed
             round_num = int(event.get("round") or (len(round_step_map) + 1))
 
             action_output = event.get("action_output") or {}
-            thoughts = action_output.get("thoughts")
             action = action_output.get("action")
             action_input = action_output.get("action_input")
+            if action_output.get("is_exe_success", True):
+                for recovered_step_id in _mark_recovered_parse_errors(history_steps):
+                    yield _sse_event(
+                        {
+                            "type": "step.retry_resolved",
+                            "id": recovered_step_id,
+                        }
+                    )
             action_input_data = None
             if action_input is not None:
                 if isinstance(action_input, str):
@@ -3971,14 +3977,12 @@ only inside `Action Input.result`.
                 action and action.lower() == "terminate"
             )
             if is_terminate:
-                pending_thoughts.pop(round_num, [])
                 pending_action_intentions.pop(round_num, None)
                 pending_action_reasons.pop(round_num, None)
                 continue
 
             # ── TodoWrite: emit plan.update SSE and show step card ──
             if action and action.lower() == "todowrite":
-                pending_thoughts.pop(round_num, [])
                 pending_action_intentions.pop(round_num, None)
                 pending_action_reasons.pop(round_num, None)
                 # Extract todos from observation JSON
@@ -4111,19 +4115,6 @@ only inside `Action Input.result`.
                 yield step_done(round_step_map[round_num])
                 continue
 
-            # Collect buffered thoughts for history persistence
-            # (already streamed to frontend via thinking_chunk handler)
-            buffered_thoughts = pending_thoughts.pop(round_num, [])
-            thought_text = None
-            if buffered_thoughts:
-                full_thought = "".join(buffered_thoughts)
-                full_thought = re.split(r"\n\s*Action\s*:", full_thought, maxsplit=1)[
-                    0
-                ].strip()
-                if full_thought.startswith("Thought:"):
-                    full_thought = full_thought[len("Thought:") :].strip()
-                if full_thought:
-                    thought_text = full_thought
             action_intention = normalize_display_text(
                 action_output.get("action_intention")
                 or pending_action_intentions.pop(round_num, None)
@@ -4133,9 +4124,7 @@ only inside `Action Input.result`.
                 action_output.get("action_reason")
                 or pending_action_reasons.pop(round_num, None)
             )
-            display_thought = action_intention or summarize_thought(
-                thought_text or thoughts, action
-            )
+            display_thought = None
 
             # Use the actual action name as the step title (Manus-style UI)
             action_title = action or f"ReAct Round {round_num}"
@@ -4220,7 +4209,7 @@ only inside `Action Input.result`.
                 current_history_step["duration_ms"] = ask_data_duration_ms
 
             # Emit thinking metadata
-            if thoughts or action or action_input:
+            if action or action_input:
                 step_action_input = (
                     None if action == "code_interpreter" else action_input
                 )
@@ -4282,9 +4271,7 @@ only inside `Action Input.result`.
                 status == "done"
                 and action
                 and action.lower() != "todowrite"
-                and should_advance_todo(
-                    action, thought_text or thoughts, observation_text
-                )
+                and should_advance_todo(action, observation_text)
             ):
                 updated_todos = advance_todo_list()
                 if updated_todos:
@@ -4520,6 +4507,110 @@ only inside `Action Input.result`.
         max_steps=react_max_steps,
     )
     final_content = _final_content_for_outcome(final_content, outcome)
+
+    if (
+        outcome.get("status") == REACT_STATUS_COMPLETED
+        and reply.action_report
+        and reply.action_report.terminate
+    ):
+        answer_draft = final_content
+        final_step_id, final_step_event = build_step(
+            "最终回复",
+            "Final response",
+            phase="生成最终回复",
+            action="final_response",
+        )
+        yield final_step_event
+
+        final_thought_parts: List[str] = []
+        final_answer_parts: List[str] = []
+        previous_thought = ""
+        previous_text = ""
+        final_step_status = "done"
+        try:
+            if final_llm_client is None:
+                final_llm_client = DefaultLLMClient(
+                    CFG.SYSTEM_APP.get_component(
+                        ComponentType.WORKER_MANAGER_FACTORY, WorkerManagerFactory
+                    ).create(),
+                    auto_convert_message=True,
+                )
+            model_name = await _resolve_llm_model_name(
+                final_llm_client, dialogue.model_name
+            )
+            if not model_name:
+                raise RuntimeError("No models available for final answer generation")
+            final_request = build_react_final_answer_request(
+                model=model_name,
+                user_request=user_input,
+                answer_draft=answer_draft,
+                history_steps=history_steps,
+                temperature=dialogue.temperature or 0.2,
+            )
+            async for output in final_llm_client.generate_stream(final_request):
+                if not output.success:
+                    raise RuntimeError(output.error_message)
+                if output.has_thinking:
+                    current_thought = output.thinking_text or ""
+                    thought_delta = (
+                        current_thought[len(previous_thought) :]
+                        if current_thought.startswith(previous_thought)
+                        else current_thought
+                    )
+                    previous_thought = current_thought
+                    if thought_delta:
+                        final_thought_parts.append(thought_delta)
+                        yield _sse_event(
+                            {
+                                "type": "step.thought",
+                                "id": final_step_id,
+                                "content": thought_delta,
+                            }
+                        )
+                if output.has_text:
+                    current_text = output.text or ""
+                    text_delta = (
+                        current_text[len(previous_text) :]
+                        if current_text.startswith(previous_text)
+                        else current_text
+                    )
+                    previous_text = current_text
+                    if text_delta:
+                        final_answer_parts.append(text_delta)
+                        yield _sse_event(
+                            {"type": "final.chunk", "content": text_delta}
+                        )
+            final_answer = "".join(final_answer_parts).strip()
+            if not final_answer:
+                raise RuntimeError("Final answer model returned no text")
+            final_content = final_answer
+        except Exception as exc:
+            final_step_status = "failed"
+            logger.warning(
+                "ReAct final answer generation failed model=%s error_type=%s",
+                dialogue.model_name,
+                type(exc).__name__,
+                exc_info=True,
+            )
+            final_content = answer_draft
+
+        yield step_done(final_step_id, final_step_status)
+        history_steps.append(
+            {
+                "id": final_step_id,
+                "title": "最终回复",
+                "detail": "Final response",
+                "kind": "final_response",
+                "thought": "".join(final_thought_parts) or None,
+                "action": "final_response",
+                "action_input": None,
+                "outputs": [
+                    {"output_type": "text", "content": final_content}
+                ],
+                "status": final_step_status,
+            }
+        )
+
     persist_task_checkpoint(
         outcome["status"], final_content, outcome.get("error_message")
     )
@@ -4820,9 +4911,10 @@ async def chat_react_agent(
         dialogue.user_name = user_token.user_id
     headers = {
         "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
+        "Cache-Control": "no-cache, no-transform",
         "Connection": "keep-alive",
         "Transfer-Encoding": "chunked",
+        "X-Accel-Buffering": "no",
     }
     try:
         return StreamingResponse(

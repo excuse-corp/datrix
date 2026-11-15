@@ -7,14 +7,21 @@ import pytest
 
 from dbgpt.core import ModelMessage, ModelRequest
 from dbgpt.core.interface.message import ModelMessageRoleType
-from dbgpt.model.proxy.llms.chatgpt import OpenAILLMClient
+from dbgpt.model.adapter.model_adapter import get_llm_model_adapter
+from dbgpt.model.cluster.worker.default_worker import DefaultModelWorker
+from dbgpt.model.proxy.llms.chatgpt import (
+    OpenAILLMClient,
+    chatgpt_generate,
+)
 
 
 class _FakeCompletions:
     def __init__(self, response):
         self.response = response
+        self.requests = []
 
     async def create(self, **kwargs):
+        self.requests.append(kwargs)
         return self.response
 
 
@@ -53,6 +60,36 @@ def test_generate_accepts_reasoning_field_without_content():
 
     assert not out.has_text
     assert out.thinking_text == "thought"
+
+
+def test_non_stream_generate_uses_non_stream_request_and_preserves_effort():
+    message = SimpleNamespace(content="SELECT 1", model_extra={})
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=message)],
+        usage=None,
+    )
+    fake_client = _FakeClient(response)
+    client = OpenAILLMClient(
+        openai_client=fake_client,
+        model="Qwen3.8-27B-FP8",
+    )
+    model = SimpleNamespace(proxy_llm_client=client)
+    params = {
+        "model": "Qwen3.8-27B-FP8",
+        "messages": [{"role": "user", "content": "query"}],
+        "reasoning_effort": "medium",
+    }
+
+    out = asyncio.run(chatgpt_generate(model, None, params, "cpu"))
+
+    request = fake_client.chat.completions.requests[0]
+    assert out.text == "SELECT 1"
+    assert request["stream"] is False
+    assert request["extra_body"] == {
+        "enable_thinking": True,
+        "reasoning_effort": "medium",
+    }
+    assert OpenAILLMClient.generate_function() is chatgpt_generate
 
 
 def test_generate_stream_yields_reasoning_field_chunks():
@@ -94,6 +131,48 @@ def test_generate_stream_yields_reasoning_field_chunks():
     assert outputs[-1].thinking_text == "think"
     assert outputs[-1].text == " answer"
     assert outputs[-1].usage == {"total_tokens": 2}
+
+
+def test_openai_proxy_adapter_selects_non_stream_generate_function():
+    adapter = get_llm_model_adapter(
+        "Qwen3.8-27B-FP8",
+        use_fastchat=False,
+        model_type="proxy/openai",
+    )
+
+    assert adapter.support_async()
+    assert adapter.support_generate_function()
+    assert adapter.get_async_generate_function(None, None) is chatgpt_generate
+
+
+def test_default_worker_uses_async_non_stream_function_for_proxy_model():
+    worker = DefaultModelWorker()
+    worker.model_name = "Qwen3.8-27B-FP8"
+    worker.model_path = None
+    worker.model = object()
+    worker.tokenizer = None
+    worker.ml = SimpleNamespace(prompt_template=None)
+    worker._model_params = SimpleNamespace(reasoning_model=False)
+    worker.llm_adapter = get_llm_model_adapter(
+        worker.model_name,
+        use_fastchat=False,
+        model_type="proxy/openai",
+    )
+    worker._support_async = True
+    worker._support_generate_func = True
+
+    _, _, generate_function, _ = worker._prepare_generate_stream(
+        {
+            "model": worker.model_name,
+            "messages": [
+                {"role": "user", "content": "select the matching scene"}
+            ],
+        },
+        span_operation_name="test.scene_router",
+        is_stream=False,
+    )
+
+    assert generate_function is chatgpt_generate
 
 
 def test_qwen38_defaults_to_xhigh_reasoning_effort():

@@ -59,12 +59,16 @@ export type StepType =
 
 export interface ExecutionStep {
   id: string;
+  parentId?: string;
+  action?: string;
   type: StepType;
   title: string;
   subtitle?: string;
   description?: string;
   phase?: string;
   status: StepStatus;
+  errorMessage?: string;
+  retryResolved?: boolean;
   confirmationStatus?: 'confirmed';
   output?: any;
   durationMs?: number;
@@ -754,6 +758,14 @@ const StepCard: React.FC<{
       <div className='flex flex-col min-w-0 flex-1'>
         <span className='text-sm font-medium text-gray-800 dark:text-gray-200 truncate'>{step.title}</span>
         {detailLine && <span className='text-[11px] text-gray-500 dark:text-gray-400 truncate'>{detailLine}</span>}
+        {step.errorMessage && (
+          <span className='text-[11px] text-red-500 dark:text-red-400 truncate'>{step.errorMessage}</span>
+        )}
+        {step.retryResolved && (
+          <span className='text-[10px] font-medium text-emerald-600 dark:text-emerald-400'>
+            后续重试成功，错误记录保留
+          </span>
+        )}
       </div>
       {durationLabel && (
         <span className='flex-shrink-0 text-[10px] text-gray-500 dark:text-gray-400'>{durationLabel}</span>
@@ -907,6 +919,17 @@ const ThoughtBubble: React.FC<{ text: string | Record<string, unknown> }> = memo
 
 ThoughtBubble.displayName = 'ThoughtBubble';
 
+const FinalResponseContent: React.FC<{ content: string; isStreaming: boolean }> = memo(({ content, isStreaming }) => (
+  <div className='ml-12 mt-2 min-w-0'>
+    <div className='prose prose-sm dark:prose-invert max-w-none text-gray-800 dark:text-gray-200 leading-relaxed'>
+      <MarkdownContext>{content}</MarkdownContext>
+    </div>
+    {isStreaming && <span className='mt-1 inline-block h-4 w-1 animate-pulse bg-blue-500 align-middle' />}
+  </div>
+));
+
+FinalResponseContent.displayName = 'FinalResponseContent';
+
 // Section Component
 const SectionBlock: React.FC<{
   section: ThinkingSection;
@@ -914,7 +937,8 @@ const SectionBlock: React.FC<{
   onStepClick: (stepId: string) => void;
   defaultExpanded?: boolean;
   stepThoughts?: Record<string, string>;
-}> = memo(({ section, activeStepId, onStepClick, defaultExpanded = true, stepThoughts }) => {
+  assistantText?: string;
+}> = memo(({ section, activeStepId, onStepClick, defaultExpanded = true, stepThoughts, assistantText }) => {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
 
   const completedCount = section.steps.filter(s => s.status === 'completed').length;
@@ -952,15 +976,35 @@ const SectionBlock: React.FC<{
 
           {section.steps.map(step => (
             <React.Fragment key={step.id}>
-              {stepThoughts?.[step.id] && <ThoughtBubble text={stepThoughts[step.id]} />}
-              {step.description?.includes('Action: get_skill_resource') ? (
-                <SkillResourceCard
-                  step={step}
-                  isActive={step.id === activeStepId}
-                  onClick={() => onStepClick(step.id)}
+              {step.action !== 'final_response' && stepThoughts?.[step.id] && (
+                <ThoughtBubble text={stepThoughts[step.id]} />
+              )}
+              <div
+                className={classNames({
+                  'ml-5 border-l border-slate-200 pl-3 dark:border-slate-700':
+                    step.parentId && section.steps.some(parent => parent.id === step.parentId),
+                })}
+              >
+                {step.description?.includes('Action: get_skill_resource') ? (
+                  <SkillResourceCard
+                    step={step}
+                    isActive={step.id === activeStepId}
+                    onClick={() => onStepClick(step.id)}
+                  />
+                ) : (
+                  <StepCard step={step} isActive={step.id === activeStepId} onClick={() => onStepClick(step.id)} />
+                )}
+              </div>
+              {step.action === 'final_response' &&
+                assistantText &&
+                !section.steps.some(
+                  child => child.parentId === step.id && child.action === 'final_response_thought',
+                ) && <FinalResponseContent content={assistantText} isStreaming={step.status === 'running'} />}
+              {step.action === 'final_response_thought' && assistantText && (
+                <FinalResponseContent
+                  content={assistantText}
+                  isStreaming={section.steps.some(parent => parent.id === step.parentId && parent.status === 'running')}
                 />
-              ) : (
-                <StepCard step={step} isActive={step.id === activeStepId} onClick={() => onStepClick(step.id)} />
               )}
               {step.description?.includes('Observation:') && <ObservationFormatter observation={step.description} />}
             </React.Fragment>
@@ -1039,7 +1083,8 @@ const ManusLeftPanel: React.FC<ManusLeftPanelProps> = ({
       textClass: 'text-red-600 dark:text-red-400',
     };
   }, [terminalRunStatus, t]);
-  const showAnswerGenerationStatus = Boolean(isWorking && !hasRunningStep);
+  const hasFinalResponseStep = sections.some(section => section.steps.some(step => step.action === 'final_response'));
+  const showAnswerGenerationStatus = Boolean(isWorking && !hasRunningStep && !hasFinalResponseStep);
   const handleStepClick = useCallback(
     (stepId: string, sectionId: string) => {
       onStepClick?.(stepId, sectionId);
@@ -1158,6 +1203,7 @@ const ManusLeftPanel: React.FC<ManusLeftPanelProps> = ({
                 onStepClick={stepId => handleStepClick(stepId, section.id)}
                 defaultExpanded
                 stepThoughts={stepThoughts}
+                assistantText={assistantText}
               />
             ))}
           </div>
@@ -1185,17 +1231,17 @@ const ManusLeftPanel: React.FC<ManusLeftPanelProps> = ({
           </div>
         )}
 
-        {taskPlan && taskPlan.length > 0 && (
-          <div className='mt-3 px-1'>
-            <TaskPlanCard tasks={taskPlan} defaultCollapsed={false} />
-          </div>
-        )}
-
-        {assistantText && (
+        {assistantText && !hasFinalResponseStep && (
           <div className='mt-4 px-1'>
             <div className='prose prose-sm dark:prose-invert max-w-none text-gray-800 dark:text-gray-200 leading-relaxed'>
               <MarkdownContext>{assistantText}</MarkdownContext>
             </div>
+          </div>
+        )}
+
+        {taskPlan && taskPlan.length > 0 && (
+          <div className='mt-3 px-1'>
+            <TaskPlanCard tasks={taskPlan} defaultCollapsed={false} />
           </div>
         )}
 

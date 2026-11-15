@@ -500,6 +500,17 @@ Action Input: {"result": "丁宇龙共有 3 个项目。"}"""
         assert steps[0].is_terminal is True
         assert steps[0].action_input == {"result": "丁宇龙共有 3 个项目。"}
 
+    def test_reasoning_and_bare_tool_json_are_not_an_action(self):
+        """Reproduce a reasoning model reply that omitted the ReAct action labels."""
+        parser = ReActOutputParser()
+        text = """``````vis-thinking
+Now run the verify script again.
+``````
+
+{"code": "python3 verify_calcs.py calcs.json"}"""
+
+        assert parser.parse_current_step(text) == []
+
     def test_parsing_action_only_response(self):
         """Accept action-only responses from models that omit Thought."""
         parser = ReActOutputParser()

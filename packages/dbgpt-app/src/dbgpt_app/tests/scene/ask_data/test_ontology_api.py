@@ -49,9 +49,7 @@ def test_ontology_document_preview_and_publish_api():
         assert compile_check.status_code == 200
         assert compile_check.json()["data"]["valid"]
 
-        source_manifest = client.get(
-            "/api/v1/ask-data/ontology/draft/source-manifest"
-        )
+        source_manifest = client.get("/api/v1/ask-data/ontology/draft/source-manifest")
         assert source_manifest.status_code == 200
         assert source_manifest.json()["data"]["source_type"] == "active_scenes"
 
@@ -128,7 +126,9 @@ def test_ontology_draft_and_history_are_hidden_from_non_admin_users(monkeypatch)
         assert client.get("/api/v1/ask-data/ontology/draft").status_code == 403
         assert client.get("/api/v1/ask-data/ontology/revisions").status_code == 403
         assert client.get("/api/v1/ask-data/ontology/snapshots").status_code == 403
-        assert client.get("/api/v1/ask-data/ontology/snapshot/latest").status_code == 403
+        assert (
+            client.get("/api/v1/ask-data/ontology/snapshot/latest").status_code == 403
+        )
     finally:
         ontology_api.configure_ontology_service(previous_service)
 
@@ -157,6 +157,11 @@ name: 信息化项目数据查询
 description: 查询项目、合同金额、付款、项目阶段、负责人、联系人、部门和供应商等信息。
 data_source: dataman_data
 view: sync.pcm_project_info
+metrics:
+  - key: project_contract_amount
+    name: 项目合同金额
+    field: project_contract_amount
+    aggregation: sum
 ---
 <!-- dataman:document=data-dictionary -->
 # 视图数据字典
@@ -245,8 +250,9 @@ view: sync.pcm_project_info
         assert not markdown.lstrip().startswith("---")
         assert "草稿" not in markdown
         assert "人工确认" not in markdown
-        assert "| project | 项目 |" in markdown
-        assert "| project_contract_amount | 项目合同金额 | project | 元 |" in markdown
+        assert "| project |  | 项目 |" in markdown
+        assert "## 指标\n\n| ID | 名称 | 领域 | 所属实体 | 单位 |" in markdown
+        assert "| 项目合同金额 |" in markdown
         assert generated.json()["data"]["revision"]["source_scene_snapshots"] == [
             {
                 "scene_id": "project_analysis",
