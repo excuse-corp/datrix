@@ -63,14 +63,15 @@ def build_global_synthesis_prompt(
 6. 生成查询结果分析规则。
 7. 对口径冲突写 conflict_note，不要掩盖。
 8. 每个对象保留 source_scenes 和 evidence。
-9. 不输出 Markdown，只输出 JSON。
-10. scene_bindings 只能引用输入场景中出现过的 semantic_key。
-11. 所有 source_scenes、scenes、Evidence.scene_id、scene_bindings.scene 必须来自 allowed_scene_ids。
-12. 不要编造未输入的业务系统、场景或数据源；如果只有一个场景，cross_scene_analysis_paths 可以为空数组。
-13. 名称相同不代表概念或指标相同；不同 domain_id 的对象不得归并。只有同领域且定义、单位、粒度和时间依据兼容时才可归并。
-14. 有 domain_id 时，GlobalEntity 和 GlobalMetric 的 id 必须使用 domain_id 前缀（例如 project.contract、finance.paid_amount）；domain_id 为空时保持兼容的原 ID。
-15. 每条跨场景路径必须恰好涉及两个不同场景且状态为 candidate。它是待审核的分析契约，不是可执行 JOIN；关系类型、业务映射依据、左右时间依据、时间和粒度对齐条件、允许分析、禁止推断及来源证据应尽量完整，无法从输入确认的字段留空并在 unresolved_questions 说明。
-16. 仅凭同名字段或相似编码不得声称跨场景映射已成立。不同领域之间只能提出待审核关系，不能合并实体或指标，也不能给出默认可比结论。
+9. 每个 GlobalMetric 必须填写 source_metric_refs；每个引用都要包含来源 scene_id、场景级 metric_id、能确定时的 semantic_key、语义文档区段和证据。source_metric_refs 只能引用输入的场景级抽取结果，不能凭空创建。
+10. 不输出 Markdown，只输出 JSON。
+11. scene_bindings 只能引用输入场景中出现过的 semantic_key。
+12. 所有 source_scenes、source_metric_refs.scene_id、scenes、Evidence.scene_id、scene_bindings.scene 必须来自 allowed_scene_ids。
+13. 不要编造未输入的业务系统、场景或数据源；如果只有一个场景，cross_scene_analysis_paths 可以为空数组。
+14. 名称相同不代表概念或指标相同；不同 domain_id 的对象不得归并。只有同领域且定义、单位、粒度和时间依据兼容时才可归并。
+15. 有 domain_id 时，GlobalEntity 和 GlobalMetric 的 id 必须使用 domain_id 前缀（例如 project.contract、finance.paid_amount）；domain_id 为空时保持兼容的原 ID。
+16. 每条跨场景路径必须恰好涉及两个不同场景且状态为 candidate。它是待审核的分析契约，不是可执行 JOIN；关系类型、业务映射依据、左右时间依据、时间和粒度对齐条件、允许分析、禁止推断及来源证据应尽量完整，无法从输入确认的字段留空并在 unresolved_questions 说明。
+17. 仅凭同名字段或相似编码不得声称跨场景映射已成立。不同领域之间只能提出待审核关系，不能合并实体或指标，也不能给出默认可比结论。
 
 allowed_scene_ids：
 {json.dumps(allowed_scene_ids, ensure_ascii=False, indent=2)}

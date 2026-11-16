@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from typing import Any
 
@@ -111,12 +112,33 @@ def generate_ontology_markdown_from_scene_sources(
                     "time_basis": metric.get("time_basis", ""),
                     "formula": metric.get("formula", ""),
                     "sources": set(),
+                    "source_metric_refs": [],
                 },
             )
             item["sources"].add(source["scene_id"])
             semantic_key = metric.get("semantic_key") or metric_id
             if semantic_key:
                 binding_rows.append([source["scene_id"], metric_id, semantic_key])
+            metric_key = str(metric["key"])
+            metric_ref = [
+                source["scene_id"],
+                metric_key,
+                semantic_key,
+                "语义文档 YAML metrics",
+                json.dumps(
+                    {
+                        "key": metric_key,
+                        "name": metric["name"],
+                        "aggregation": metric.get("aggregation") or "",
+                        "unit": metric.get("unit") or "",
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            ]
+            if metric_ref not in item["source_metric_refs"]:
+                item["source_metric_refs"].append(metric_ref)
 
     relation_rows.extend(_entity_relation_candidates(entities_by_scene))
     cross_scene_rows.extend(_cross_scene_candidates(fields_by_scene))
@@ -187,6 +209,19 @@ def generate_ontology_markdown_from_scene_sources(
                 "冲突说明",
             ],
             metric_rows,
+        ),
+        "",
+        "## 指标来源追溯",
+        "",
+        _table(
+            ["全局指标", "场景", "场景级指标", "语义键", "语义文档区段", "证据"],
+            [
+                [item["id"], scene_id, scene_metric_id, semantic_key, section, evidence]
+                for item in sorted(metrics.values(), key=lambda value: value["id"])
+                for scene_id, scene_metric_id, semantic_key, section, evidence in sorted(
+                    item["source_metric_refs"]
+                )
+            ],
         ),
         "",
         "## 场景绑定",

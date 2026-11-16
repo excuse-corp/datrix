@@ -31,6 +31,7 @@ from .markdown import (
     build_prompt_projection,
     with_managed_frontmatter,
 )
+from .neo4j_store import Neo4jOntologyError, Neo4jOntologyStore
 from .repository import (
     InMemoryOntologyRepository,
     OntologyRepositoryError,
@@ -62,11 +63,13 @@ class OntologyLifecycleService:
         parser: OntologyMarkdownParser | None = None,
         llm_generator: OntologyLLMGenerator | None = None,
         generation_mode: Literal["llm", "rules"] | None = None,
+        neo4j_store: Neo4jOntologyStore | None = None,
     ):
         self.repository = repository
         self.parser = parser or OntologyMarkdownParser()
         self.llm_generator = llm_generator
         self.generation_mode = generation_mode
+        self.neo4j_store = neo4j_store or Neo4jOntologyStore()
 
     def draft(self, *, user_id: str) -> OntologyRevision:
         current = self.repository.ensure(created_by=user_id)
@@ -228,6 +231,10 @@ class OntologyLifecycleService:
             compiler_version=self.compiler_version,
         )
         self.repository.save_snapshot(snapshot)
+        try:
+            self.neo4j_store.sync_snapshot(snapshot)
+        except Neo4jOntologyError as exc:
+            raise OntologyServiceError("ONTOLOGY_NEO4J_SYNC_FAILED", str(exc)) from exc
         return snapshot
 
     def generate_from_active_scenes(
@@ -318,10 +325,48 @@ class OntologyLifecycleService:
         return result
 
     def activate(self, snapshot_id: str) -> OntologySnapshot:
+        previous_snapshot_id = None
         try:
+            previous_snapshot_id = self.neo4j_store.active_snapshot_id()
+            self.neo4j_store.activate_snapshot(snapshot_id)
             return self.repository.activate(snapshot_id)
         except OntologyRepositoryError as exc:
+            if previous_snapshot_id:
+                try:
+                    self.neo4j_store.activate_snapshot(previous_snapshot_id)
+                except Neo4jOntologyError:
+                    pass
+            else:
+                try:
+                    self.neo4j_store.deactivate_snapshot(snapshot_id)
+                except Neo4jOntologyError:
+                    pass
             raise OntologyServiceError(str(exc), str(exc)) from exc
+        except Neo4jOntologyError as exc:
+            raise OntologyServiceError(
+                "ONTOLOGY_NEO4J_ACTIVATE_FAILED", str(exc)
+            ) from exc
+
+    def neo4j_health(self) -> dict[str, Any]:
+        try:
+            return self.neo4j_store.health()
+        except Neo4jOntologyError as exc:
+            raise OntologyServiceError("ONTOLOGY_NEO4J_UNAVAILABLE", str(exc)) from exc
+
+    def neo4j_snapshot_status(self, snapshot_id: str) -> dict[str, Any]:
+        try:
+            return self.neo4j_store.snapshot_status(snapshot_id)
+        except Neo4jOntologyError as exc:
+            raise OntologyServiceError("ONTOLOGY_NEO4J_UNAVAILABLE", str(exc)) from exc
+
+    def sync_snapshot_to_neo4j(self, snapshot_id: str) -> dict[str, Any]:
+        try:
+            snapshot = self.repository.get_snapshot(snapshot_id)
+            return self.neo4j_store.sync_snapshot(snapshot)
+        except OntologyRepositoryError as exc:
+            raise OntologyServiceError(str(exc), str(exc)) from exc
+        except Neo4jOntologyError as exc:
+            raise OntologyServiceError("ONTOLOGY_NEO4J_SYNC_FAILED", str(exc)) from exc
 
     def active_snapshot(self) -> OntologySnapshot | None:
         return self.repository.active_snapshot()
@@ -586,7 +631,9 @@ def _default_ontology_llm_generator(
                 try:
                     from dbgpt_app.config import ApplicationConfig
 
-                    app_config = cfg.parse_config(ApplicationConfig, hook_section="hooks")
+                    app_config = cfg.parse_config(
+                        ApplicationConfig, hook_section="hooks"
+                    )
                     configured_model = configured_model or app_config.models.default_llm
                 except Exception:
                     configured_model = None
@@ -623,7 +670,9 @@ def _default_ontology_llm_generator(
                 last_error = RuntimeError(
                     f"Ontology generator model {selected_model} generation failed"
                 )
-            raise last_error or RuntimeError("Ontology generator model generation failed")
+            raise last_error or RuntimeError(
+                "Ontology generator model generation failed"
+            )
         except Exception as exc:
             raise OntologyLLMGenerationError(
                 "ONTOLOGY_LLM_UNAVAILABLE", f"模型暂时不可用，未生成草稿：{exc}"

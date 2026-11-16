@@ -8,9 +8,9 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from .generator import _normalize_source
 from ..query.capabilities import build_query_capabilities
 from ..scene.markdown import SemanticMarkdownParser, split_scene_documents
+from .generator import _normalize_source
 from .llm_prompts import build_global_synthesis_prompt, build_scene_extraction_prompt
 from .llm_renderer import render_ontology_markdown_from_synthesis
 from .llm_schemas import (
@@ -19,6 +19,7 @@ from .llm_schemas import (
     OntologyGenerationResult,
     OntologySceneSource,
     SceneOntologyExtraction,
+    SourceMetricRef,
 )
 from .llm_validator import (
     OntologyLLMValidationError,
@@ -59,7 +60,7 @@ class OntologyLLMGenerator:
 
         prompt = build_global_synthesis_prompt(extractions)
         synthesis, global_warnings = await self._generate_global_synthesis(
-            prompt, sources
+            prompt, sources, extractions
         )
         warnings.extend(global_warnings)
         warnings.extend(
@@ -121,6 +122,7 @@ class OntologyLLMGenerator:
         self,
         prompt: str,
         sources: list[OntologySceneSource],
+        extractions: list[SceneOntologyExtraction],
     ) -> tuple[GlobalOntologySynthesis, list[str]]:
         allowed_scenes = sorted(source.scene_id for source in sources)
         current_prompt = prompt
@@ -132,7 +134,10 @@ class OntologyLLMGenerator:
                 synthesis = _parse_model_json(
                     text, GlobalOntologySynthesis, "ONTOLOGY_LLM_INVALID_JSON"
                 )
-                return synthesis, validate_global_synthesis(synthesis, sources)
+                _backfill_exact_metric_sources(synthesis, extractions)
+                return synthesis, validate_global_synthesis(
+                    synthesis, sources, extractions
+                )
             except (OntologyLLMGenerationError, OntologyLLMValidationError) as exc:
                 if attempt >= 1 or not _retryable_generation_error(exc):
                     raise
@@ -286,7 +291,50 @@ def _retryable_generation_error(
         "ONTOLOGY_LLM_SCHEMA_INVALID",
         "ONTOLOGY_LLM_REFERENCE_INVALID",
         "ONTOLOGY_LLM_EVIDENCE_INVALID",
+        "ONTOLOGY_METRIC_SOURCE_INVALID",
     }
+
+
+def _backfill_exact_metric_sources(
+    synthesis: GlobalOntologySynthesis,
+    extractions: list[SceneOntologyExtraction],
+) -> None:
+    """Backfill legacy outputs using exact scene binding evidence only.
+
+    Older model responses predate ``source_metric_refs``.  This compatibility
+    step does not infer a metric: it copies a reference only when a declared
+    scene binding's semantic key or local metric ID matches exactly.
+    """
+    extraction_by_scene = {item.scene_id: item for item in extractions}
+    for metric in synthesis.metrics:
+        if metric.source_metric_refs:
+            continue
+        refs: list[SourceMetricRef] = []
+        for binding in metric.scene_bindings:
+            extraction = extraction_by_scene.get(binding.scene)
+            if extraction is None:
+                continue
+            candidate = next(
+                (
+                    item
+                    for item in extraction.metrics
+                    if item.local_id == binding.semantic_key
+                    or item.semantic_key == binding.semantic_key
+                ),
+                None,
+            )
+            if candidate is None or not candidate.evidence:
+                continue
+            refs.append(
+                SourceMetricRef(
+                    scene_id=binding.scene,
+                    metric_id=candidate.local_id,
+                    semantic_key=candidate.semantic_key,
+                    section=(candidate.evidence[0].section or "场景语义文档"),
+                    evidence=list(candidate.evidence),
+                )
+            )
+        metric.source_metric_refs = refs
 
 
 def _repair_prompt(

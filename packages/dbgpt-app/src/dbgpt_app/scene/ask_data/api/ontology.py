@@ -370,6 +370,50 @@ def activate_snapshot(
         raise _http_error(exc) from exc
 
 
+@router.get("/neo4j/health")
+def neo4j_health(
+    service: OntologyLifecycleService = Depends(get_ontology_service),
+    principal: AskDataPrincipal = Depends(get_principal),
+):
+    _require_admin(principal)
+    try:
+        return {"status": "succeeded", "data": service.neo4j_health()}
+    except OntologyServiceError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.get("/snapshots/{snapshot_id}/sync-status")
+def ontology_snapshot_sync_status(
+    snapshot_id: str,
+    service: OntologyLifecycleService = Depends(get_ontology_service),
+    principal: AskDataPrincipal = Depends(get_principal),
+):
+    _require_admin(principal)
+    try:
+        return {
+            "status": "succeeded",
+            "data": service.neo4j_snapshot_status(snapshot_id),
+        }
+    except OntologyServiceError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post("/snapshots/{snapshot_id}/sync")
+def sync_ontology_snapshot(
+    snapshot_id: str,
+    service: OntologyLifecycleService = Depends(get_ontology_service),
+    principal: AskDataPrincipal = Depends(get_principal),
+):
+    _require_admin(principal)
+    try:
+        return {
+            "status": "succeeded",
+            "data": service.sync_snapshot_to_neo4j(snapshot_id),
+        }
+    except OntologyServiceError as exc:
+        raise _http_error(exc) from exc
+
+
 @router.get("/graph")
 def get_graph(
     revision: int | None = None,

@@ -91,6 +91,25 @@ def render_ontology_markdown_from_synthesis(
             ],
         ),
         "",
+        "## 指标来源追溯",
+        "",
+        _table(
+            ["全局指标", "场景", "场景级指标", "语义键", "语义文档区段", "证据"],
+            [
+                [
+                    metric.id,
+                    source_ref.scene_id,
+                    source_ref.metric_id,
+                    source_ref.semantic_key or "",
+                    source_ref.section,
+                    evidence.quote,
+                ]
+                for metric in synthesis.metrics
+                for source_ref in metric.source_metric_refs
+                for evidence in source_ref.evidence
+            ],
+        ),
+        "",
         "## 指标关系",
         "",
         _table(

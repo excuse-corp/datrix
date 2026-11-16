@@ -85,6 +85,7 @@ def validate_scene_extraction(
 def validate_global_synthesis(
     synthesis: GlobalOntologySynthesis,
     sources: list[OntologySceneSource],
+    extractions: list[SceneOntologyExtraction] | None = None,
 ) -> list[str]:
     scene_ids = {source.scene_id for source in sources}
     source_by_scene = {source.scene_id: source for source in sources}
@@ -93,6 +94,9 @@ def validate_global_synthesis(
     entity_ids = {entity.id for entity in synthesis.entities}
     metric_ids = {metric.id for metric in synthesis.metrics}
     domain_by_scene = {source.scene_id: source.domain_id for source in sources}
+    extraction_by_scene = {
+        extraction.scene_id: extraction for extraction in extractions or []
+    }
 
     def assert_domain_namespace(object_id: str, domain_id: str | None) -> None:
         if domain_id and not object_id.startswith(f"{domain_id}."):
@@ -141,6 +145,81 @@ def validate_global_synthesis(
                 f"指标 {metric.id} 的领域与来源场景不一致。",
             )
         assert_domain_namespace(metric.id, effective_domain)
+        if not metric.source_metric_refs:
+            raise OntologyLLMValidationError(
+                "ONTOLOGY_METRIC_SOURCE_INVALID",
+                f"指标 {metric.id} 缺少场景级指标来源追溯，不能发布。",
+            )
+        ref_scenes: set[str] = set()
+        for source_ref in metric.source_metric_refs:
+            _assert_scenes([source_ref.scene_id], scene_ids, metric.id)
+            ref_scenes.add(source_ref.scene_id)
+            extraction = extraction_by_scene.get(source_ref.scene_id)
+            candidate = (
+                next(
+                    (
+                        item
+                        for item in extraction.metrics
+                        if item.local_id == source_ref.metric_id
+                    ),
+                    None,
+                )
+                if extraction
+                else None
+            )
+            if extractions is not None and candidate is None:
+                raise OntologyLLMValidationError(
+                    "ONTOLOGY_METRIC_SOURCE_INVALID",
+                    (
+                        f"指标 {metric.id} 的来源引用 {source_ref.scene_id}/"
+                        f"{source_ref.metric_id} 不存在于对应场景级抽取结果。"
+                    ),
+                )
+            if (
+                candidate
+                and source_ref.semantic_key
+                and candidate.semantic_key != source_ref.semantic_key
+            ):
+                raise OntologyLLMValidationError(
+                    "ONTOLOGY_METRIC_SOURCE_INVALID",
+                    f"指标 {metric.id} 的来源语义键与场景级指标定义不一致。",
+                )
+            source_quotes = (
+                {
+                    _normalize_quote(item.quote)
+                    for item in candidate.evidence
+                    if item.quote
+                }
+                if candidate
+                else set()
+            )
+            if not source_ref.evidence or (
+                candidate
+                and any(
+                    evidence.scene_id != source_ref.scene_id
+                    or _normalize_quote(evidence.quote) not in source_quotes
+                    for evidence in source_ref.evidence
+                )
+            ):
+                raise OntologyLLMValidationError(
+                    "ONTOLOGY_METRIC_SOURCE_INVALID",
+                    f"指标 {metric.id} 的来源证据必须引用场景级指标中的原始证据。",
+                )
+            candidate_sections = (
+                {item.section for item in candidate.evidence if item.section}
+                if candidate
+                else set()
+            )
+            if candidate_sections and source_ref.section not in candidate_sections:
+                raise OntologyLLMValidationError(
+                    "ONTOLOGY_METRIC_SOURCE_INVALID",
+                    f"指标 {metric.id} 的来源语义文档区段与场景级证据不一致。",
+                )
+        if not ref_scenes.issubset(set(metric.source_scenes)):
+            raise OntologyLLMValidationError(
+                "ONTOLOGY_METRIC_SOURCE_INVALID",
+                f"指标 {metric.id} 的 source_scenes 未包含全部场景级来源。",
+            )
         if metric.entity_id not in entity_ids:
             raise OntologyLLMValidationError(
                 "ONTOLOGY_LLM_REFERENCE_INVALID",

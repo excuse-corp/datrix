@@ -55,6 +55,33 @@ export type OntologySnapshot = {
   activated_at?: string | null;
 };
 
+export type OntologyNeo4jHealth = {
+  enabled: boolean;
+  status: 'ready' | 'disabled' | 'unavailable' | string;
+  uri?: string;
+  database?: string;
+  ready?: boolean;
+};
+
+export type OntologySnapshotSyncStatus = {
+  enabled: boolean;
+  status: 'ready' | 'active' | 'superseded' | 'missing' | 'disabled' | string;
+  snapshot_id: string;
+  content_hash?: string;
+  revision?: number;
+  ontology_id?: string;
+  node_count?: number;
+  relationship_count?: number;
+  layer_counts?: Record<
+    'business_semantics' | 'analysis_explanations' | 'mapping_governance',
+    {
+      nodes: number;
+      relationships: number;
+    }
+  >;
+  sync_error?: string | null;
+};
+
 export type OntologyGraphResponse = {
   revision: number;
   valid: boolean;
@@ -177,6 +204,14 @@ export const buildOntologySnapshot = (revision: number) =>
 
 export const activateOntologySnapshot = (snapshotId: string) =>
   request<OntologySnapshot>(`/snapshots/${encodeURIComponent(snapshotId)}/activate`, { method: 'POST' });
+
+export const getOntologyNeo4jHealth = () => request<OntologyNeo4jHealth>('/neo4j/health');
+
+export const getOntologySnapshotSyncStatus = (snapshotId: string) =>
+  request<OntologySnapshotSyncStatus>(`/snapshots/${encodeURIComponent(snapshotId)}/sync-status`);
+
+export const syncOntologySnapshot = (snapshotId: string) =>
+  request<OntologySnapshotSyncStatus>(`/snapshots/${encodeURIComponent(snapshotId)}/sync`, { method: 'POST' });
 
 export const listOntologyRevisions = () => request<{ items: OntologyRevision[] }>('/revisions');
 

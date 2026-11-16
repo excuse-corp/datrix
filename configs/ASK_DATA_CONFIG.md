@@ -44,6 +44,23 @@ Before starting the service, verify that the host running `dataman` can reach
 `DATAMAN_DATA_DB_HOST:DATAMAN_DATA_DB_PORT` and that the account has only read
 access to the configured view.
 
+When the three-layer Ontology publishing graph is enabled, add the local Neo4j
+parameters to the ignored `configs/.env.ask-data` file:
+
+```text
+DATAMAN_NEO4J_ENABLED=true
+DATAMAN_NEO4J_URI=bolt://127.0.0.1:7670
+DATAMAN_NEO4J_USERNAME=neo4j
+DATAMAN_NEO4J_PASSWORD=<from the local Neo4j secret file>
+DATAMAN_NEO4J_DATABASE=neo4j
+```
+
+The service startup script loads this file before starting Datrix. The password
+must remain in the ignored environment file or deployment secret; it is never
+written to TOML, tracked Markdown, logs, or frontend code. The Ontology graph
+publishing and status endpoints are documented in
+[`docs/neo4j-access.md`](../docs/neo4j-access.md).
+
 The non-secret prerequisite check is:
 
 ```bash

@@ -955,8 +955,16 @@ metrics:
         "finance.contract.paid_amount |"
     ) in markdown
     assert "| finance.contract.paid_amount | 合同支付金额 | finance |" in markdown
+    assert "## 指标来源追溯" in markdown
     assert "| 元 | sum | 合同 | payment_date |" in markdown
     assert "finance.contract.paid_amount" in keys
+    compilation = OntologyMarkdownParser().compile(markdown)
+    paid_amount = next(
+        node
+        for node in compilation.graph.nodes
+        if node.id == "finance.contract.paid_amount"
+    )
+    assert paid_amount.data["source_metric_refs"][0]["metric_id"] == "paid_amount"
 
 
 def test_compile_check_treats_metric_conflict_note_as_business_context():
@@ -1121,6 +1129,7 @@ async def test_llm_generator_outputs_compilable_analysis_markdown():
     assert result.mode == "llm"
     assert result.entity_count == 1
     assert "## 指标关系" in result.markdown
+    assert "## 指标来源追溯" in result.markdown
     assert "合同是收入确认和履约约束的核心对象" in result.markdown
     assert not result.markdown.lstrip().startswith("---")
     assert "草稿" not in result.markdown
@@ -1129,6 +1138,8 @@ async def test_llm_generator_outputs_compilable_analysis_markdown():
     assert compilation.valid
     assert compilation.prompt_projection["analysis_dimensions"]
     assert compilation.prompt_projection["result_analysis_rules"]
+    metric = next(node for node in compilation.graph.nodes if node.type == "metric")
+    assert metric.data["source_metric_refs"][0]["metric_id"] == "contract_amount"
 
 
 @pytest.mark.asyncio

@@ -396,6 +396,50 @@ class OntologyMarkdownParser:
                 line,
             )
 
+        for row, line in tables.get("指标来源追溯", []):
+            metric_id = cell(row, "全局指标", "指标")
+            scene_id = cell(row, "场景")
+            source_metric_id = cell(row, "场景级指标", "场景指标ID")
+            section = cell(row, "语义文档区段", "区段")
+            evidence = cell(row, "证据")
+            if (
+                not metric_id
+                or not scene_id
+                or not source_metric_id
+                or not section
+                or not evidence
+            ):
+                issues.append(
+                    OntologyValidationIssue(
+                        code="METRIC_SOURCE_TRACE_REQUIRED",
+                        message="指标来源追溯必须填写全局指标、场景、场景级指标、语义文档区段和证据。",
+                        line=line,
+                    )
+                )
+                continue
+            metric = nodes.get(metric_id)
+            if metric is None or metric.type != "metric":
+                issues.append(
+                    OntologyValidationIssue(
+                        code="METRIC_SOURCE_TRACE_REFERENCE_INVALID",
+                        message=f"指标来源追溯引用了不存在的指标：{metric_id}。",
+                        line=line,
+                    )
+                )
+                continue
+            refs = list((metric.data or {}).get("source_metric_refs") or [])
+            refs.append(
+                {
+                    "scene_id": scene_id,
+                    "metric_id": source_metric_id,
+                    "semantic_key": cell(row, "语义键"),
+                    "section": section,
+                    "evidence": evidence,
+                }
+            )
+            metric.data["source_metric_refs"] = refs
+            add_scene(scene_id, line)
+
         for row, line in tables.get("指标关系", []):
             identifier = cell(row, "ID")
             primary = cell(row, "主指标")

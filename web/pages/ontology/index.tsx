@@ -5,15 +5,20 @@ import {
   generateOntologyFromScenes,
   getOntology,
   getOntologyGraph,
+  getOntologyNeo4jHealth,
+  getOntologySnapshotSyncStatus,
   listOntologyRevisions,
   previewOntology,
   saveOntologyDraft,
   saveOntologyLayout,
+  syncOntologySnapshot,
   validateOntologyRevision,
   type OntologyGraph,
   type OntologyIssue,
+  type OntologyNeo4jHealth,
   type OntologyRevision,
   type OntologySnapshot,
+  type OntologySnapshotSyncStatus,
   type OntologySourceRef,
   type OntologySourceRefresh,
 } from '@/utils/ontology';
@@ -22,12 +27,14 @@ import {
   BranchesOutlined,
   CheckCircleFilled,
   CloudUploadOutlined,
+  DatabaseOutlined,
   DiffOutlined,
   DownloadOutlined,
   ExclamationCircleFilled,
   FileSearchOutlined,
   ReloadOutlined,
   SaveOutlined,
+  SyncOutlined,
   UploadOutlined,
 } from '@ant-design/icons';
 import type { UploadProps } from 'antd';
@@ -40,6 +47,8 @@ const OntologyGraphCanvas = dynamic(() => import('@/components/ontology/Ontology
 const DiffEditor = dynamic(() => import('@monaco-editor/react').then(module => module.DiffEditor), { ssr: false });
 
 type ViewMode = 'split' | 'document' | 'graph';
+type OntologyLayer = 'business_semantics' | 'analysis_explanations' | 'mapping_governance';
+type OntologyLayerView = OntologyLayer | 'all';
 type BridgeReviewItem = {
   pathId?: string;
   joinRowId: string;
@@ -157,6 +166,10 @@ export default function OntologyPage() {
   const [sourceRefreshOpen, setSourceRefreshOpen] = useState(false);
   const [diff, setDiff] = useState<{ original: string; modified: string }>();
   const [diffOpen, setDiffOpen] = useState(false);
+  const [neo4jHealth, setNeo4jHealth] = useState<OntologyNeo4jHealth>();
+  const [syncStatus, setSyncStatus] = useState<OntologySnapshotSyncStatus>();
+  const [syncing, setSyncing] = useState(false);
+  const [graphLayer, setGraphLayer] = useState<OntologyLayerView>('all');
 
   const changed = Boolean(draft && markdown !== draft.markdown);
 
@@ -178,6 +191,18 @@ export default function OntologyPage() {
       setSourceScenes(data.source_scenes);
       setSourceRefresh(buildSourceRefreshNotice(data.draft, data.source_scenes));
       await loadGraph(data.draft.revision, true);
+      try {
+        const health = await getOntologyNeo4jHealth();
+        setNeo4jHealth(health);
+        if (data.active_snapshot) {
+          setSyncStatus(await getOntologySnapshotSyncStatus(data.active_snapshot.snapshot_id));
+        } else {
+          setSyncStatus(undefined);
+        }
+      } catch {
+        setNeo4jHealth({ enabled: true, status: 'unavailable' });
+        setSyncStatus(undefined);
+      }
     } catch (error) {
       message.error(error instanceof Error ? error.message : '加载 Ontology 失败');
     } finally {
@@ -288,6 +313,20 @@ export default function OntologyPage() {
     }
   };
 
+  const syncActiveSnapshot = async () => {
+    if (!active) return;
+    setSyncing(true);
+    try {
+      const result = await syncOntologySnapshot(active.snapshot_id);
+      setSyncStatus(result);
+      message.success('当前本体快照已重新同步到 Neo4j');
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : 'Neo4j 同步失败');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const inspectSourceChanges = async () => {
     if (!draft) return;
     setSaving(true);
@@ -369,6 +408,59 @@ export default function OntologyPage() {
   const showGraph = mode !== 'document';
   const canApplySourceRefresh = Boolean(sourceRefresh);
   const sourceBySceneId = new Map(sourceScenes.map(source => [source.scene_id, source]));
+  const layerForNode = (type: string): OntologyLayer =>
+    ['scene', 'scene_snapshot', 'result_binding', 'evidence', 'review_record', 'source_document'].includes(type)
+      ? 'mapping_governance'
+      : [
+            'rule',
+            'analysis_dimension',
+            'analysis_path',
+            'analysis_rule',
+            'clarification_rule',
+            'alignment_condition',
+          ].includes(type)
+        ? 'analysis_explanations'
+        : 'business_semantics';
+  const layerForEdge = (type: string): OntologyLayer =>
+    [
+      'scene_binding',
+      'provided_by',
+      'has_snapshot',
+      'declares_binding',
+      'maps_to',
+      'supported_by',
+      'from_document',
+      'reviews',
+    ].includes(type)
+      ? 'mapping_governance'
+      : [
+            'cross_scene_join',
+            'metric_relation',
+            'clarification_rule',
+            'applies_to_metric',
+            'applies_to_entity',
+            'from_metric',
+            'to_metric',
+            'requires',
+          ].includes(type)
+        ? 'analysis_explanations'
+        : 'business_semantics';
+  const layerCounts = (graph?.nodes ?? []).reduce<Record<OntologyLayer, number>>(
+    (counts, node) => {
+      counts[layerForNode(node.type)] += 1;
+      return counts;
+    },
+    { business_semantics: 0, analysis_explanations: 0, mapping_governance: 0 },
+  );
+  const visibleGraph =
+    !graph || graphLayer === 'all'
+      ? graph
+      : (() => {
+          const edges = graph.edges.filter(edge => layerForEdge(edge.type) === graphLayer);
+          const includedIds = new Set(edges.flatMap(edge => [edge.source, edge.target]));
+          const nodes = graph.nodes.filter(node => layerForNode(node.type) === graphLayer || includedIds.has(node.id));
+          return { nodes, edges };
+        })();
   const publishStatusIcon = active ? (
     <Tooltip title={`已发布 v${active.revision}`}>
       <CheckCircleFilled className='text-[15px] text-emerald-500' />
@@ -502,6 +594,70 @@ export default function OntologyPage() {
             description={`模式：${lastGeneration.mode.toUpperCase()}；来源场景 ${lastGeneration.source_count} 个；实体 ${lastGeneration.entity_count} 个；指标 ${lastGeneration.metric_count} 个；关系 ${lastGeneration.relation_count} 个；分析规则 ${lastGeneration.analysis_rule_count} 条`}
           />
         )}
+        <div className='mx-4 mt-4 grid gap-3 md:grid-cols-2'>
+          <div className='rounded-md border border-gray-200 p-4 dark:border-white/10'>
+            <div className='flex items-center justify-between'>
+              <div className='flex items-center gap-2 font-medium'>
+                <DatabaseOutlined className='text-blue-600' /> Neo4j 发布存储
+              </div>
+              <Tag
+                color={
+                  neo4jHealth?.status === 'ready' ? 'green' : neo4jHealth?.status === 'disabled' ? 'default' : 'orange'
+                }
+              >
+                {neo4jHealth?.status === 'ready'
+                  ? '已连接'
+                  : neo4jHealth?.status === 'disabled'
+                    ? '未启用'
+                    : neo4jHealth?.status === 'unavailable'
+                      ? '不可用'
+                      : '待检查'}
+              </Tag>
+            </div>
+            <div className='mt-2 text-xs text-gray-500'>
+              {syncStatus
+                ? `快照 ${syncStatus.snapshot_id} · ${syncStatus.node_count ?? 0} 个对象 · ${syncStatus.relationship_count ?? 0} 条关系 · ${syncStatus.status}`
+                : '发布后可查看当前快照的图存储同步状态。'}
+            </div>
+            {syncStatus?.sync_error && <div className='mt-2 text-xs text-red-600'>{syncStatus.sync_error}</div>}
+            {active && neo4jHealth?.status === 'ready' && (
+              <Button
+                className='mt-3'
+                size='small'
+                icon={<SyncOutlined />}
+                loading={syncing}
+                onClick={() => void syncActiveSnapshot()}
+              >
+                重试当前快照同步
+              </Button>
+            )}
+          </div>
+          <div className='rounded-md border border-gray-200 p-4 dark:border-white/10'>
+            <div className='font-medium'>{syncStatus?.layer_counts ? '已发布快照三层对象' : '草稿三层节点'}</div>
+            <div className='mt-3 flex flex-wrap gap-2 text-xs'>
+              {(
+                [
+                  ['business_semantics', '业务语义', 'blue'],
+                  ['analysis_explanations', '分析解释', 'purple'],
+                  ['mapping_governance', '映射治理', 'cyan'],
+                ] as const
+              ).map(([layer, label, color]) => {
+                const publishedCount = syncStatus?.layer_counts?.[layer];
+                return (
+                  <Tag key={layer} color={color}>
+                    {label}{' '}
+                    {publishedCount
+                      ? `${publishedCount.nodes} 节点 / ${publishedCount.relationships} 关系`
+                      : `${layerCounts[layer]} 节点`}
+                  </Tag>
+                );
+              })}
+            </div>
+            <div className='mt-2 text-xs text-gray-500'>
+              三层在发布时编译为带 layer 属性的图对象，当前分析召回仍使用 JSON 快照。
+            </div>
+          </div>
+        </div>
         <div className='mx-4 mt-4 rounded-md border border-gray-200 p-4 dark:border-white/10'>
           <div className='mb-3 flex items-center justify-between'>
             <div>
@@ -638,12 +794,25 @@ export default function OntologyPage() {
                 <ApartmentOutlined className='text-blue-600' />
                 <span className='text-sm font-medium'>本体图谱</span>
               </div>
-              <span className='text-xs text-gray-500'>布局独立于业务版本</span>
+              <div className='flex items-center gap-3'>
+                <Segmented<OntologyLayerView>
+                  size='small'
+                  value={graphLayer}
+                  onChange={setGraphLayer}
+                  options={[
+                    { value: 'all', label: '全部' },
+                    { value: 'business_semantics', label: `业务语义 ${layerCounts.business_semantics}` },
+                    { value: 'analysis_explanations', label: `分析解释 ${layerCounts.analysis_explanations}` },
+                    { value: 'mapping_governance', label: `映射治理 ${layerCounts.mapping_governance}` },
+                  ]}
+                />
+                <span className='text-xs text-gray-500'>布局独立于业务版本</span>
+              </div>
             </div>
             <div className='min-h-0 flex-1 p-3'>
               <div className='h-[632px] rounded-md bg-slate-50 dark:bg-[#111217]'>
                 <OntologyGraphCanvas
-                  graph={graph}
+                  graph={visibleGraph}
                   layout={layout}
                   onSaveLayout={async value => {
                     await saveOntologyLayout(draft.revision, value);

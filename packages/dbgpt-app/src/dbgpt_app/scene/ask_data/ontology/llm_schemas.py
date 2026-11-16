@@ -6,7 +6,6 @@ from typing import Any, Awaitable, Callable, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 GenerateFn = Callable[[str], Awaitable[str]]
 
 
@@ -121,6 +120,18 @@ class SceneBinding(BaseModel):
     semantic_key: str = Field(min_length=1)
 
 
+class SourceMetricRef(BaseModel):
+    """Traceability from a global metric to an explicit scene metric."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    scene_id: str = Field(min_length=1)
+    metric_id: str = Field(min_length=1)
+    semantic_key: str | None = None
+    section: str = Field(min_length=1)
+    evidence: list[Evidence] = Field(min_length=1)
+
+
 class GlobalEntity(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -155,6 +166,7 @@ class GlobalMetric(BaseModel):
     recommended_dimensions: list[str] = Field(default_factory=list)
     related_metrics: list[str] = Field(default_factory=list)
     source_scenes: list[str] = Field(default_factory=list)
+    source_metric_refs: list[SourceMetricRef] = Field(default_factory=list)
     scene_bindings: list[SceneBinding] = Field(default_factory=list)
     conflict_note: str | None = None
     evidence: list[Evidence] = Field(default_factory=list)
@@ -292,4 +304,5 @@ __all__ = [
     "SceneMetricCandidate",
     "SceneOntologyExtraction",
     "SceneRelationCandidate",
+    "SourceMetricRef",
 ]
