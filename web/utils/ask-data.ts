@@ -79,6 +79,15 @@ export type SceneResult = {
     aggregation?: string | null;
     unit?: string | null;
   }>;
+  field_lineage?: Array<{
+    field_ref?: string | null;
+    source_field: string;
+    roles?: string[];
+    result_keys?: string[];
+    semantic_key?: string | null;
+    aggregation?: string | null;
+    resolved?: boolean;
+  }>;
   rows?: Array<Record<string, unknown>>;
   sql?: string | null;
   sql_explanation?: SqlExplanation | null;
@@ -110,6 +119,7 @@ export type SqlExplanation = {
 export type Clarification = { question?: string; field?: string; options?: string[] };
 export type OntologyAnalysisContext = {
   ontology_snapshot_id?: string;
+  retrieval_source?: string;
   revision?: number;
   matched_scene_ids?: string[];
   matched_column_keys?: string[];
@@ -122,9 +132,18 @@ export type OntologyAnalysisContext = {
     confidence?: string;
     evidence?: string;
   }>;
+  retrieval_trace?: Array<{
+    result_key: string;
+    scene_id?: string;
+    semantic_key?: string | null;
+    field_refs?: string[];
+    status: string;
+    matched_by?: string | null;
+  }>;
   unmatched_columns?: string[];
   result_profiles?: Array<{
     scene_id: string;
+    scene_snapshot_id?: string;
     grain?: string[];
     time_grain?: string | null;
     time_basis?: string | null;

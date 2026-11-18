@@ -22,12 +22,14 @@ class CompiledQuery:
         selected_keys: list[str],
         compiler_version: str,
         query_spec_hash: str,
+        field_lineage: list[dict[str, Any]] | None = None,
     ):
         self.sql = sql
         self.parameters = parameters
         self.selected_keys = selected_keys
         self.compiler_version = compiler_version
         self.query_spec_hash = query_spec_hash
+        self.field_lineage = field_lineage or []
         self.sql_hash = f"sha256:{hashlib.sha256(sql.encode('utf-8')).hexdigest()}"
 
 
@@ -48,17 +50,70 @@ class QuerySpecCompiler:
         metrics = {item["key"]: item for item in capabilities.metrics}
         selected_keys: list[str] = []
         selections = []
+        field_lineage: list[dict[str, Any]] = []
+
+        def add_lineage(
+            field_name: str | None,
+            role: str,
+            *,
+            result_key: str | None = None,
+            semantic_key: str | None = None,
+            aggregation: str | None = None,
+        ) -> None:
+            if not field_name or field_name == "*":
+                return
+            current = next(
+                (item for item in field_lineage if item["source_field"] == field_name),
+                None,
+            )
+            if current is None:
+                current = {
+                    "source_field": field_name,
+                    "roles": [],
+                    "result_keys": [],
+                    "semantic_key": semantic_key,
+                    "aggregation": aggregation,
+                    "resolved": True,
+                }
+                field_lineage.append(current)
+            if role not in current["roles"]:
+                current["roles"].append(role)
+            if result_key and result_key not in current["result_keys"]:
+                current["result_keys"].append(result_key)
+            if semantic_key and not current.get("semantic_key"):
+                current["semantic_key"] = semantic_key
+            if aggregation and not current.get("aggregation"):
+                current["aggregation"] = aggregation
+
         for key in spec.dimensions:
             item = dimensions[key]
             expression = column(item["field"], _selectable=table).label(key)
             selections.append(expression)
             selected_keys.append(key)
+            add_lineage(
+                str(item.get("field") or ""),
+                "select",
+                result_key=key,
+                semantic_key=str(item.get("semantic_key") or key),
+            )
+            add_lineage(
+                str(item.get("field") or ""),
+                "group_by",
+                result_key=key,
+                semantic_key=str(item.get("semantic_key") or key),
+            )
             if item.get("label_field"):
                 label_key = f"{key}_label"
                 selections.append(
                     column(item["label_field"], _selectable=table).label(label_key)
                 )
                 selected_keys.append(label_key)
+                add_lineage(
+                    str(item["label_field"]),
+                    "select",
+                    result_key=label_key,
+                    semantic_key=str(item.get("semantic_key") or key),
+                )
         for key in spec.metrics:
             item = metrics[key]
             field = column(item.get("field") or "*", _selectable=table)
@@ -71,12 +126,20 @@ class QuerySpecCompiler:
                 expression = getattr(func, aggregation)(field)
             selections.append(expression.label(key))
             selected_keys.append(key)
+            add_lineage(
+                str(item.get("field") or ""),
+                "aggregate",
+                result_key=key,
+                semantic_key=str(item.get("semantic_key") or key),
+                aggregation=aggregation,
+            )
         statement = select(*selections).select_from(table)
         parameters: dict[str, Any] = {}
         conditions = []
         time_config = capabilities.time
         if spec.time_range and time_config.get("field"):
             time_field = column(time_config["field"], _selectable=table)
+            add_lineage(str(time_config["field"]), "time_filter")
             start_name, end_name = "p_time_start", "p_time_end"
             conditions.extend(
                 [time_field >= bindparam(start_name), time_field < bindparam(end_name)]
@@ -90,6 +153,11 @@ class QuerySpecCompiler:
         for index, item in enumerate(spec.filters):
             dimension = dimensions[item.dimension]
             field = column(dimension["field"], _selectable=table)
+            add_lineage(
+                str(dimension.get("field") or ""),
+                "filter",
+                semantic_key=str(dimension.get("semantic_key") or item.dimension),
+            )
             values = item.values
             names = [
                 f"p_filter_{index}_{value_index}" for value_index in range(len(values))
@@ -141,7 +209,12 @@ class QuerySpecCompiler:
             f"sha256:{hashlib.sha256(canonical_spec.encode('utf-8')).hexdigest()}"
         )
         return CompiledQuery(
-            str(compiled), parameters, selected_keys, self.compiler_version, query_hash
+            str(compiled),
+            parameters,
+            selected_keys,
+            self.compiler_version,
+            query_hash,
+            field_lineage=field_lineage,
         )
 
 

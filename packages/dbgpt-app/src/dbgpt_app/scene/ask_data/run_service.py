@@ -76,7 +76,10 @@ class RunExecutionService:
                 question=question,
                 plan_json=plan.model_dump(mode="json"),
                 combine_mode=plan.combine.mode if plan.combine else None,
-                ontology_snapshot_id=plan.ontology_snapshot_id,
+                # The SQL run does not select or pin the global Ontology.  The
+                # post-query Agent analysis records the Ontology snapshot it
+                # actually reads in its own context.
+                ontology_snapshot_id=None,
                 idempotency_key=idempotency_key,
                 status=RunStatus.RUNNING,
                 started_at=started_at,
@@ -173,9 +176,7 @@ class RunExecutionService:
                 "errors": result.errors,
                 "warnings": warnings,
                 "result_json": result.model_dump(mode="json"),
-                "ontology_snapshot_id": (
-                    result.ontology_snapshot_id or plan.ontology_snapshot_id
-                ),
+                "ontology_snapshot_id": None,
                 "finished_at": finished,
                 "duration_ms": duration_ms,
                 "clarification": result.clarification,

@@ -850,19 +850,33 @@ def _main_agent_result_content(
         str(item.get("scene_id")) for item in scene_items if item.get("scene_id")
     ]
     result_columns = [
-        {**column, "scene_id": str(item.get("scene_id") or "")}
+        {
+            **column,
+            "scene_id": str(item.get("scene_id") or ""),
+            **(
+                {"scene_snapshot_id": str(item.get("snapshot_id"))}
+                if item.get("snapshot_id")
+                else {}
+            ),
+        }
         for item in scene_items
         for column in item.get("columns", [])
         if isinstance(column, dict)
     ]
     result_profiles = []
+    result_lineage = []
     for item in scene_items:
         caliber = item.get("sql_explanation")
         caliber = caliber if isinstance(caliber, dict) else {}
         result_profiles.append(
             {
                 "scene_id": str(item.get("scene_id") or ""),
-                "grain": item.get("grain") or caliber.get("grain") or [],
+                **(
+                    {"scene_snapshot_id": str(item.get("snapshot_id"))}
+                    if item.get("snapshot_id")
+                    else {}
+                ),
+                "grain": item.get("grain") or [],
                 "grain_semantic_keys": [
                     str(column.get("semantic_key") or column.get("key"))
                     for column in item.get("columns", [])
@@ -872,9 +886,21 @@ def _main_agent_result_content(
                 ],
                 "time_grain": item.get("time_grain"),
                 "time_basis": item.get("time_basis"),
-                "time_range": item.get("time_range") or caliber.get("time_scope"),
+                "time_range": item.get("time_range"),
             }
         )
+        for lineage in item.get("field_lineage", []) or []:
+            if not isinstance(lineage, dict):
+                continue
+            for result_key in lineage.get("result_keys", []) or []:
+                result_lineage.append(
+                    {
+                        **lineage,
+                        "result_key": str(result_key),
+                        "scene_id": str(item.get("scene_id") or ""),
+                        "scene_snapshot_id": str(item.get("snapshot_id") or ""),
+                    }
+                )
     compact = {
         "status": payload.get("status"),
         "query_id": payload.get("query_id"),
@@ -883,15 +909,29 @@ def _main_agent_result_content(
         "scenes": [
             {
                 "scene_id": item.get("scene_id"),
+                "scene_snapshot_id": item.get("snapshot_id"),
                 "status": item.get("status"),
                 "row_count": item.get("row_count"),
                 "truncated": item.get("truncated"),
                 "data_caliber": item.get("sql_explanation"),
                 "columns": [
-                    column.get("key")
+                    {
+                        key: column.get(key)
+                        for key in (
+                            "key",
+                            "type",
+                            "semantic_key",
+                            "source_field",
+                            "aggregation",
+                            "unit",
+                            "label",
+                        )
+                        if column.get(key) is not None
+                    }
                     for column in item.get("columns", [])
                     if isinstance(column, dict)
                 ],
+                "field_lineage": item.get("field_lineage", []),
                 "rows": item.get("rows", []),
             }
             for item in scene_items
@@ -904,13 +944,15 @@ def _main_agent_result_content(
             "本次业务查询已成功完成。直接基于这些结果回答用户；"
             "不要用相同问题再次调用 ask_data_query。"
         )
-    ontology_context = _active_ontology_analysis_context(
-        question,
-        scene_ids=scene_ids,
-        principal=principal,
-        result_columns=result_columns,
-        result_profiles=result_profiles,
-    )
+    ontology_kwargs = {
+        "scene_ids": scene_ids,
+        "principal": principal,
+        "result_columns": result_columns,
+        "result_profiles": result_profiles,
+    }
+    if result_lineage:
+        ontology_kwargs["result_lineage"] = result_lineage
+    ontology_context = _active_ontology_analysis_context(question, **ontology_kwargs)
     has_data_caliber = any(
         isinstance(scene.get("data_caliber"), dict) for scene in compact["scenes"]
     )
@@ -1000,6 +1042,7 @@ def _active_ontology_analysis_context(
     scene_ids: list[str] | None = None,
     principal: AskDataPrincipal | None = None,
     result_columns: list[dict[str, Any]] | None = None,
+    result_lineage: list[dict[str, Any]] | None = None,
     result_profiles: list[dict[str, Any]] | None = None,
 ) -> str:
     try:
@@ -1008,8 +1051,21 @@ def _active_ontology_analysis_context(
             OntologyAnalysisService,
         )
 
+        ontology_service = get_ontology_service()
+        ontology_snapshot, retrieval_source = ontology_service.analysis_snapshot_with_source(
+            scene_ids=scene_ids,
+            result_columns=result_columns,
+            result_lineage=result_lineage,
+            result_profiles=result_profiles,
+            authorized_scene_ids=(
+                sorted(principal.scene_ids) if principal is not None else []
+            ),
+            is_platform_admin=(
+                principal.is_platform_admin if principal is not None else False
+            ),
+        )
         return OntologyAnalysisService().render(
-            get_ontology_service().active_snapshot(),
+            ontology_snapshot,
             question,
             scene_ids=scene_ids,
             authorized_scene_ids=(
@@ -1019,7 +1075,9 @@ def _active_ontology_analysis_context(
                 principal.is_platform_admin if principal is not None else False
             ),
             result_columns=result_columns,
+            result_lineage=result_lineage,
             result_profiles=result_profiles,
+            retrieval_source=retrieval_source,
         )
     except Exception:
         return ""

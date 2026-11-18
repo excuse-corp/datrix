@@ -100,10 +100,330 @@ def test_format_issues_still_block_publish():
     assert getattr(exc_info.value, "code", None) == "ONTOLOGY_VALIDATION_FAILED"
 
 
+def _approve_revision_for_test(service, revision, scene_snapshots=None):
+    sources = scene_snapshots or []
+    state = service.review_state(
+        revision, user_id="admin", scene_snapshots=sources
+    )
+    for item in state["items"]:
+        if item["required"] and item["status"] != "confirmed":
+            service.review_object(
+                revision,
+                target_type=item["target_type"],
+                target_id=item["target_id"],
+                decision="confirmed",
+                comment="test approval",
+                actor_id="admin",
+                expected_fingerprint=item["fingerprint"],
+                scene_snapshots=sources,
+            )
+    state = service.review_state(
+        revision, user_id="admin", scene_snapshots=sources
+    )
+    assert state["current_content_hash"]
+    service.approve_revision(
+        revision,
+        actor_id="admin",
+        expected_content_hash=state["current_content_hash"],
+        scene_snapshots=sources,
+    )
+
+
+def _metric_ontology_markdown(metric_name="合同金额"):
+    return (
+        DEFAULT_ONTOLOGY_MARKDOWN
+        + f"""
+## 业务实体
+
+| ID | 名称 | 别名 | 定义 |
+| --- | --- | --- | --- |
+| contract | 合同 |  | 业务合同 |
+
+## 指标
+
+| ID | 名称 | 所属实体 | 单位 | 计算公式 | 来源场景 |
+| --- | --- | --- | --- | --- | --- |
+| contract_amount | {metric_name} | contract | 元 |  | contract_analysis |
+"""
+    )
+
+
+def test_publication_requires_confirmation_and_revision_approval():
+    service = OntologyLifecycleService(InMemoryOntologyRepository())
+    draft = service.draft(user_id="admin")
+    saved = service.save_draft(
+        markdown=_metric_ontology_markdown(),
+        user_id="admin",
+        expected_revision=draft.revision,
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        service.build_snapshot(saved.revision)
+
+    assert getattr(exc_info.value, "code", None) == "ONTOLOGY_REVIEW_INCOMPLETE"
+
+    state = service.review_state(saved.revision, user_id="admin")
+    assert state["pending_count"] == 1
+    metric_review = next(item for item in state["items"] if item["target_id"] == "contract_amount")
+    assert metric_review["object"]["id"] == "contract_amount"
+    assert metric_review["object"]["data"]["unit"] == "元"
+    assert "formula" in metric_review["object"]["data"]
+    with pytest.raises(ValueError) as rejection_error:
+        service.review_object(
+            saved.revision,
+            target_type="node",
+            target_id="contract_amount",
+            decision="rejected",
+            comment="  ",
+            actor_id="admin",
+            expected_fingerprint=metric_review["fingerprint"],
+        )
+    assert getattr(rejection_error.value, "code", None) == "ONTOLOGY_REVIEW_COMMENT_REQUIRED"
+
+    _approve_revision_for_test(service, saved.revision)
+    snapshot = service.build_snapshot(saved.revision)
+
+    assert snapshot.revision == saved.revision
+    assert snapshot.graph_json["nodes"]
+
+
+def test_clean_invalid_metric_sources_removes_metrics_and_bindings():
+    service = OntologyLifecycleService(InMemoryOntologyRepository())
+    draft = service.draft(user_id="admin")
+    saved = service.save_draft(
+        markdown=(
+            DEFAULT_ONTOLOGY_MARKDOWN
+            + """
+## 指标
+
+| ID | 名称 | 所属实体 | 单位 | 计算公式 | 来源场景 |
+| --- | --- | --- | --- | --- | --- |
+| invented_metric | 推演指标 | entity | 个 | 由字段推演 | contract_analysis |
+
+## 指标关系
+
+| ID | 主指标 | 关系 | 关联指标 | 分析用途 |
+| --- | --- | --- | --- | --- |
+| relation_invented | invented_metric | correlates_with | invented_metric | 不应保留 |
+
+## 场景绑定
+
+| 场景 | Ontology 对象 | 场景语义键 |
+| --- | --- | --- |
+| contract_analysis | invented_metric | contract.count |
+"""
+        ),
+        user_id="admin",
+        expected_revision=draft.revision,
+    )
+    source = {
+        "snapshot": _scene_snapshot("snap_contract_v1"),
+        "semantic_md": _project_semantic_markdown_without_query_model(),
+    }
+
+    result = service.clean_invalid_metric_sources(
+        saved.revision,
+        actor_id="admin",
+        scene_snapshots=[source],
+    )
+
+    assert result["removed_metric_ids"] == ["invented_metric"]
+    assert result["review_state"]["pending_count"] == 0
+    cleaned = result["revision"].ontology_md
+    assert "invented_metric" not in cleaned
+    assert "relation_invented" not in cleaned
+    assert "场景绑定" in cleaned
+
+
+def test_exclude_review_object_removes_metric_and_records_audit_event():
+    service = OntologyLifecycleService(InMemoryOntologyRepository())
+    draft = service.draft(user_id="admin")
+    saved = service.save_draft(
+        markdown=(
+            DEFAULT_ONTOLOGY_MARKDOWN
+            + """
+## 指标
+
+| ID | 名称 | 所属实体 | 单位 | 计算公式 | 来源场景 |
+| --- | --- | --- | --- | --- | --- |
+| invented_metric | 推演指标 | entity | 个 | 由字段推演 | contract_analysis |
+
+## 指标关系
+
+| ID | 主指标 | 关系 | 关联指标 | 分析用途 |
+| --- | --- | --- | --- | --- |
+| relation_invented | invented_metric | correlates_with | invented_metric | 不应保留 |
+
+## 场景绑定
+
+| 场景 | Ontology 对象 | 场景语义键 |
+| --- | --- | --- |
+| contract_analysis | invented_metric | contract.count |
+"""
+        ),
+        user_id="admin",
+        expected_revision=draft.revision,
+    )
+    item = next(
+        value
+        for value in service.review_state(saved.revision, user_id="admin")["items"]
+        if value["target_id"] == "invented_metric"
+    )
+
+    result = service.exclude_review_object(
+        saved.revision,
+        target_type="node",
+        target_id="invented_metric",
+        comment="该指标没有业务确认，不纳入本体。",
+        actor_id="admin",
+        expected_fingerprint=item["fingerprint"],
+    )
+
+    assert "invented_metric" not in result["revision"].ontology_md
+    assert "relation_invented" not in result["revision"].ontology_md
+    assert result["review_state"]["pending_count"] == 0
+    assert result["event"]["event_type"] == "object_excluded"
+    assert any(
+        event["event_type"] == "object_excluded"
+        for event in result["review_state"]["events"]
+    )
+
+
+def test_exclude_review_object_removes_cross_scene_analysis_path():
+    service = OntologyLifecycleService(InMemoryOntologyRepository())
+    draft = service.draft(user_id="admin")
+    saved = service.save_draft(
+        markdown=(
+            DEFAULT_ONTOLOGY_MARKDOWN
+            + """
+## 跨场景分析路径
+
+| ID | 分析主题 | 涉及场景 | 关联实体 | 推荐分析方式 |
+| --- | --- | --- | --- | --- |
+| path_unused | 不需要的跨场景盘点 | scene_a、scene_b | entity_a、entity_b | 不纳入 |
+"""
+        ),
+        user_id="admin",
+        expected_revision=draft.revision,
+    )
+    item = next(
+        value
+        for value in service.review_state(saved.revision, user_id="admin")["items"]
+        if value["target_id"] == "path_unused"
+    )
+
+    result = service.exclude_review_object(
+        saved.revision,
+        target_type="node",
+        target_id="path_unused",
+        comment="当前没有实际业务关联，不纳入分析本体。",
+        actor_id="admin",
+        expected_fingerprint=item["fingerprint"],
+    )
+
+    assert "path_unused" not in result["revision"].ontology_md
+    assert result["review_state"]["pending_count"] == 0
+
+
+def test_validation_rejects_metric_without_semantic_document_declaration():
+    service = OntologyLifecycleService(InMemoryOntologyRepository())
+    draft = service.draft(user_id="admin")
+    saved = service.save_draft(
+        markdown=(
+            DEFAULT_ONTOLOGY_MARKDOWN
+            + """
+## 指标
+
+| ID | 名称 | 所属实体 | 单位 | 计算公式 | 来源场景 |
+| --- | --- | --- | --- | --- | --- |
+| invented_metric | 推演指标 | entity | 个 | 由字段推演 | contract_analysis |
+"""
+        ),
+        user_id="admin",
+        expected_revision=draft.revision,
+    )
+    result = service.validate(
+        saved.revision,
+        [
+            {
+                "snapshot": _scene_snapshot("snap_contract_v1"),
+                "semantic_md": _project_semantic_markdown_without_query_model(),
+            }
+        ],
+    )
+
+    assert not result["valid"]
+    assert any(
+        issue["code"] == "ONTOLOGY_METRIC_SOURCE_INVALID"
+        for issue in result["issues"]
+    )
+def test_changed_ontology_revision_requires_fresh_review_and_approval():
+    service = OntologyLifecycleService(InMemoryOntologyRepository())
+    draft = service.draft(user_id="admin")
+    saved = service.save_draft(
+        markdown=_metric_ontology_markdown(),
+        user_id="admin",
+        expected_revision=draft.revision,
+    )
+    _approve_revision_for_test(service, saved.revision)
+
+    changed = service.save_draft(
+        markdown=_metric_ontology_markdown("合同回款金额"),
+        user_id="admin",
+        expected_revision=saved.revision,
+    )
+    state = service.review_state(changed.revision, user_id="admin")
+
+    assert changed.revision != saved.revision
+    assert state["pending_count"] == 1
+    assert state["items"][-1]["status"] == "candidate"
+    assert not state["approved"]
+    with pytest.raises(ValueError) as exc_info:
+        service.build_snapshot(changed.revision)
+    assert getattr(exc_info.value, "code", None) == "ONTOLOGY_REVIEW_INCOMPLETE"
+
+
+def test_incomplete_cross_scene_contract_cannot_be_confirmed_by_api():
+    service = OntologyLifecycleService(InMemoryOntologyRepository())
+    draft = service.draft(user_id="admin")
+    saved = service.save_draft(
+        markdown=(
+            DEFAULT_ONTOLOGY_MARKDOWN
+            + """
+## 跨场景关联
+
+| ID | 左侧场景 | 右侧场景 | 业务实体 | 关联键 | 粒度 |
+| --- | --- | --- | --- | --- | --- |
+| contract_payment | contract_analysis | payment_analysis | contract |  |  |
+"""
+        ),
+        user_id="admin",
+        expected_revision=draft.revision,
+    )
+    state = service.review_state(saved.revision, user_id="admin")
+    edge_review = next(
+        item for item in state["items"] if item["target_id"] == "contract_payment"
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        service.review_object(
+            saved.revision,
+            target_type="edge",
+            target_id="contract_payment",
+            decision="confirmed",
+            comment="确认",
+            actor_id="admin",
+            expected_fingerprint=edge_review["fingerprint"],
+        )
+
+    assert getattr(exc_info.value, "code", None) == "ONTOLOGY_REVIEW_EVIDENCE_INCOMPLETE"
+
+
 def test_ontology_snapshot_is_immutable_after_activation():
     service = OntologyLifecycleService(InMemoryOntologyRepository())
     draft = service.draft(user_id="admin")
 
+    _approve_revision_for_test(service, draft.revision)
     snapshot = service.build_snapshot(draft.revision)
     active = service.activate(snapshot.snapshot_id)
 
@@ -114,6 +434,7 @@ def test_ontology_snapshot_is_immutable_after_activation():
 def test_ontology_can_activate_an_older_snapshot_as_a_rollback():
     service = OntologyLifecycleService(InMemoryOntologyRepository())
     first = service.draft(user_id="admin")
+    _approve_revision_for_test(service, first.revision)
     first_snapshot = service.build_snapshot(first.revision)
     service.activate(first_snapshot.snapshot_id)
     second = service.save_draft(
@@ -121,6 +442,7 @@ def test_ontology_can_activate_an_older_snapshot_as_a_rollback():
         user_id="admin",
         expected_revision=first.revision,
     )
+    _approve_revision_for_test(service, second.revision)
     second_snapshot = service.build_snapshot(second.revision)
     service.activate(second_snapshot.snapshot_id)
 
@@ -141,6 +463,7 @@ def test_sql_ontology_round_trip(tmp_path):
     service = OntologyLifecycleService(SqlOntologyRepository(db))
 
     draft = service.draft(user_id="admin")
+    _approve_revision_for_test(service, draft.revision)
     snapshot = service.build_snapshot(draft.revision)
     active = service.activate(snapshot.snapshot_id)
 
@@ -193,6 +516,9 @@ def test_source_refresh_must_be_accepted_before_publishing_active_scenes():
         user_id="admin",
         expected_revision=draft.revision,
         apply=True,
+    )
+    _approve_revision_for_test(
+        service, refreshed["revision"].revision, [scene]
     )
     snapshot = service.build_snapshot(refreshed["revision"].revision, [scene])
 
@@ -634,6 +960,52 @@ def test_result_metric_requires_an_explicit_scene_binding():
     assert projection["unmatched_columns"] == []
 
 
+def test_candidate_scene_binding_is_not_used_for_result_matching():
+    snapshot = OntologySnapshot(
+        snapshot_id="onto_candidate_binding",
+        ontology_id="ontology",
+        revision=1,
+        status="active",
+        content_hash="sha256:candidate-binding",
+        graph_json={
+            "nodes": [
+                {"id": "projects", "type": "scene", "name": "项目场景"},
+                {"id": "project.revenue", "type": "metric", "name": "项目收入"},
+            ],
+            "edges": [
+                {
+                    "id": "candidate_binding",
+                    "source": "projects",
+                    "target": "project.revenue",
+                    "type": "scene_binding",
+                    "name": "待审核绑定",
+                    "data": {
+                        "semantic_key": "project.revenue",
+                        "status": "candidate",
+                    },
+                }
+            ],
+        },
+        prompt_projection_json={"entities": [], "metrics": [], "edges": []},
+    )
+
+    projection = relevant_ontology_projection(
+        snapshot,
+        scene_ids=["projects"],
+        result_columns=[
+            {
+                "key": "project.revenue",
+                "semantic_key": "project.revenue",
+                "type": "metric",
+                "scene_id": "projects",
+            }
+        ],
+    )
+
+    assert projection["matched_bindings"] == []
+    assert projection["unmatched_columns"] == ["project.revenue"]
+
+
 def test_metric_id_collision_without_binding_stays_unmatched():
     snapshot = OntologySnapshot(
         snapshot_id="onto_unbound",
@@ -666,6 +1038,91 @@ def test_metric_id_collision_without_binding_stays_unmatched():
 
     assert projection["matched_bindings"] == []
     assert projection["unmatched_columns"] == ["revenue"]
+
+
+def test_result_binding_can_match_exact_snapshot_scoped_field_lineage():
+    snapshot = OntologySnapshot(
+        snapshot_id="onto_field_binding",
+        ontology_id="ontology",
+        revision=2,
+        status="active",
+        content_hash="sha256:field-binding",
+        graph_json={
+            "nodes": [
+                {"id": "finance", "type": "scene", "name": "财务场景"},
+                {"id": "finance.payment_amount", "type": "metric", "name": "支付金额"},
+            ],
+            "edges": [
+                {
+                    "id": "payment_binding",
+                    "source": "finance",
+                    "target": "finance.payment_amount",
+                    "type": "scene_binding",
+                    "name": "字段绑定",
+                    "data": {
+                        "semantic_key": "finance.payment_amount",
+                        "scene_snapshot_id": "scene_finance_v3",
+                        "field_ref": "finance@scene_finance_v3:paid_amount",
+                    },
+                }
+            ],
+        },
+        prompt_projection_json={
+            "entities": [],
+            "metrics": [
+                {
+                    "id": "finance.payment_amount",
+                    "name": "支付金额",
+                    "data": {
+                        "field_ref": "finance@scene_finance_v3:paid_amount"
+                    },
+                }
+            ],
+            "edges": [
+                {
+                    "id": "payment_binding",
+                    "source": "finance",
+                    "target": "finance.payment_amount",
+                    "type": "scene_binding",
+                    "name": "字段绑定",
+                    "data": {
+                        "semantic_key": "finance.payment_amount",
+                        "scene_snapshot_id": "scene_finance_v3",
+                        "field_ref": "finance@scene_finance_v3:paid_amount",
+                    },
+                }
+            ],
+            "analysis_dimensions": [],
+            "metric_relations": [],
+            "cross_scene_analysis_paths": [],
+            "result_analysis_rules": [],
+        },
+    )
+
+    projection = relevant_ontology_projection(
+        snapshot,
+        scene_ids=["finance"],
+        result_columns=[
+            {
+                "key": "amount_total",
+                "semantic_key": "unmapped_alias",
+                "scene_id": "finance",
+                "scene_snapshot_id": "scene_finance_v3",
+                "type": "metric",
+            }
+        ],
+        result_lineage=[
+            {
+                "result_key": "amount_total",
+                "field_ref": "finance@scene_finance_v3:paid_amount",
+                "resolved": True,
+            }
+        ],
+    )
+
+    assert projection["matched_bindings"][0]["matched_by"] == "field_ref"
+    assert projection["unmatched_columns"] == []
+    assert projection["retrieval_trace"][0]["status"] == "matched"
 
 
 def test_scene_semantic_keys_include_business_binding_aliases():
@@ -809,6 +1266,7 @@ metrics:
         saved.revision, source_snapshot_refs([source])
     )
 
+    _approve_revision_for_test(service, saved.revision, [source])
     snapshot = service.build_snapshot(saved.revision, [source])
 
     assert snapshot.revision == saved.revision

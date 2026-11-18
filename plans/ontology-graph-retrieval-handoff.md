@@ -1,6 +1,8 @@
 # 本体图谱召回开发交接文档
 
-本文交给下一阶段“查数完成后使用全局本体进行数据分析”的开发人员。当前阶段已经完成三层本体的发布编译和 Neo4j 存储，**没有把运行时召回切换到 Neo4j，也没有在本阶段实现图遍历召回**。
+本文记录“查数完成后使用全局本体进行数据分析”的当前实现状态。三层本体的发布编译和 Neo4j 存储已经完成，运行时召回已接入：Neo4j 开启时优先读取图快照并按结果元数据做白名单扩展，Neo4j 不可用时回退关系库 JSON 快照。
+
+实施范围和最小查数输入以[查数后全局本体分析上下文方案](./ontology-graph-retrieval-plan.md)为准；本文补充 Neo4j 结构和交接注意事项。
 
 ## 1. 已完成的边界
 
@@ -84,27 +86,26 @@ ResultBinding       -[:MAPS_TO]->       Metric|Dimension|Entity
 
 `ResultBinding.data_json` 至少应包含 `scene_id`、`scene_snapshot_id`、`semantic_key`、结果列模式、字段名、聚合、单位、粒度、时间依据和审核状态。当前部分历史 Markdown 只含 `semantic_key`，召回实现要把缺失属性视为未知，不要推断。
 
-## 4. 建议的召回接口
+## 4. 当前召回接口
 
-建议新增独立模块，不要把 Cypher 交给 LLM：
+运行时模块已按以下边界实现，不要把 Cypher 交给 LLM：
 
 ```text
-ontology/neo4j_reader.py       只读快照和对象关系
-ontology/graph_retrieval.py    精确绑定、白名单邻居扩展和裁剪
-ontology/retrieval_models.py   召回结果和 trace 数据结构
+ontology/neo4j_reader.py       只读快照和白名单邻居关系
+ontology/context.py             精确绑定、权限过滤、跨场景条件校验和裁剪
+ontology/analysis_service.py   主 Agent 分析阶段的统一入口
 ```
 
-建议接口形态：
+当前调用形态：
 
 ```python
-retrieve_analysis_context(
-    *,
-    ontology_snapshot_id: str,
-    scene_id: str,
-    result_columns: list[ResultColumnContext],
-    user_question: str | None,
-    authorized_scene_ids: set[str],
-) -> OntologyRetrievalResult
+OntologyLifecycleService.analysis_snapshot_with_source(
+    *, scene_ids, result_columns, result_lineage
+)
+OntologyAnalysisService.render(
+    snapshot, question, result_columns, result_lineage,
+    result_profiles, authorized_scene_ids
+)
 ```
 
 返回值必须包括：
@@ -120,11 +121,11 @@ unmapped_columns
 retrieval_trace
 ```
 
-`retrieval_trace` 至少记录每列的匹配方式、对象 ID、关系路径、过滤的原因、图快照和召回耗时。最终分析结果必须把 `ontology_snapshot_id` 和 trace 的摘要写入分析上下文，便于审计和复现。
+`retrieval_trace` 当前记录每列的匹配方式、字段引用和匹配状态；上下文同时写入 `ontology_snapshot_id` 与 `retrieval_source`，便于审计和复现。对象关系路径和耗时仍是后续增强项。
 
 ## 5. 召回顺序和图扩展白名单
 
-建议先做确定性匹配，再做有限图扩展：
+实现先做确定性匹配，再做有限图扩展：
 
 ```text
 结果列元数据
@@ -171,19 +172,23 @@ Metric/Dimension/Entity 对象
 
 ## 7. 与现有代码的衔接
 
-当前运行时召回仍在：
+当前运行时召回入口仍在：
 
 ```text
 packages/dbgpt-app/src/dbgpt_app/scene/ask_data/ontology/context.py
 packages/dbgpt-app/src/dbgpt_app/scene/ask_data/ontology/analysis_service.py
 ```
 
-这两个模块目前读取关系库快照里的 `prompt_projection_json`，不能假设已经存在 Neo4j reader。迁移建议：
+`analysis_service.py` 负责渲染分析上下文，`neo4j_reader.py` 负责固定 Cypher 读取。迁移和回退规则如下：
 
-1. 先实现 Neo4j reader 和同一输入的双读对照，不改变主 Agent 输出；
-2. 对照记录精确绑定命中、分析规则数量、跨场景候选数量和未绑定列；
-3. 通过验收后再让 `analysis_service` 选择 Neo4j reader；
-4. 保留关系库 JSON 回退，直到至少一个完整发布周期验证通过。
+1. `OntologyLifecycleService.analysis_snapshot_with_source()` 先取得 Neo4j 的活动快照 ID，再按场景、语义键和字段引用读取；
+2. `OntologyAnalysisService` 对读取到的快照执行固定的绑定匹配和白名单图扩展；
+3. Neo4j 读取异常时按 `DATAMAN_NEO4J_FALLBACK_JSON`（默认开启）回退关系库快照；
+4. 上下文包含 `ontology_snapshot_id`、`retrieval_source`、精确命中方式、未匹配列和结果口径，便于审计。
+5. 设置 `DATAMAN_NEO4J_COMPARE_JSON=1` 可启用影子对照：按同一活动快照和查询上下文分别生成 Neo4j 与 JSON 分析投影，并在服务日志写入等价状态和各内容类别的差异数量。日志不包含业务字段名、指标名称或结果值；比较异常不会中断回答。默认关闭。
+6. 指标必须在来源场景语义文档的 `metrics` 配置中有明确声明；发布校验会拒绝没有显式来源的指标。管理员可调用 `POST /api/v1/ask-data/ontology/revisions/{revision}/clean-invalid-metrics` 清理草稿中的无来源指标及其绑定/关系，已激活快照不受影响。
+
+查数编排器只返回结果包，不读取活动本体。主 Agent 的查数后分析阶段从结果包提取 `scene_id`、`snapshot_id`、结果列和 `field_lineage`，调用本体分析入口一次。
 
 ## 8. 发布与环境注意事项
 
@@ -203,4 +208,4 @@ packages/dbgpt-app/src/dbgpt_app/scene/ask_data/ontology/analysis_service.py
 - 权限过滤在 Neo4j 查询条件和图扩展两处都生效；
 - 分析输出能回溯到对象、关系、来源场景版本和 `ontology_snapshot_id`；
 - Neo4j 不可用时，JSON 回退路径仍能完成已有分析；
-- 双读对照结果达到约定一致性后再切换默认读路径。
+- 启用 `DATAMAN_NEO4J_COMPARE_JSON=1` 后，可从 `Ontology Neo4j/JSON shadow comparison` 结构化日志检查双读投影差异；达到约定一致性后再切换默认读路径。

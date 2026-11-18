@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from ..scene.markdown import SemanticMarkdownParser
+from ..query.capabilities import build_query_capabilities
+from ..query.query_spec import build_field_ref
 from .schemas import OntologyEdge, OntologyGraph, OntologyNode
 
 
@@ -29,6 +31,12 @@ def build_scene_fragment(snapshot: Any) -> OntologyGraph:
     if not scene_id:
         return OntologyGraph()
     provenance = [{"scene_id": scene_id, "snapshot_id": snapshot_id}]
+    capabilities = build_query_capabilities(snapshot)
+    metrics_by_key = {
+        str(item.get("key")): item
+        for item in capabilities.metrics
+        if item.get("key")
+    }
     nodes = [
         OntologyNode(
             id=scene_id,
@@ -40,22 +48,36 @@ def build_scene_fragment(snapshot: Any) -> OntologyGraph:
         )
     ]
     edges = []
-    for metric in projection.get("metrics", []):
-        if (
-            not isinstance(metric, dict)
-            or not metric.get("key")
-            or str(metric["key"]) not in declared_metric_keys
-        ):
+    for metric in capabilities.metrics:
+        if not metric.get("key") or str(metric["key"]) not in declared_metric_keys:
             continue
-        semantic_key = str(metric["key"])
+        result_key = str(metric["key"])
+        semantic_key = str(metric.get("semantic_key") or result_key)
         metric_id = f"{scene_id}__{semantic_key}"
+        capability = metrics_by_key.get(result_key, {})
+        source_field = str(capability.get("field") or "").strip() or None
+        metric_data = {
+            "source_scene": scene_id,
+            "semantic_key": semantic_key,
+            "result_key": result_key,
+            "source_field": source_field,
+            "field_ref": (
+                build_field_ref(scene_id, snapshot_id, source_field)
+                if source_field
+                else None
+            ),
+            "aggregation": capability.get("aggregation"),
+            "unit": capability.get("unit"),
+            "scene_snapshot_id": snapshot_id,
+        }
+        metric_data = {key: value for key, value in metric_data.items() if value is not None}
         nodes.append(
             OntologyNode(
                 id=metric_id,
                 type="metric",
                 name=str(metric.get("name") or semantic_key),
                 aliases=[str(item) for item in metric.get("aliases", [])],
-                data={"source_scene": scene_id, "semantic_key": semantic_key},
+                data=metric_data,
                 provenance=provenance,
             )
         )
@@ -70,12 +92,12 @@ def build_scene_fragment(snapshot: Any) -> OntologyGraph:
                     provenance=provenance,
                 ),
                 OntologyEdge(
-                    id=f"binding_{scene_id}_{metric_id}",
+                    id=f"binding_{scene_id}_{result_key}_{metric_id}",
                     source=scene_id,
                     target=metric_id,
                     type="scene_binding",
                     name="场景语义绑定",
-                    data={"semantic_key": semantic_key},
+                    data=metric_data,
                     provenance=provenance,
                 ),
             ]

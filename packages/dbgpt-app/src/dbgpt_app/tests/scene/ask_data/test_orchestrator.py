@@ -292,15 +292,11 @@ def test_orchestrator_limits_concurrent_requests():
     assert service.max_active == 2
 
 
-def test_orchestrator_uses_active_ontology_only_after_scene_queries():
+def test_orchestrator_returns_query_bundle_without_loading_ontology():
     registry = _registry()
     validator = PlanValidator(registry)
     service = _FakeQueryService()
-    orchestrator = AskDataOrchestrator(
-        validator,
-        service,
-        ontology_snapshot_provider=_ontology_snapshot,
-    )
+    orchestrator = AskDataOrchestrator(validator, service)
     plan = MainAgentPlan(action="execute", tasks=[_task()], combine=CombinePlan())
 
     result = asyncio.run(
@@ -308,10 +304,6 @@ def test_orchestrator_uses_active_ontology_only_after_scene_queries():
     )
 
     assert result.status == "succeeded"
-    assert result.ontology_snapshot_id == "onto_contracts"
-    assert result.bundle["ontology_context"]["ontology_snapshot_id"] == "onto_contracts"
-    assert result.bundle["ontology_context"]["matched_scene_ids"] == ["contracts"]
-    assert result.bundle["ontology_context"]["matched_column_keys"] == [
-        "contract_amount"
-    ]
-    assert "Ontology v3" in result.bundle["answer"]
+    assert result.ontology_snapshot_id is None
+    assert result.bundle["ontology_context"] is None
+    assert "Ontology" not in result.bundle["answer"]

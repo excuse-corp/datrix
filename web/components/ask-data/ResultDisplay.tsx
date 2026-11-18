@@ -179,7 +179,12 @@ function OntologyAnalysisBasis({ context }: { context?: OntologyAnalysisContext 
     <Card
       size='small'
       title='语义分析依据'
-      extra={context.revision ? <Typography.Text type='secondary'>Ontology v{context.revision}</Typography.Text> : null}
+      extra={
+        <Typography.Text type='secondary'>
+          {context.revision ? `Ontology v${context.revision}` : 'Ontology'}
+          {context.retrieval_source ? ` · ${context.retrieval_source}` : ''}
+        </Typography.Text>
+      }
     >
       <div className='flex flex-col gap-3'>
         {bindings.length > 0 && (

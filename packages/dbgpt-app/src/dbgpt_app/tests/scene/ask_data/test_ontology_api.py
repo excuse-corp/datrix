@@ -33,7 +33,22 @@ def test_ontology_document_preview_and_publish_api():
         draft = client.get("/api/v1/ask-data/ontology/draft")
         assert draft.status_code == 200
         revision = draft.json()["data"]["revision"]
-        markdown = draft.json()["data"]["markdown"]
+        markdown = (
+            draft.json()["data"]["markdown"]
+            + """
+## 业务实体
+
+| ID | 名称 | 别名 | 定义 |
+| --- | --- | --- | --- |
+| entity_revenue | 收入 |  | 收入 |
+
+## 指标
+
+| ID | 名称 | 所属实体 | 单位 | 计算公式 | 来源场景 |
+| --- | --- | --- | --- | --- | --- |
+| metric_revenue | 营收 | entity_revenue | 元 |  |  |
+"""
+        )
 
         preview = client.post(
             "/api/v1/ask-data/ontology/compile-preview",
@@ -65,6 +80,39 @@ def test_ontology_document_preview_and_publish_api():
         )
         assert saved.status_code == 200
 
+        review_state = client.get(
+            f"/api/v1/ask-data/ontology/revisions/{revision}/reviews"
+        )
+        assert review_state.status_code == 200
+        state = review_state.json()["data"]
+        assert state["pending_count"] == 1
+        metric_review = next(item for item in state["items"] if item["target_id"] == "metric_revenue")
+        reviewed = client.post(
+            f"/api/v1/ask-data/ontology/revisions/{revision}/reviews",
+            json={
+                "target_type": "node",
+                "target_id": "metric_revenue",
+                "decision": "confirmed",
+                "expected_fingerprint": metric_review["fingerprint"],
+                "comment": "来源口径已核对",
+            },
+        )
+        assert reviewed.status_code == 200
+        state = reviewed.json()["data"]["review_state"]
+        assert state["pending_count"] == 0
+        approved = client.post(
+            f"/api/v1/ask-data/ontology/revisions/{revision}/approve",
+            json={
+                "expected_content_hash": state["current_content_hash"]
+            },
+        )
+        assert approved.status_code == 200
+        approval_state = approved.json()["data"]["review_state"]
+        assert approval_state["approved"]
+        assert {
+            event["event_type"] for event in approval_state["events"]
+        } >= {"object_review", "revision_approved"}
+
         built = client.post(
             f"/api/v1/ask-data/ontology/revisions/{revision}/build-snapshot"
         )
@@ -80,6 +128,12 @@ def test_ontology_document_preview_and_publish_api():
         latest = client.get("/api/v1/ask-data/ontology/snapshot/latest")
         assert latest.status_code == 200
         assert latest.json()["data"]["snapshot_id"] == snapshot_id
+        final_review_state = client.get(
+            f"/api/v1/ask-data/ontology/revisions/{revision}/reviews"
+        ).json()["data"]
+        assert {
+            event["event_type"] for event in final_review_state["events"]
+        } >= {"snapshot_built", "snapshot_activated"}
     finally:
         ontology_api.configure_ontology_service(previous_service)
 

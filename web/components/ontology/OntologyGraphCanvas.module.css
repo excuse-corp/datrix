@@ -1,0 +1,374 @@
+.canvas {
+  --ontology-surface: #ffffff;
+  --ontology-border: #dbe4ef;
+  --ontology-edge-label: #46566f;
+  --ontology-grid: #cbd8ea;
+  --ontology-warning: #d99021;
+  --ontology-focus: #0c75fc;
+  --ontology-minimap-mask: rgba(15, 35, 66, 0.1);
+  --ontology-entity: #0c75fc;
+  --ontology-metric: #168a76;
+  --ontology-scene: #7660c9;
+  --ontology-analysis: #5e73b5;
+  --ontology-rule: #cf793c;
+  --ontology-edge: #8392a9;
+  --ontology-cross-scene: #ce655a;
+  --ontology-review-pending: #d99021;
+  --ontology-review-rejected: #ce655a;
+  --ontology-focus-glow: rgba(12, 117, 252, 0.32);
+  --ontology-edge-muted: #9aa8bb;
+  position: relative;
+  isolation: isolate;
+  background: #f4f8fc;
+  color: #233249;
+}
+
+.spatial {
+  background:
+    radial-gradient(ellipse at 13% 16%, rgba(12, 117, 252, 0.11), transparent 31%),
+    radial-gradient(ellipse at 88% 76%, rgba(32, 159, 133, 0.1), transparent 32%),
+    linear-gradient(145deg, #f8fbff 0%, #eef4fa 53%, #f7fbf9 100%);
+}
+
+.spatial::before {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background-image: radial-gradient(rgba(89, 120, 160, 0.22) 0.7px, transparent 0.7px);
+  background-position: 0 0;
+  background-size: 22px 22px;
+  content: '';
+  mask-image: linear-gradient(135deg, black 0%, transparent 84%);
+  pointer-events: none;
+}
+
+.flat {
+  background:
+    linear-gradient(rgba(111, 132, 158, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(111, 132, 158, 0.05) 1px, transparent 1px),
+    #f5f8fc;
+  background-size: 24px 24px;
+}
+
+.depthPlanes {
+  --viewport-x: 0px;
+  --viewport-y: 0px;
+  --viewport-zoom: 1;
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  perspective: 1350px;
+  perspective-origin: 50% 38%;
+}
+
+.depthPlane {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border: 1px solid rgba(87, 122, 165, 0.32);
+  border-radius: 24px;
+  background:
+    linear-gradient(150deg, rgba(255, 255, 255, 0.8), rgba(228, 239, 250, 0.44)),
+    linear-gradient(rgba(76, 111, 154, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(76, 111, 154, 0.08) 1px, transparent 1px);
+  background-size: auto, 28px 28px, 28px 28px;
+  box-shadow:
+    0 35px 58px rgba(37, 71, 111, 0.18),
+    0 12px 18px rgba(37, 71, 111, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.96);
+  transform-origin: top left;
+  transform-style: preserve-3d;
+  transform: translate3d(var(--viewport-x), var(--viewport-y), 0)
+    scale(var(--viewport-zoom))
+    translate3d(var(--plane-x), var(--plane-y), var(--plane-z))
+    rotateX(var(--plane-rotate-x, 8deg)) rotateY(var(--plane-rotate-y, -8deg));
+}
+
+.depthPlane::before {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  border-radius: 24px 24px 0 0;
+  background: linear-gradient(90deg, transparent, var(--plane-accent), transparent);
+  content: '';
+}
+
+.depthPlane::after {
+  position: absolute;
+  inset: auto 8px -16px;
+  height: 16px;
+  border: 1px solid color-mix(in srgb, var(--plane-accent), transparent 58%);
+  border-top: 0;
+  border-radius: 0 0 16px 16px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--plane-accent), white 70%), color-mix(in srgb, var(--plane-accent), transparent 82%));
+  transform: rotateX(-48deg);
+  transform-origin: top;
+  content: '';
+}
+
+.depthPlane span {
+  position: absolute;
+  top: 13px;
+  left: 15px;
+  padding: 5px 9px;
+  border: 1px solid color-mix(in srgb, var(--plane-accent), transparent 70%);
+  border-radius: 999px;
+  background: color-mix(in srgb, white, var(--plane-accent) 8%);
+  color: color-mix(in srgb, var(--plane-accent), #26384d 34%);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  box-shadow: 0 3px 10px rgba(37, 71, 111, 0.08);
+}
+
+.businessPlane {
+  --plane-accent: #3188eb;
+  --plane-rotate-y: 8deg;
+  border-color: rgba(49, 136, 235, 0.4);
+  background-color: rgba(49, 136, 235, 0.08);
+}
+
+.analysisPlane {
+  --plane-accent: #7869d2;
+  --plane-rotate-y: 0deg;
+  border-color: rgba(120, 105, 210, 0.38);
+  background-color: rgba(120, 105, 210, 0.075);
+}
+
+.mappingPlane {
+  --plane-accent: #219a83;
+  --plane-rotate-y: -8deg;
+  border-color: rgba(33, 154, 131, 0.38);
+  background-color: rgba(33, 154, 131, 0.07);
+}
+
+.nodeCard {
+  position: relative;
+  border-color: color-mix(in srgb, var(--node-accent), white 26%) !important;
+  background: linear-gradient(145deg, #ffffff 0%, #f9fbfe 52%, color-mix(in srgb, var(--node-accent), white 93%) 100%) !important;
+  box-shadow:
+    0 6px 12px rgba(31, 57, 91, 0.1),
+    0 2px 3px rgba(31, 57, 91, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.98) !important;
+  transform-style: preserve-3d;
+}
+
+.nodeCard::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 5px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--node-accent), white 8%), var(--node-accent));
+  content: '';
+}
+
+.spatialNode {
+  box-shadow:
+    0 20px 0 -9px color-mix(in srgb, var(--node-accent), #253a53 54%),
+    0 25px 34px rgba(31, 57, 91, 0.2),
+    0 8px 14px rgba(31, 57, 91, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 1) !important;
+  transition: transform 220ms ease, box-shadow 220ms ease;
+}
+
+.spatialNode:hover {
+  box-shadow:
+    0 22px 0 -9px color-mix(in srgb, var(--node-accent), #253a53 45%),
+    0 32px 42px rgba(31, 57, 91, 0.24),
+    0 10px 17px rgba(31, 57, 91, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 1) !important;
+  translate: 0 -5px;
+}
+
+.nodeContent {
+  position: relative;
+  z-index: 1;
+}
+
+.nodeMark {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-accent), transparent 88%);
+}
+
+.typeBadge {
+  border: 1px solid color-mix(in srgb, currentColor, transparent 76%);
+  background: color-mix(in srgb, currentColor, white 93%);
+}
+
+.reviewConfirmed {
+  color: #16805f;
+  background: rgba(22, 138, 118, 0.1);
+}
+
+.reviewPending {
+  color: #a96c12;
+  background: rgba(217, 144, 33, 0.12);
+}
+
+.reviewRejected {
+  color: #bf4f4f;
+  background: rgba(206, 101, 90, 0.12);
+}
+
+.reviewLine {
+  border-color: var(--ontology-review-pending) !important;
+}
+
+.detailPanel {
+  border-color: var(--ontology-border) !important;
+  background: color-mix(in srgb, var(--ontology-surface), transparent 3%) !important;
+}
+
+.reviewPanel {
+  border-color: color-mix(in srgb, var(--ontology-border), var(--ontology-focus) 18%);
+  background: color-mix(in srgb, var(--ontology-surface), var(--ontology-focus) 3%);
+}
+
+:global(html[data-interface-style='dashboard']) .canvas {
+  --ontology-entity: #209f85;
+  --ontology-metric: #397bbb;
+  --ontology-scene: #6f73b9;
+  --ontology-analysis: #658e9c;
+  --ontology-rule: #d68a4d;
+  --ontology-focus: #209f85;
+  --ontology-warning: #c18020;
+  --ontology-cross-scene: #cc665b;
+  --ontology-review-pending: #c18020;
+  --ontology-review-rejected: #cc665b;
+  --ontology-focus-glow: rgba(32, 159, 133, 0.34);
+  font-family: Manrope, Inter, 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+}
+
+:global(html[data-interface-style='terminal']) .canvas {
+  --ontology-entity: #58a6ff;
+  --ontology-metric: #4cc9a6;
+  --ontology-scene: #b195f9;
+  --ontology-analysis: #8b9cf5;
+  --ontology-rule: #f0a765;
+  --ontology-focus: #58a6ff;
+  --ontology-focus-glow: rgba(88, 166, 255, 0.35);
+  --ontology-edge-label: #c1ccdc;
+  --ontology-edge-muted: #718096;
+  --ontology-surface: #181c23;
+  --ontology-border: #343c49;
+}
+
+:global(body.dark) .canvas,
+:global(.dark) .canvas {
+  --ontology-surface: #1a1b1e;
+  --ontology-border: rgba(255, 255, 255, 0.12);
+  --ontology-edge-label: #c4cddd;
+  --ontology-grid: #303a4b;
+  --ontology-minimap-mask: rgba(4, 10, 20, 0.44);
+  --ontology-review-pending: #e1a93d;
+  --ontology-review-rejected: #df796f;
+  background-color: #11151c;
+}
+
+.canvas :global(.ontology-react-flow),
+.canvas :global(.react-flow__renderer) {
+  background: transparent;
+}
+
+.canvas :global(.ontology-react-flow) {
+  position: relative;
+  z-index: 1;
+}
+
+:global(body.dark) .spatial,
+:global(.dark) .spatial {
+  background:
+    radial-gradient(ellipse at 12% 18%, rgba(50, 125, 217, 0.18), transparent 34%),
+    radial-gradient(ellipse at 88% 78%, rgba(32, 159, 133, 0.13), transparent 35%),
+    linear-gradient(145deg, #171d27 0%, #11151c 56%, #151c20 100%);
+}
+
+:global(body.dark) .flat,
+:global(.dark) .flat {
+  background:
+    linear-gradient(rgba(181, 198, 220, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(181, 198, 220, 0.045) 1px, transparent 1px),
+    #11151c;
+  background-size: 24px 24px;
+}
+
+:global(body.dark) .depthPlane,
+:global(.dark) .depthPlane {
+  border-color: color-mix(in srgb, var(--plane-accent), transparent 48%);
+  background:
+    linear-gradient(145deg, rgba(40, 53, 71, 0.82), rgba(24, 35, 49, 0.56)),
+    linear-gradient(rgba(181, 198, 220, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(181, 198, 220, 0.07) 1px, transparent 1px);
+  background-size: auto, 28px 28px, 28px 28px;
+  box-shadow:
+    0 30px 58px rgba(0, 0, 0, 0.34),
+    0 12px 18px rgba(0, 0, 0, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+:global(body.dark) .depthPlane span,
+:global(.dark) .depthPlane span {
+  border-color: color-mix(in srgb, var(--plane-accent), transparent 42%);
+  background: #202a37;
+  color: color-mix(in srgb, var(--plane-accent), white 25%);
+}
+
+:global(body.dark) .businessPlane,
+:global(.dark) .businessPlane {
+  --plane-accent: #64adff;
+}
+
+:global(body.dark) .analysisPlane,
+:global(.dark) .analysisPlane {
+  --plane-accent: #a497ff;
+}
+
+:global(body.dark) .mappingPlane,
+:global(.dark) .mappingPlane {
+  --plane-accent: #5bd3b4;
+}
+
+:global(body.dark) .nodeCard,
+:global(.dark) .nodeCard {
+  background: linear-gradient(145deg, #252b35 0%, #1b222b 70%, #18212a 100%) !important;
+  box-shadow:
+    0 8px 18px rgba(0, 0, 0, 0.28),
+    0 2px 4px rgba(0, 0, 0, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07) !important;
+}
+
+:global(body.dark) .spatialNode,
+:global(.dark) .spatialNode {
+  box-shadow:
+    0 18px 32px rgba(0, 0, 0, 0.38),
+    0 5px 12px rgba(0, 0, 0, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+}
+
+:global(body.dark) .typeBadge,
+:global(.dark) .typeBadge {
+  background: color-mix(in srgb, currentColor, #1a1b1e 88%);
+}
+
+:global(body.dark) .reviewPanel,
+:global(.dark) .reviewPanel {
+  background: color-mix(in srgb, var(--ontology-surface), var(--ontology-focus) 9%);
+}
+
+@media (max-width: 768px) {
+  .depthPlanes {
+    opacity: 0.72;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nodeCard,
+  .spatialNode,
+  .nodeContent {
+    transition: none !important;
+  }
+
+  :global(.react-flow__edge.animated) .react-flow__edge-path {
+    animation: none !important;
+  }
+}

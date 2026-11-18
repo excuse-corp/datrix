@@ -20,8 +20,10 @@ class OntologyAnalysisService:
         authorized_scene_ids: list[str] | None = None,
         is_platform_admin: bool = True,
         result_columns: list[dict[str, Any]] | None = None,
+        result_lineage: list[dict[str, Any]] | None = None,
         result_profiles: list[dict[str, Any]] | None = None,
         max_nodes: int = 16,
+        retrieval_source: str | None = None,
     ) -> dict[str, Any] | None:
         if snapshot is None:
             return None
@@ -33,7 +35,9 @@ class OntologyAnalysisService:
             authorized_scene_ids=authorized_scene_ids,
             is_platform_admin=is_platform_admin,
             result_columns=result_columns,
+            result_lineage=result_lineage,
             result_profiles=result_profiles,
+            retrieval_source=retrieval_source,
         )
 
     def render(
@@ -45,8 +49,10 @@ class OntologyAnalysisService:
         authorized_scene_ids: list[str] | None = None,
         is_platform_admin: bool = True,
         result_columns: list[dict[str, Any]] | None = None,
+        result_lineage: list[dict[str, Any]] | None = None,
         result_profiles: list[dict[str, Any]] | None = None,
         max_nodes: int = 16,
+        retrieval_source: str | None = None,
     ) -> str:
         return render_main_agent_ontology_context(
             snapshot,
@@ -55,8 +61,10 @@ class OntologyAnalysisService:
             authorized_scene_ids=authorized_scene_ids,
             is_platform_admin=is_platform_admin,
             result_columns=result_columns,
+            result_lineage=result_lineage,
             result_profiles=result_profiles,
             max_nodes=max_nodes,
+            retrieval_source=retrieval_source,
         )
 
 

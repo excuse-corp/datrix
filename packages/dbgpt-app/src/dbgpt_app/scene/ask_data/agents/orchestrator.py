@@ -27,6 +27,8 @@ class QueryRunResult(BaseModel):
     bundle: dict[str, Any] | None = None
     clarification: dict[str, Any] | None = None
     duration_ms: int = 0
+    # Deprecated compatibility field.  New orchestration leaves this empty;
+    # post-query analysis owns the global Ontology snapshot.
     ontology_snapshot_id: str | None = None
 
 
@@ -43,7 +45,6 @@ class AskDataOrchestrator:
         task_timeout_seconds: float = 30,
         total_timeout_seconds: float = 120,
         result_builder: ResultBundleBuilder | None = None,
-        ontology_snapshot_provider: Callable[[], Any | None] | None = None,
     ):
         self.plan_validator = plan_validator
         self.query_service = query_service
@@ -55,7 +56,6 @@ class AskDataOrchestrator:
         self.task_timeout_seconds = task_timeout_seconds
         self.total_timeout_seconds = total_timeout_seconds
         self.result_builder = result_builder or ResultBundleBuilder()
-        self.ontology_snapshot_provider = ontology_snapshot_provider
 
     async def execute(
         self,
@@ -341,7 +341,6 @@ class AskDataOrchestrator:
             if results
             else "failed"
         )
-        ontology_snapshot = self._active_ontology_snapshot()
         bundle = self.result_builder.build(
             results=results,
             snapshots={snapshot.scene_id: snapshot for snapshot in snapshots.values()},
@@ -349,10 +348,6 @@ class AskDataOrchestrator:
             keys=plan.combine.keys if plan.combine else None,
             derived_metrics=plan.combine.derived_metrics if plan.combine else None,
             status=status,
-            ontology_snapshot=ontology_snapshot,
-            question="\n".join(task.question for task in plan.tasks),
-            authorized_scene_ids=authorized_scene_ids,
-            is_platform_admin=is_platform_admin,
         )
         return QueryRunResult(
             status=status,
@@ -362,16 +357,7 @@ class AskDataOrchestrator:
             combine=plan.combine.model_dump(mode="json") if plan.combine else None,
             bundle=bundle.model_dump(mode="json"),
             duration_ms=int((monotonic() - started) * 1000),
-            ontology_snapshot_id=getattr(ontology_snapshot, "snapshot_id", None),
         )
-
-    def _active_ontology_snapshot(self) -> Any | None:
-        if self.ontology_snapshot_provider is None:
-            return None
-        try:
-            return self.ontology_snapshot_provider()
-        except Exception:
-            return None
 
 
 __all__ = ["AskDataOrchestrator", "QueryRunResult"]

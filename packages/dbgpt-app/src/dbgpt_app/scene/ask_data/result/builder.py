@@ -5,8 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 from ..combine import ResultCombiner
-from ..ontology.analysis_service import OntologyAnalysisService
-from ..ontology.schemas import OntologySnapshot
 from ..query.query_spec import SceneResult
 from ..schemas.result import ResultBundle, SceneResultSummary
 from ..schemas.snapshot import Snapshot
@@ -35,7 +33,7 @@ class ResultBundleBuilder:
         keys: list[str] | None = None,
         derived_metrics: list[str] | None = None,
         status: str = "succeeded",
-        ontology_snapshot: OntologySnapshot | None = None,
+        ontology_snapshot: Any | None = None,
         question: str | None = None,
         authorized_scene_ids: list[str] | None = None,
         is_platform_admin: bool = True,
@@ -78,14 +76,10 @@ class ResultBundleBuilder:
             for reference in result.rag.get("references", [])
             if isinstance(reference, str)
         ]
-        ontology_context = self._ontology_context(
-            ontology_snapshot,
-            question,
-            results,
-            authorized_scene_ids=authorized_scene_ids,
-            is_platform_admin=is_platform_admin,
-        )
-        answer = self._answer(status, results, warnings, ontology_context)
+        # Ontology is a post-query analysis concern.  The result builder only
+        # packages query output and its lineage; the main Agent retrieves one
+        # immutable ontology snapshot after this bundle has been returned.
+        answer = self._answer(status, results, warnings)
         return ResultBundle(
             status=status,
             answer=answer,
@@ -106,58 +100,7 @@ class ResultBundleBuilder:
             charts=charts,
             warnings=warnings,
             rag_references=references,
-            ontology_context=ontology_context,
-        )
-
-    @staticmethod
-    def _ontology_context(
-        ontology_snapshot: OntologySnapshot | None,
-        question: str | None,
-        results: list[SceneResult],
-        *,
-        authorized_scene_ids: list[str] | None = None,
-        is_platform_admin: bool = True,
-    ) -> dict[str, Any] | None:
-        if ontology_snapshot is None:
-            return None
-        scene_ids = sorted({result.scene_id for result in results if result.scene_id})
-        result_columns = [
-            {
-                **column.model_dump(mode="json"),
-                "scene_id": result.scene_id,
-            }
-            for result in results
-            for column in result.columns
-        ]
-        result_profiles = [
-            {
-                "scene_id": result.scene_id,
-                "grain": result.grain
-                or list((result.sql_explanation or {}).get("grain") or []),
-                "grain_semantic_keys": [
-                    column.semantic_key or column.key
-                    for column in result.columns
-                    if column.type == "dimension"
-                ],
-                "time_grain": result.time_grain,
-                "time_basis": result.time_basis,
-                "time_range": (
-                    result.time_range.model_dump(mode="json")
-                    if result.time_range
-                    else None
-                ),
-            }
-            for result in results
-        ]
-        return OntologyAnalysisService().build(
-            ontology_snapshot,
-            question,
-            scene_ids=scene_ids,
-            authorized_scene_ids=authorized_scene_ids,
-            is_platform_admin=is_platform_admin,
-            result_columns=result_columns,
-            result_profiles=result_profiles,
-            max_nodes=16,
+            ontology_context=None,
         )
 
     @staticmethod
@@ -165,17 +108,12 @@ class ResultBundleBuilder:
         status: str,
         results: list[SceneResult],
         warnings: list[dict[str, str]],
-        ontology_context: dict[str, Any] | None = None,
     ) -> str:
         if status not in {"succeeded", "partial_succeeded"}:
             return "查询未完成，请根据返回的错误或澄清信息继续操作。"
         row_count = sum(result.row_count for result in results)
         scene_count = len({result.scene_id for result in results})
         suffixes = []
-        if ontology_context:
-            suffixes.append(
-                f"已结合 Ontology v{ontology_context.get('revision')} 的业务语义。"
-            )
         caliber_summaries = [
             str(result.sql_explanation.get("summary") or "").strip()
             for result in results

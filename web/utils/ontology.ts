@@ -91,6 +91,47 @@ export type OntologyGraphResponse = {
   layout: Record<string, unknown>;
 };
 
+export type OntologyReviewItem = {
+  target_type: 'node' | 'edge';
+  target_id: string;
+  object_type: string;
+  name: string;
+  fingerprint: string;
+  object?: OntologyNode | OntologyEdge;
+  status: 'candidate' | 'confirmed' | 'rejected' | string;
+  required: boolean;
+  comment: string;
+  reviewer_id?: string | null;
+  reviewed_at?: string | null;
+};
+
+export type OntologyReviewEvent = {
+  event_id: string;
+  revision: number;
+  event_type: string;
+  target_type?: string | null;
+  target_id?: string | null;
+  decision?: string | null;
+  comment?: string;
+  actor_id: string;
+  content_hash?: string | null;
+  created_at: string;
+};
+
+export type OntologyReviewState = {
+  revision: number;
+  items: OntologyReviewItem[];
+  required_count: number;
+  confirmed_required_count: number;
+  pending_count: number;
+  current_content_hash?: string | null;
+  approved: boolean;
+  approved_by?: string | null;
+  approved_at?: string | null;
+  blocking_issue?: { code: string; message: string };
+  events: OntologyReviewEvent[];
+};
+
 export type OntologySceneChange = {
   scene_id: string;
   kind: 'added' | 'changed' | 'removed';
@@ -226,6 +267,55 @@ export const generateOntologyFromScenes = (expected_revision: number, apply = fa
 
 export const getOntologyRevisionDiff = (revision: number) =>
   request<OntologySourceRefresh>(`/revisions/${revision}/diff`);
+
+export const getOntologyReviewState = (revision: number) =>
+  request<OntologyReviewState>(`/revisions/${revision}/reviews`);
+
+export const reviewOntologyObject = (
+  revision: number,
+  payload: Pick<OntologyReviewItem, 'target_type' | 'target_id' | 'fingerprint'> & {
+    decision: 'confirmed' | 'rejected' | 'candidate';
+    comment?: string;
+  },
+) =>
+  request<{ event: OntologyReviewEvent; review_state: OntologyReviewState }>(`/revisions/${revision}/reviews`, {
+    method: 'POST',
+    body: JSON.stringify({
+      target_type: payload.target_type,
+      target_id: payload.target_id,
+      decision: payload.decision,
+      expected_fingerprint: payload.fingerprint,
+      comment: payload.comment ?? '',
+    }),
+  });
+
+export const excludeOntologyObject = (
+  revision: number,
+  payload: Pick<OntologyReviewItem, 'target_type' | 'target_id' | 'fingerprint'> & {
+    comment: string;
+  },
+) =>
+  request<{
+    event: OntologyReviewEvent;
+    revision: OntologyRevision;
+    removed_target_type: OntologyReviewItem['target_type'];
+    removed_target_id: string;
+    review_state: OntologyReviewState;
+  }>(`/revisions/${revision}/reviews/exclude`, {
+    method: 'POST',
+    body: JSON.stringify({
+      target_type: payload.target_type,
+      target_id: payload.target_id,
+      expected_fingerprint: payload.fingerprint,
+      comment: payload.comment,
+    }),
+  });
+
+export const approveOntologyRevision = (revision: number, expected_content_hash: string) =>
+  request<{ event: OntologyReviewEvent; review_state: OntologyReviewState }>(`/revisions/${revision}/approve`, {
+    method: 'POST',
+    body: JSON.stringify({ expected_content_hash }),
+  });
 
 export const saveOntologyLayout = (revision: number, layout: Record<string, unknown>) =>
   request<{ layout: Record<string, unknown> }>(`/revisions/${revision}/layout`, {

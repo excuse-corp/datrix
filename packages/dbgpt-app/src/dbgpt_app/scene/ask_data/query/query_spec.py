@@ -64,6 +64,25 @@ class ResultColumn(BaseModel):
     unit: str | None = None
 
 
+class FieldLineage(BaseModel):
+    """A source field used by the exact query that produced a SceneResult."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    field_ref: str | None = None
+    source_field: str
+    roles: list[str] = Field(default_factory=list)
+    result_keys: list[str] = Field(default_factory=list)
+    semantic_key: str | None = None
+    aggregation: str | None = None
+    resolved: bool = True
+
+
+def build_field_ref(scene_id: str, snapshot_id: str, source_field: str) -> str:
+    """Return a stable, snapshot-scoped reference to a physical source field."""
+    return f"{scene_id}@{snapshot_id}:{source_field}"
+
+
 class SceneResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -77,6 +96,7 @@ class SceneResult(BaseModel):
     time_basis: str | None = None
     time_range: TimeRange | None = None
     columns: list[ResultColumn] = Field(default_factory=list)
+    field_lineage: list[FieldLineage] = Field(default_factory=list)
     rows: list[dict[str, Any]] = Field(default_factory=list)
     row_count: int = 0
     truncated: bool = False
@@ -93,6 +113,8 @@ class SceneResult(BaseModel):
 
 __all__ = [
     "OrderBy",
+    "FieldLineage",
+    "build_field_ref",
     "QueryFilter",
     "QuerySpec",
     "ResultColumn",

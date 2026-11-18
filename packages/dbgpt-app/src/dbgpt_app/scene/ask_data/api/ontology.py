@@ -57,6 +57,37 @@ class OntologyPublishRequest(BaseModel):
     revision: int = Field(ge=1)
 
 
+class OntologyReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target_type: Literal["node", "edge"]
+    target_id: str = Field(min_length=1, max_length=128)
+    decision: Literal["confirmed", "rejected", "candidate"]
+    expected_fingerprint: str = Field(min_length=1, max_length=128)
+    comment: str = Field(default="", max_length=2000)
+
+
+class OntologyExcludeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target_type: Literal["node", "edge"]
+    target_id: str = Field(min_length=1, max_length=128)
+    expected_fingerprint: str = Field(min_length=1, max_length=128)
+    comment: str = Field(min_length=1, max_length=2000)
+
+
+class OntologyApproveRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_content_hash: str = Field(min_length=1, max_length=128)
+
+
+class OntologyMetricCleanupRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_revision: int = Field(ge=1)
+
+
 class DefaultModelRequest(BaseModel):
     model_name: str = Field(min_length=1)
 
@@ -217,7 +248,12 @@ def _source_manifest_payload(revision, principal: AskDataPrincipal) -> dict[str,
 
 
 def _http_error(exc: OntologyServiceError) -> HTTPException:
-    status = 409 if isinstance(exc, OntologyConflictError) else 400
+    status = (
+        409
+        if isinstance(exc, OntologyConflictError)
+        or exc.code in {"ONTOLOGY_REVIEW_INCOMPLETE", "ONTOLOGY_APPROVAL_REQUIRED"}
+        else 400
+    )
     if exc.code.endswith("NOT_FOUND"):
         status = 404
     return HTTPException(
@@ -321,6 +357,134 @@ def validate_revision(
         raise _http_error(exc) from exc
 
 
+@router.get("/revisions/{revision}/reviews")
+def get_revision_reviews(
+    revision: int,
+    service: OntologyLifecycleService = Depends(get_ontology_service),
+    principal: AskDataPrincipal = Depends(get_principal),
+):
+    _require_admin(principal)
+    try:
+        return {
+            "status": "succeeded",
+            "data": service.review_state(
+                revision,
+                user_id=principal.user_id,
+                scene_snapshots=_authorized_scene_sources(principal),
+            ),
+        }
+    except OntologyServiceError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post("/revisions/{revision}/reviews")
+def review_revision_object(
+    revision: int,
+    payload: OntologyReviewRequest,
+    service: OntologyLifecycleService = Depends(get_ontology_service),
+    principal: AskDataPrincipal = Depends(get_principal),
+):
+    _require_admin(principal)
+    try:
+        result = service.review_object(
+            revision,
+            target_type=payload.target_type,
+            target_id=payload.target_id,
+            decision=payload.decision,
+            comment=payload.comment,
+            actor_id=principal.user_id,
+            expected_fingerprint=payload.expected_fingerprint,
+            scene_snapshots=_authorized_scene_sources(principal),
+        )
+        return {"status": "succeeded", "data": result}
+    except OntologyServiceError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post("/revisions/{revision}/reviews/exclude")
+def exclude_revision_object(
+    revision: int,
+    payload: OntologyExcludeRequest,
+    service: OntologyLifecycleService = Depends(get_ontology_service),
+    principal: AskDataPrincipal = Depends(get_principal),
+):
+    _require_admin(principal)
+    try:
+        result = service.exclude_review_object(
+            revision,
+            target_type=payload.target_type,
+            target_id=payload.target_id,
+            comment=payload.comment,
+            actor_id=principal.user_id,
+            expected_fingerprint=payload.expected_fingerprint,
+            scene_snapshots=_authorized_scene_sources(principal),
+        )
+        return {
+            "status": "succeeded",
+            "data": {
+                "event": result["event"],
+                "revision": _revision_payload(result["revision"]),
+                "removed_target_type": result["removed_target_type"],
+                "removed_target_id": result["removed_target_id"],
+                "review_state": result["review_state"],
+            },
+        }
+    except OntologyServiceError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post("/revisions/{revision}/clean-invalid-metrics")
+def clean_invalid_metrics(
+    revision: int,
+    payload: OntologyMetricCleanupRequest,
+    service: OntologyLifecycleService = Depends(get_ontology_service),
+    principal: AskDataPrincipal = Depends(get_principal),
+):
+    _require_admin(principal)
+    if payload.expected_revision != revision:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "ONTOLOGY_REVISION_CONFLICT", "message": "草稿版本已变化，请刷新后重试。"},
+        )
+    try:
+        result = service.clean_invalid_metric_sources(
+            revision,
+            actor_id=principal.user_id,
+            scene_snapshots=_authorized_scene_sources(principal),
+        )
+        return {
+            "status": "succeeded",
+            "data": {
+                "removed_metric_ids": result["removed_metric_ids"],
+                "removed_count": result["removed_count"],
+                "revision": _revision_payload(result["revision"]),
+                "review_state": result["review_state"],
+            },
+        }
+    except OntologyServiceError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post("/revisions/{revision}/approve")
+def approve_revision(
+    revision: int,
+    payload: OntologyApproveRequest,
+    service: OntologyLifecycleService = Depends(get_ontology_service),
+    principal: AskDataPrincipal = Depends(get_principal),
+):
+    _require_admin(principal)
+    try:
+        result = service.approve_revision(
+            revision,
+            actor_id=principal.user_id,
+            expected_content_hash=payload.expected_content_hash,
+            scene_snapshots=_authorized_scene_sources(principal),
+        )
+        return {"status": "succeeded", "data": result}
+    except OntologyServiceError as exc:
+        raise _http_error(exc) from exc
+
+
 @router.post("/revisions/{revision}/build-snapshot")
 def build_snapshot(
     revision: int,
@@ -330,7 +494,9 @@ def build_snapshot(
     _require_admin(principal)
     try:
         snapshot = service.build_snapshot(
-            revision, _authorized_scene_sources(principal)
+            revision,
+            _authorized_scene_sources(principal),
+            actor_id=principal.user_id,
         )
         return {"status": "succeeded", "data": _snapshot_payload(snapshot)}
     except OntologyServiceError as exc:
@@ -346,9 +512,11 @@ def publish_snapshot(
     _require_admin(principal)
     try:
         snapshot = service.build_snapshot(
-            payload.revision, _authorized_scene_sources(principal)
+            payload.revision,
+            _authorized_scene_sources(principal),
+            actor_id=principal.user_id,
         )
-        active = service.activate(snapshot.snapshot_id)
+        active = service.activate(snapshot.snapshot_id, actor_id=principal.user_id)
         return {"status": "succeeded", "data": _snapshot_payload(active)}
     except OntologyServiceError as exc:
         raise _http_error(exc) from exc
@@ -364,7 +532,9 @@ def activate_snapshot(
     try:
         return {
             "status": "succeeded",
-            "data": _snapshot_payload(service.activate(snapshot_id)),
+            "data": _snapshot_payload(
+                service.activate(snapshot_id, actor_id=principal.user_id)
+            ),
         }
     except OntologyServiceError as exc:
         raise _http_error(exc) from exc
@@ -408,7 +578,9 @@ def sync_ontology_snapshot(
     try:
         return {
             "status": "succeeded",
-            "data": service.sync_snapshot_to_neo4j(snapshot_id),
+            "data": service.sync_snapshot_to_neo4j(
+                snapshot_id, actor_id=principal.user_id
+            ),
         }
     except OntologyServiceError as exc:
         raise _http_error(exc) from exc

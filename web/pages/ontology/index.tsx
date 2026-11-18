@@ -1,14 +1,19 @@
 import AskDataPageShell from '@/components/ask-data/AskDataPageShell';
+import OntologyReviewDetails from '@/components/ontology/OntologyReviewDetails';
 import {
   activateOntologySnapshot,
+  approveOntologyRevision,
   buildOntologySnapshot,
+  excludeOntologyObject,
   generateOntologyFromScenes,
   getOntology,
   getOntologyGraph,
   getOntologyNeo4jHealth,
+  getOntologyReviewState,
   getOntologySnapshotSyncStatus,
   listOntologyRevisions,
   previewOntology,
+  reviewOntologyObject,
   saveOntologyDraft,
   saveOntologyLayout,
   syncOntologySnapshot,
@@ -16,6 +21,8 @@ import {
   type OntologyGraph,
   type OntologyIssue,
   type OntologyNeo4jHealth,
+  type OntologyReviewItem,
+  type OntologyReviewState,
   type OntologyRevision,
   type OntologySnapshot,
   type OntologySnapshotSyncStatus,
@@ -38,7 +45,7 @@ import {
   UploadOutlined,
 } from '@ant-design/icons';
 import type { UploadProps } from 'antd';
-import { Alert, Button, Modal, Segmented, Spin, Tag, Tooltip, Upload, message } from 'antd';
+import { Alert, Button, Input, Modal, Popconfirm, Segmented, Spin, Tag, Tooltip, Upload, message } from 'antd';
 import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useState } from 'react';
 
@@ -63,53 +70,6 @@ const issueText = (issues: OntologyIssue[]) =>
     .join('；');
 
 const sourceName = (source?: Partial<OntologySourceRef>) => source?.scene_name || source?.scene_id || '-';
-
-const markdownCells = (line: string) =>
-  line
-    .trim()
-    .replace(/^\|/, '')
-    .replace(/\|$/, '')
-    .split('|')
-    .map(cell => cell.trim());
-
-function updateBridgeTableStatus(markdown: string, section: string, id: string, status: string) {
-  const lines = markdown.split('\n');
-  const headingIndex = lines.findIndex(line => new RegExp(`^#{2,3}\\s+${section}\\s*$`).test(line));
-  if (headingIndex < 0) return markdown;
-  let headerIndex = headingIndex + 1;
-  while (headerIndex < lines.length && !lines[headerIndex].trim().startsWith('|')) {
-    if (/^#{1,3}\s+/.test(lines[headerIndex])) return markdown;
-    headerIndex += 1;
-  }
-  if (!lines[headerIndex + 1]?.trim().startsWith('|')) return markdown;
-
-  const headers = markdownCells(lines[headerIndex]);
-  const separator = markdownCells(lines[headerIndex + 1]);
-  let statusIndex = headers.findIndex(header => header.replace(/[\s_（）()：:]/g, '').toLowerCase() === '状态');
-  if (statusIndex < 0) {
-    const idIndex = headers.findIndex(header => header.replace(/\s/g, '') === 'ID');
-    statusIndex = idIndex >= 0 ? idIndex + 1 : 0;
-    headers.splice(statusIndex, 0, '状态');
-    separator.splice(statusIndex, 0, '---');
-    lines[headerIndex] = `| ${headers.join(' | ')} |`;
-    lines[headerIndex + 1] = `| ${separator.join(' | ')} |`;
-  }
-
-  for (let index = headerIndex + 2; index < lines.length && lines[index].trim().startsWith('|'); index += 1) {
-    const cells = markdownCells(lines[index]);
-    if (cells[0] !== id) continue;
-    while (cells.length < headers.length) cells.push('');
-    cells[statusIndex] = status;
-    lines[index] = `| ${cells.join(' | ')} |`;
-  }
-  return lines.join('\n');
-}
-
-function setBridgeStatus(markdown: string, pathId: string | undefined, joinRowId: string, status: string) {
-  let updated = pathId ? updateBridgeTableStatus(markdown, '跨场景分析路径', pathId, status) : markdown;
-  updated = updateBridgeTableStatus(updated, '跨场景关联', joinRowId, status);
-  return updated;
-}
 
 const buildSourceRefreshNotice = (
   revision: OntologyRevision,
@@ -156,10 +116,13 @@ export default function OntologyPage() {
   const [graph, setGraph] = useState<OntologyGraph>();
   const [layout, setLayout] = useState<Record<string, unknown>>({});
   const [issues, setIssues] = useState<OntologyIssue[]>([]);
+  const [reviewState, setReviewState] = useState<OntologyReviewState>();
+  const [reviewTarget, setReviewTarget] = useState<OntologyReviewItem>();
+  const [reviewComment, setReviewComment] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [checking, setChecking] = useState(false);
-  const [mode, setMode] = useState<ViewMode>('split');
+  const [mode, setMode] = useState<ViewMode>('graph');
   const [sourceRefresh, setSourceRefresh] = useState<OntologySourceRefresh>();
   const [sourceScenes, setSourceScenes] = useState<OntologySourceRef[]>([]);
   const [lastGeneration, setLastGeneration] = useState<OntologySourceRefresh['generation']>();
@@ -170,8 +133,10 @@ export default function OntologyPage() {
   const [syncStatus, setSyncStatus] = useState<OntologySnapshotSyncStatus>();
   const [syncing, setSyncing] = useState(false);
   const [graphLayer, setGraphLayer] = useState<OntologyLayerView>('all');
+  const [focusTarget, setFocusTarget] = useState<Pick<OntologyReviewItem, 'target_type' | 'target_id'> | undefined>();
 
   const changed = Boolean(draft && markdown !== draft.markdown);
+  const clearFocusTarget = useCallback(() => setFocusTarget(undefined), []);
 
   const loadGraph = useCallback(async (revision: number, replaceInvalid = false) => {
     const preview = await getOntologyGraph(revision);
@@ -191,6 +156,7 @@ export default function OntologyPage() {
       setSourceScenes(data.source_scenes);
       setSourceRefresh(buildSourceRefreshNotice(data.draft, data.source_scenes));
       await loadGraph(data.draft.revision, true);
+      setReviewState(await getOntologyReviewState(data.draft.revision));
       try {
         const health = await getOntologyNeo4jHealth();
         setNeo4jHealth(health);
@@ -253,6 +219,7 @@ export default function OntologyPage() {
       setMarkdown(result.markdown);
       setSourceRefresh(buildSourceRefreshNotice(result, sourceScenes));
       await loadGraph(result.revision);
+      setReviewState(await getOntologyReviewState(result.revision));
       message.success('Ontology 草稿已保存');
     } catch (error) {
       message.error(error instanceof Error ? error.message : '保存失败');
@@ -265,6 +232,10 @@ export default function OntologyPage() {
     if (!draft) return;
     if (changed) {
       message.warning('请先保存当前文档再发布');
+      return;
+    }
+    if (!reviewState?.approved) {
+      message.warning('请先完成关键对象审核并批准当前修订');
       return;
     }
     setSaving(true);
@@ -284,6 +255,74 @@ export default function OntologyPage() {
       await refresh();
     } catch (error) {
       message.error(error instanceof Error ? error.message : '发布失败，请先处理格式提醒或场景语义文档版本变更');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const reviewObject = async (
+    item: OntologyReviewItem,
+    decision: 'confirmed' | 'rejected' | 'candidate',
+    comment: string,
+  ) => {
+    if (!draft) return;
+    setSaving(true);
+    try {
+      const result = await reviewOntologyObject(draft.revision, {
+        target_type: item.target_type,
+        target_id: item.target_id,
+        fingerprint: item.fingerprint,
+        decision,
+        comment,
+      });
+      setReviewState(result.review_state);
+      setReviewTarget(undefined);
+      await loadGraph(draft.revision, true);
+      message.success(
+        decision === 'confirmed' ? '对象已确认' : decision === 'rejected' ? '对象已驳回' : '已撤回审核结论',
+      );
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '保存审核结论失败');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const excludeObject = async (item: OntologyReviewItem, comment: string) => {
+    if (!draft) return;
+    setSaving(true);
+    try {
+      const result = await excludeOntologyObject(draft.revision, {
+        target_type: item.target_type,
+        target_id: item.target_id,
+        fingerprint: item.fingerprint,
+        comment,
+      });
+      setDraft(result.revision);
+      setMarkdown(result.revision.markdown);
+      setReviewState(result.review_state);
+      setReviewTarget(undefined);
+      await loadGraph(result.revision.revision, true);
+      message.success('对象已从当前本体草稿移除；来源文档仍声明时，重新生成可能再次出现');
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '移除对象失败');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const approveRevision = async () => {
+    if (!draft || changed || !reviewState?.current_content_hash) {
+      message.warning(changed ? '请先保存当前文档' : '当前来源版本不可审核，请先处理来源变更');
+      return;
+    }
+    setSaving(true);
+    try {
+      const result = await approveOntologyRevision(draft.revision, reviewState.current_content_hash);
+      setReviewState(result.review_state);
+      message.success('当前修订已批准，可以发布');
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '批准修订失败');
     } finally {
       setSaving(false);
     }
@@ -353,6 +392,7 @@ export default function OntologyPage() {
       setLastGeneration(result.generation);
       setSourceRefreshOpen(false);
       await loadGraph(result.revision.revision);
+      setReviewState(await getOntologyReviewState(result.revision.revision));
       const summary = result.generation
         ? `实体 ${result.generation.entity_count} 个，指标 ${result.generation.metric_count} 个，分析规则 ${result.generation.analysis_rule_count} 条`
         : '已根据场景语义文档生成本体草稿';
@@ -398,8 +438,18 @@ export default function OntologyPage() {
     joinRowId: string,
     status: 'confirmed' | 'rejected' | 'candidate',
   ) => {
-    setMarkdown(current => setBridgeStatus(current, pathId, joinRowId, status));
-    message.success('状态已写入本体草稿；保存并发布后生效');
+    const targetType = pathId ? 'node' : 'edge';
+    const targetId = pathId ?? joinRowId;
+    const item = reviewState?.items.find(review => review.target_type === targetType && review.target_id === targetId);
+    if (!item) {
+      message.warning('未找到当前桥接审核对象，请刷新图谱后重试');
+      return;
+    }
+    void reviewObject(
+      item,
+      status,
+      status === 'rejected' ? '审核驳回跨场景桥接' : status === 'confirmed' ? '审核确认跨场景桥接' : '撤回桥接审核结论',
+    );
   };
 
   if (loading || !draft) return <Spin className='flex h-full items-center justify-center' />;
@@ -452,6 +502,14 @@ export default function OntologyPage() {
     },
     { business_semantics: 0, analysis_explanations: 0, mapping_governance: 0 },
   );
+  const reviewQueue = [...(reviewState?.items ?? [])]
+    .filter(item => item.required && item.status !== 'confirmed')
+    .sort((left, right) => Number(right.status === 'rejected') - Number(left.status === 'rejected'));
+  const reviewObjectDetails =
+    reviewTarget?.object ??
+    (reviewTarget?.target_type === 'node'
+      ? graph?.nodes.find(node => node.id === reviewTarget.target_id)
+      : graph?.edges.find(edge => edge.id === reviewTarget?.target_id));
   const visibleGraph =
     !graph || graphLayer === 'all'
       ? graph
@@ -531,9 +589,33 @@ export default function OntologyPage() {
           <Button icon={<SaveOutlined />} onClick={() => void save()} loading={saving} disabled={!changed}>
             保存
           </Button>
-          <Button type='primary' icon={<CloudUploadOutlined />} onClick={() => void publish()} loading={saving}>
-            发布
-          </Button>
+          <Tooltip
+            title={
+              reviewState?.pending_count
+                ? `还有 ${reviewState.pending_count} 个关键对象待确认`
+                : '批准当前内容和来源快照；编辑或来源变化后需要重新批准'
+            }
+          >
+            <Button
+              icon={<CheckCircleFilled />}
+              onClick={() => void approveRevision()}
+              loading={saving}
+              disabled={saving || changed || !reviewState?.current_content_hash || Boolean(reviewState?.pending_count)}
+            >
+              {reviewState?.approved ? '已批准' : '批准修订'}
+            </Button>
+          </Tooltip>
+          <Tooltip title={reviewState?.approved ? '发布已批准修订' : '完成关键对象审核并批准修订后才能发布'}>
+            <Button
+              type='primary'
+              icon={<CloudUploadOutlined />}
+              onClick={() => void publish()}
+              loading={saving}
+              disabled={!reviewState?.approved || changed}
+            >
+              发布
+            </Button>
+          </Tooltip>
         </>
       }
     >
@@ -594,6 +676,67 @@ export default function OntologyPage() {
             description={`模式：${lastGeneration.mode.toUpperCase()}；来源场景 ${lastGeneration.source_count} 个；实体 ${lastGeneration.entity_count} 个；指标 ${lastGeneration.metric_count} 个；关系 ${lastGeneration.relation_count} 个；分析规则 ${lastGeneration.analysis_rule_count} 条`}
           />
         )}
+        <div className='mx-4 mt-4 rounded-md border border-gray-200 p-4 dark:border-white/10'>
+          <div className='mb-3 flex flex-wrap items-center justify-between gap-2'>
+            <div>
+              <div className='font-medium'>审核待办</div>
+              <div className='mt-1 text-xs text-gray-500'>关键指标、分析路径和场景桥接需逐项确认后才能批准修订。</div>
+            </div>
+            <Tag color={reviewQueue.length ? 'gold' : 'green'}>
+              {reviewQueue.length ? `${reviewQueue.length} 项待处理` : '关键对象已确认'}
+            </Tag>
+          </div>
+          {reviewState?.blocking_issue && (
+            <Alert
+              className='mb-3'
+              type='warning'
+              showIcon
+              message='当前来源快照不可审核'
+              description={reviewState.blocking_issue.message}
+            />
+          )}
+          {reviewQueue.length ? (
+            <div className='max-h-64 space-y-2 overflow-auto'>
+              {reviewQueue.slice(0, 12).map(item => (
+                <div
+                  key={`${item.target_type}:${item.target_id}`}
+                  className='flex flex-wrap items-center justify-between gap-3 rounded-md border border-gray-100 px-3 py-2 dark:border-white/10'
+                >
+                  <div className='min-w-0'>
+                    <div className='flex flex-wrap items-center gap-2'>
+                      <span className='truncate text-sm font-medium'>{item.name || item.target_id}</span>
+                      <Tag className='m-0'>{item.object_type}</Tag>
+                      <Tag className='m-0' color={item.status === 'rejected' ? 'red' : 'gold'}>
+                        {item.status === 'rejected' ? '已驳回' : '待确认'}
+                      </Tag>
+                    </div>
+                    <div className='mt-1 truncate text-xs text-gray-500'>{item.target_id}</div>
+                    {item.status === 'rejected' && item.comment && (
+                      <div className='mt-1 text-xs text-red-600'>驳回意见：{item.comment}</div>
+                    )}
+                  </div>
+                  <Button
+                    size='small'
+                    disabled={changed || !reviewState?.current_content_hash}
+                    onClick={() => {
+                      setReviewTarget(item);
+                      setReviewComment('');
+                    }}
+                  >
+                    查看并审核
+                  </Button>
+                </div>
+              ))}
+              {reviewQueue.length > 12 && (
+                <div className='pt-1 text-xs text-gray-500'>
+                  还有 {reviewQueue.length - 12} 项，请在图谱中继续处理。
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className='text-sm text-gray-500'>当前修订没有待确认的关键对象。</div>
+          )}
+        </div>
         <div className='mx-4 mt-4 grid gap-3 md:grid-cols-2'>
           <div className='rounded-md border border-gray-200 p-4 dark:border-white/10'>
             <div className='flex items-center justify-between'>
@@ -788,7 +931,7 @@ export default function OntologyPage() {
               />
             </div>
           </div>
-          <div className={`${showGraph ? 'flex' : 'hidden'} min-h-[680px] flex-col`}>
+          <div id='ontology-graph-panel' className={`${showGraph ? 'flex' : 'hidden'} min-h-[680px] flex-col`}>
             <div className='flex items-center justify-between border-b border-gray-100 px-4 py-3 dark:border-white/10'>
               <div className='flex items-center gap-2'>
                 <ApartmentOutlined className='text-blue-600' />
@@ -814,6 +957,10 @@ export default function OntologyPage() {
                 <OntologyGraphCanvas
                   graph={visibleGraph}
                   layout={layout}
+                  reviewState={reviewState}
+                  onReviewObject={reviewObject}
+                  focusTarget={focusTarget}
+                  onFocusTargetHandled={clearFocusTarget}
                   onSaveLayout={async value => {
                     await saveOntologyLayout(draft.revision, value);
                     setLayout(value);
@@ -901,15 +1048,117 @@ export default function OntologyPage() {
           )}
         </div>
       </Modal>
+      <Modal
+        title={`审核：${reviewTarget?.name || reviewTarget?.target_id || ''}`}
+        open={Boolean(reviewTarget)}
+        bodyStyle={{ maxHeight: '75vh', overflowY: 'auto' }}
+        onCancel={() => setReviewTarget(undefined)}
+        width={760}
+        footer={null}
+      >
+        {reviewObjectDetails ? (
+          <OntologyReviewDetails object={reviewObjectDetails} />
+        ) : (
+          <Alert type='warning' message='当前对象详情不可用，请刷新后重新审核。' />
+        )}
+        <Alert
+          className='mt-4'
+          type='info'
+          showIcon
+          message='驳回与不纳入的区别'
+          description='驳回会保留对象并要求修改；不纳入本体会从当前草稿删除对象及关联引用。两种操作都需要填写原因。'
+        />
+        <Input.TextArea
+          className='mt-4'
+          aria-label='审核意见'
+          placeholder='审核意见（驳回时必填）'
+          value={reviewComment}
+          maxLength={2000}
+          onChange={event => setReviewComment(event.target.value)}
+        />
+        <div className='mt-4 flex flex-wrap gap-2'>
+          <Button
+            type='primary'
+            loading={saving}
+            disabled={!reviewObjectDetails || changed}
+            onClick={() => reviewTarget && void reviewObject(reviewTarget, 'confirmed', reviewComment)}
+          >
+            确认
+          </Button>
+          <Button
+            danger
+            loading={saving}
+            disabled={!reviewObjectDetails || changed || !reviewComment.trim()}
+            onClick={() => reviewTarget && void reviewObject(reviewTarget, 'rejected', reviewComment)}
+          >
+            驳回
+          </Button>
+          <Popconfirm
+            title='确认将对象从当前本体草稿移除？'
+            okText='移除'
+            cancelText='取消'
+            onConfirm={() => reviewTarget && void excludeObject(reviewTarget, reviewComment)}
+          >
+            <Button
+              danger
+              type='primary'
+              ghost
+              loading={saving}
+              disabled={!reviewObjectDetails || changed || !reviewComment.trim()}
+            >
+              不纳入本体
+            </Button>
+          </Popconfirm>
+          <Button
+            onClick={() => {
+              if (!reviewTarget) return;
+              setMode('graph');
+              setGraphLayer('all');
+              setFocusTarget({ target_type: reviewTarget.target_type, target_id: reviewTarget.target_id });
+              setReviewTarget(undefined);
+              window.requestAnimationFrame(() =>
+                document.getElementById('ontology-graph-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+              );
+            }}
+          >
+            在图谱中定位
+          </Button>
+        </div>
+      </Modal>
       <Modal title='草稿与线上版本 Diff' open={diffOpen} onCancel={() => setDiffOpen(false)} footer={null} width={1000}>
         {diff && (
-          <DiffEditor
-            height='65vh'
-            language='markdown'
-            original={diff.original}
-            modified={diff.modified}
-            options={{ readOnly: true, minimap: { enabled: false }, renderSideBySide: true }}
-          />
+          <div>
+            <Alert
+              className='mb-3'
+              type='info'
+              showIcon
+              message={
+                <span className='flex flex-wrap items-center gap-x-4 gap-y-1'>
+                  <span>
+                    <Tag color='red'>红色</Tag>线上版本有，草稿中已删除
+                  </span>
+                  <span>
+                    <Tag color='green'>绿色</Tag>草稿新增，线上版本中没有
+                  </span>
+                </span>
+              }
+            />
+            <div className='mb-2 grid grid-cols-2 gap-3 text-sm font-semibold'>
+              <div className='rounded border border-gray-200 px-3 py-2 dark:border-white/10'>
+                左侧：线上版本（当前已发布）
+              </div>
+              <div className='rounded border border-gray-200 px-3 py-2 dark:border-white/10'>
+                右侧：当前草稿（待审核/发布）
+              </div>
+            </div>
+            <DiffEditor
+              height='65vh'
+              language='markdown'
+              original={diff.original}
+              modified={diff.modified}
+              options={{ readOnly: true, minimap: { enabled: false }, renderSideBySide: true }}
+            />
+          </div>
         )}
       </Modal>
     </AskDataPageShell>

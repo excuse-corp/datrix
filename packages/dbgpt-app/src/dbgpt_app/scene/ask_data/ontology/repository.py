@@ -99,6 +99,26 @@ class AskDataOntologyLayoutEntity(Model):
     )
 
 
+class AskDataOntologyEventEntity(Model):
+    __tablename__ = "ask_data_ontology_event"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    event_id = Column(String(64), nullable=False, unique=True, index=True)
+    ontology_id = Column(String(128), nullable=False, index=True)
+    revision = Column(Integer, nullable=False, index=True)
+    event_type = Column(String(48), nullable=False, index=True)
+    target_type = Column(String(32), nullable=True)
+    target_id = Column(String(128), nullable=True)
+    target_fingerprint = Column(String(128), nullable=True)
+    decision = Column(String(32), nullable=True)
+    comment = Column(Text, nullable=False, default="")
+    actor_id = Column(String(128), nullable=False)
+    content_hash = Column(String(128), nullable=True)
+    source_scene_snapshots_json = Column(JSON, nullable=False, default=list)
+    metadata_json = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+
+
 def create_ontology_tables(db_manager: DatabaseManager) -> None:
     db_manager.metadata.create_all(
         db_manager.engine,
@@ -107,6 +127,7 @@ def create_ontology_tables(db_manager: DatabaseManager) -> None:
             AskDataOntologyRevisionEntity.__table__,
             AskDataOntologySnapshotEntity.__table__,
             AskDataOntologyLayoutEntity.__table__,
+            AskDataOntologyEventEntity.__table__,
         ],
     )
 
@@ -119,6 +140,7 @@ class InMemoryOntologyRepository:
         self._snapshots: dict[str, OntologySnapshot] = {}
         self._active_revision: int | None = None
         self._layout: dict[int, dict[str, Any]] = {}
+        self._events: list[dict[str, Any]] = []
         self._lock = RLock()
 
     def ensure(self, *, created_by: str) -> OntologyRevision:
@@ -264,6 +286,28 @@ class InMemoryOntologyRepository:
             )
             self._revisions[revision] = updated
             return updated
+
+    def append_event(self, event: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            stored = dict(event)
+            self._events.append(stored)
+            return self._event_payload(stored)
+
+    def list_events(self, revision: int) -> list[dict[str, Any]]:
+        with self._lock:
+            return [
+                self._event_payload(event)
+                for event in self._events
+                if int(event.get("revision", -1)) == revision
+            ]
+
+    @staticmethod
+    def _event_payload(event: dict[str, Any]) -> dict[str, Any]:
+        result = dict(event)
+        created_at = result.get("created_at")
+        if isinstance(created_at, datetime):
+            result["created_at"] = created_at.isoformat()
+        return result
 
 
 class SqlOntologyRepository:
@@ -557,6 +601,38 @@ class SqlOntologyRepository:
             entity.source_scene_snapshots_json = source_scene_snapshots
             return self._revision(entity)
 
+    def append_event(self, event: dict[str, Any]) -> dict[str, Any]:
+        with self.db_manager.session() as session:
+            entity = AskDataOntologyEventEntity(
+                event_id=event["event_id"],
+                ontology_id=event.get("ontology_id", "global_business"),
+                revision=event["revision"],
+                event_type=event["event_type"],
+                target_type=event.get("target_type"),
+                target_id=event.get("target_id"),
+                target_fingerprint=event.get("target_fingerprint"),
+                decision=event.get("decision"),
+                comment=event.get("comment", ""),
+                actor_id=event["actor_id"],
+                content_hash=event.get("content_hash"),
+                source_scene_snapshots_json=event.get("source_scene_snapshots", []),
+                metadata_json=event.get("metadata", {}),
+                created_at=event.get("created_at", datetime.now(timezone.utc)),
+            )
+            session.add(entity)
+            session.flush()
+            return self._event_payload(entity)
+
+    def list_events(self, revision: int) -> list[dict[str, Any]]:
+        with self.db_manager.session(commit=False) as session:
+            return [
+                self._event_payload(item)
+                for item in session.query(AskDataOntologyEventEntity)
+                .filter_by(ontology_id="global_business", revision=revision)
+                .order_by(AskDataOntologyEventEntity.created_at.asc(), AskDataOntologyEventEntity.id.asc())
+                .all()
+            ]
+
     @staticmethod
     def _revision(entity: AskDataOntologyRevisionEntity) -> OntologyRevision:
         return OntologyRevision(
@@ -573,6 +649,25 @@ class SqlOntologyRepository:
             created_at=entity.created_at,
             updated_at=entity.updated_at,
         )
+
+    @staticmethod
+    def _event_payload(entity: AskDataOntologyEventEntity) -> dict[str, Any]:
+        return {
+            "event_id": entity.event_id,
+            "ontology_id": entity.ontology_id,
+            "revision": entity.revision,
+            "event_type": entity.event_type,
+            "target_type": entity.target_type,
+            "target_id": entity.target_id,
+            "target_fingerprint": entity.target_fingerprint,
+            "decision": entity.decision,
+            "comment": entity.comment,
+            "actor_id": entity.actor_id,
+            "content_hash": entity.content_hash,
+            "source_scene_snapshots": list(entity.source_scene_snapshots_json or []),
+            "metadata": dict(entity.metadata_json or {}),
+            "created_at": entity.created_at.isoformat(),
+        }
 
     @staticmethod
     def _snapshot(entity: AskDataOntologySnapshotEntity) -> OntologySnapshot:
@@ -593,6 +688,7 @@ class SqlOntologyRepository:
 
 __all__ = [
     "AskDataOntologyEntity",
+    "AskDataOntologyEventEntity",
     "AskDataOntologyLayoutEntity",
     "AskDataOntologyRevisionEntity",
     "AskDataOntologySnapshotEntity",

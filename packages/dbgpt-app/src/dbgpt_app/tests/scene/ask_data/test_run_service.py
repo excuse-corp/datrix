@@ -238,7 +238,7 @@ def test_run_service_persists_bundle_warnings_on_query_run():
     assert query.warnings == ["RAG_DEGRADED"]
 
 
-def test_run_service_persists_runtime_ontology_snapshot_id():
+def test_run_service_does_not_pin_ontology_during_sql_execution():
     repository = InMemoryRunRepository()
     orchestrator = FakeOrchestrator(
         _snapshot(),
@@ -257,7 +257,7 @@ def test_run_service_persists_runtime_ontology_snapshot_id():
     )
 
     assert result.ontology_snapshot_id == "onto_contracts"
-    assert query.ontology_snapshot_id == "onto_contracts"
+    assert query.ontology_snapshot_id is None
 
 
 def test_run_service_replays_success_result_and_rejects_key_reuse_conflict():

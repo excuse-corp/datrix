@@ -40,6 +40,10 @@ The compatibility CLI is still named `dbgpt` while package and command migration
 4. Execution agents run SQL, Python, shell, connector, or tool-based analysis tasks inside controlled environments.
 5. Summarization agents validate results, generate charts or reports, and return an auditable conclusion.
 
+## Ontology Structure
+
+Datrix organizes its global Ontology into business semantics, analysis explanations, and mapping governance. See the [three-layer Ontology structure](docs/ontology-three-layer-structure.md) for the objects, relationships, provenance rules, and Neo4j snapshot representation in each layer.
+
 ## Quick Start
 
 `dbgpt start webserver` starts the Datrix backend WebServer. The WebServer runs the FastAPI / Uvicorn API service and serves the already-built static frontend from the backend package; it is not a standalone frontend dev server.

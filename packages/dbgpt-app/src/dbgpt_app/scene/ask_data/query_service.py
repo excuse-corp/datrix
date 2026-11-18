@@ -12,9 +12,10 @@ from .query.capabilities import (
 )
 from .query.compiler import CompiledQuery, QuerySpecCompiler
 from .query.executor import SafeSceneQueryExecutor
-from .query.query_spec import QuerySpec, ResultColumn, SceneResult
+from .query.query_spec import FieldLineage, QuerySpec, ResultColumn, SceneResult, build_field_ref
 from .rag.manager import SceneKnowledgeManager
 from .result.sql_explanation import build_sql_explanation
+from .result.query_metadata import sql_field_lineage, sql_result_profile
 from .schemas.snapshot import Snapshot, SnapshotStatus
 
 
@@ -56,13 +57,18 @@ class SceneQueryService:
             status="succeeded",
             grain=list(spec.dimensions),
             time_grain=spec.time_grain,
-            time_basis=(
-                str(capabilities.time.get("field"))
-                if capabilities.time.get("field")
-                else None
-            ),
+            time_basis=(str(capabilities.time.get("name") or "").strip() or None),
             time_range=spec.time_range,
             columns=columns,
+            field_lineage=[
+                FieldLineage(
+                    field_ref=build_field_ref(
+                        snapshot.scene_id, snapshot.snapshot_id, item["source_field"]
+                    ),
+                    **item,
+                )
+                for item in compiled.field_lineage
+            ],
             rows=rows,
             row_count=len(rows),
             truncated=truncated,
@@ -113,18 +119,23 @@ class SceneQueryService:
             for key in keys
         ]
         capabilities = build_query_capabilities(snapshot)
+        profile = sql_result_profile(sql, snapshot)
         return SceneResult(
             task_id=task_id,
             scene_id=snapshot.scene_id,
             scene_revision=snapshot.revision_id,
             snapshot_id=snapshot.snapshot_id,
             status="succeeded",
-            time_basis=(
-                str(capabilities.time.get("field"))
-                if capabilities.time.get("field")
-                else None
-            ),
+            grain=profile["grain"],
+            time_grain=profile["time_grain"],
+            time_basis=profile["time_basis"],
+            time_range=profile["time_range"],
             columns=columns,
+            field_lineage=sql_field_lineage(
+                sql,
+                snapshot,
+                result_columns=[column.model_dump(mode="json") for column in columns],
+            ),
             rows=rows,
             row_count=len(rows),
             truncated=truncated,

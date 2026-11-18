@@ -131,6 +131,11 @@ def normalize_ontology_graph(
             "scene_id",
             "scene_snapshot_id",
             "semantic_key",
+            "field_ref",
+            "source_field",
+            "aggregation",
+            "unit",
+            "result_key",
             "target_object_id",
             "document_type",
             "semantic_md_hash",
@@ -246,8 +251,23 @@ def normalize_ontology_graph(
             "data_json": _json_value(edge_data),
             "provenance_json": _json_value(provenance or []),
             "source_scene_ids": source_scene_ids or [],
-            "status": str(edge_data.get("status") or "candidate"),
+            "status": str(
+                edge_data.get("status")
+                or edge_data.get("review_status")
+                or "candidate"
+            ),
         }
+        for field in (
+            "scene_id",
+            "scene_snapshot_id",
+            "semantic_key",
+            "field_ref",
+            "source_field",
+            "scenes",
+        ):
+            value = edge_data.get(field)
+            if value is not None:
+                properties[field] = value
         normalized_edges.append(
             {
                 "relation_id": relation_id,
@@ -369,6 +389,18 @@ def normalize_ontology_graph(
                     "semantic_key": semantic_key,
                     "scene_snapshot_id": snapshot_version_by_scene.get(scene_id),
                     "target_object_id": metric_id,
+                    "status": str(data.get("review_status") or "candidate"),
+                    **{
+                        key: data[key]
+                        for key in (
+                            "field_ref",
+                            "source_field",
+                            "aggregation",
+                            "unit",
+                            "result_key",
+                        )
+                        if data.get(key) is not None
+                    },
                 },
                 "provenance": provenance,
             }

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-
 from ..schemas.plan import CombinePlan, MainAgentPlan, PlanTask
 from ..schemas.snapshot import Snapshot
 from ..snapshot.registry import RegistryLookupError, SceneAgentRegistry
@@ -20,7 +19,9 @@ class RouterAgent:
         ontology_snapshot_provider: Callable[[], object | None] | None = None,
     ):
         self.registry = registry
-        self.ontology_snapshot_provider = ontology_snapshot_provider
+        # Deprecated compatibility argument. Routing is intentionally based on
+        # Scene snapshots only and never calls this provider.
+        self._unused_ontology_snapshot_provider = ontology_snapshot_provider
 
     def route(self, question: str) -> MainAgentPlan:
         normalized = question.strip().lower()

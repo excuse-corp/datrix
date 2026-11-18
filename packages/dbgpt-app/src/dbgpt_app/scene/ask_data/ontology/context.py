@@ -17,7 +17,9 @@ def relevant_ontology_projection(
     authorized_scene_ids: list[str] | None = None,
     is_platform_admin: bool = True,
     result_columns: list[dict[str, Any]] | None = None,
+    result_lineage: list[dict[str, Any]] | None = None,
     result_profiles: list[dict[str, Any]] | None = None,
+    retrieval_source: str | None = None,
 ) -> dict[str, Any]:
     """Select a small connected subgraph; never expose scene Markdown or SQL."""
     graph = snapshot.graph_json
@@ -150,6 +152,7 @@ def relevant_ontology_projection(
     normalized_profiles = [
         {
             "scene_id": str(profile.get("scene_id") or ""),
+            "scene_snapshot_id": str(profile.get("scene_snapshot_id") or ""),
             "grain": _display_values(profile.get("grain")),
             "grain_semantic_keys": _display_values(profile.get("grain_semantic_keys")),
             "time_grain": profile.get("time_grain"),
@@ -280,6 +283,13 @@ def relevant_ontology_projection(
             score_value += 90
         if semantic_key and semantic_key in metric_semantic_keys:
             score_value += 95
+        field_ref = str(data.get("field_ref") or "")
+        if field_ref and any(
+            field_ref == str(lineage.get("field_ref") or "")
+            for lineage in (result_lineage or [])
+            if isinstance(lineage, dict) and lineage.get("resolved", True)
+        ):
+            score_value += 110
         if item_id in metric_column_keys:
             score_value += 100
         if not terms:
@@ -313,7 +323,13 @@ def relevant_ontology_projection(
     metric_bindings = _metric_bindings_for_columns(
         prompt_projection.get("edges", []) or edges,
         selected_scene_ids,
-        metric_column_keys | metric_semantic_keys,
+        [
+            item
+            for item in (result_columns or [])
+            if isinstance(item, dict)
+            and str(item.get("type") or "").lower() == "metric"
+        ],
+        result_lineage or [],
     )
     metrics = _select_projection_items(
         prompt_projection.get("metrics", []),
@@ -367,8 +383,40 @@ def relevant_ontology_projection(
             & entity_ids
         )
     ][:8]
+    matched_bindings = _matched_bindings_for_columns(
+        prompt_projection.get("edges", []) or edges,
+        selected_scene_ids,
+        result_columns or [],
+        metric_ids,
+        result_lineage or [],
+    )
+    matched_result_keys = {item["result_key"] for item in matched_bindings}
+    retrieval_trace = [
+        {
+            "result_key": str(column.get("key") or ""),
+            "scene_id": str(column.get("scene_id") or ""),
+            "semantic_key": str(column.get("semantic_key") or "") or None,
+            "field_refs": [
+                str(item.get("field_ref"))
+                for item in (result_lineage or [])
+                if item.get("result_key") == column.get("key") and item.get("field_ref")
+            ],
+            "status": "matched" if column.get("key") in matched_result_keys else "unmapped",
+            "matched_by": next(
+                (
+                    item["matched_by"]
+                    for item in matched_bindings
+                    if item["result_key"] == column.get("key")
+                ),
+                None,
+            ),
+        }
+        for column in (result_columns or [])
+        if isinstance(column, dict) and column.get("key")
+    ]
     return {
         "ontology_snapshot_id": snapshot.snapshot_id,
+        "retrieval_source": retrieval_source or "json_snapshot",
         "revision": snapshot.revision,
         "matched_scene_ids": sorted(selected_scene_ids),
         "matched_column_keys": sorted(column_keys),
@@ -386,22 +434,23 @@ def relevant_ontology_projection(
         "cross_scene_analysis_paths": cross_scene_analysis_paths,
         "result_analysis_rules": result_analysis_rules,
         "clarification_rules": [],
-        "matched_bindings": _matched_bindings_for_columns(
-            prompt_projection.get("edges", []) or edges,
-            selected_scene_ids,
-            result_columns or [],
-            metric_ids,
-        ),
+        "matched_bindings": matched_bindings,
+        "retrieval_trace": retrieval_trace,
         "unmatched_columns": sorted(
-            key
-            for key in metric_result_keys
-            if not _column_is_bound(
-                key,
-                result_columns or [],
-                prompt_projection.get("edges", []) or edges,
-                selected_scene_ids,
-                metric_ids,
-            )
+            {
+                str(column.get("key"))
+                for column in (result_columns or [])
+                if isinstance(column, dict)
+                and column.get("key")
+                and str(column.get("type") or "").lower() == "metric"
+                and not _column_is_bound(
+                    column,
+                    prompt_projection.get("edges", []) or edges,
+                    selected_scene_ids,
+                    metric_ids,
+                    result_lineage or [],
+                )
+            }
         ),
     }
 
@@ -414,8 +463,10 @@ def render_main_agent_ontology_context(
     authorized_scene_ids: list[str] | None = None,
     is_platform_admin: bool = True,
     result_columns: list[dict[str, Any]] | None = None,
+    result_lineage: list[dict[str, Any]] | None = None,
     result_profiles: list[dict[str, Any]] | None = None,
     max_nodes: int = 16,
+    retrieval_source: str | None = None,
 ) -> str:
     if snapshot is None:
         return ""
@@ -426,8 +477,10 @@ def render_main_agent_ontology_context(
         authorized_scene_ids=authorized_scene_ids,
         is_platform_admin=is_platform_admin,
         result_columns=result_columns,
+        result_lineage=result_lineage,
         result_profiles=result_profiles,
         max_nodes=max_nodes,
+        retrieval_source=retrieval_source,
     )
     has_context = any(
         projection.get(key)
@@ -445,7 +498,15 @@ def render_main_agent_ontology_context(
     )
     if not has_context and not projection.get("unmatched_columns"):
         return ""
-    lines = [f"全局业务 Ontology（版本 {projection['revision']}）："]
+    lines = [
+        f"全局业务 Ontology（版本 {projection['revision']}）：",
+        f"- 本体快照：{projection['ontology_snapshot_id']}；读取来源：{projection['retrieval_source']}",
+    ]
+    for trace in projection.get("retrieval_trace", []):
+        if trace.get("status") == "matched":
+            lines.append(
+                f"- 结果列 {trace.get('result_key')} 通过 {trace.get('matched_by')} 精确命中本体绑定。"
+            )
     if projection.get("unmatched_columns"):
         lines.append(
             "- 以下结果列没有已确认的本体指标绑定："
@@ -638,18 +699,20 @@ def _select_projection_items(
 def _metric_bindings_for_columns(
     edges: list[dict[str, Any]],
     scene_ids: set[str],
-    column_keys: set[str],
+    result_columns: list[dict[str, Any]],
+    result_lineage: list[dict[str, Any]],
 ) -> set[str]:
-    if not column_keys:
+    if not result_columns:
         return set()
     metric_ids: set[str] = set()
     for edge in edges:
         if edge.get("type") != "scene_binding":
             continue
-        if scene_ids and edge.get("source") not in scene_ids:
+        if not _binding_is_confirmed(edge):
             continue
-        semantic_key = str((edge.get("data") or {}).get("semantic_key") or "")
-        if semantic_key in column_keys:
+        if scene_ids and str(edge.get("source") or "") not in scene_ids:
+            continue
+        if any(_edge_matches_column(edge, column, result_lineage) for column in result_columns):
             metric_ids.add(str(edge.get("target")))
     return metric_ids
 
@@ -659,10 +722,13 @@ def _matched_bindings_for_columns(
     scene_ids: set[str],
     result_columns: list[dict[str, Any]],
     selected_metric_ids: set[str],
+    result_lineage: list[dict[str, Any]],
 ) -> list[dict[str, str]]:
     bindings: list[dict[str, str]] = []
     for edge in edges:
         if edge.get("type") != "scene_binding":
+            continue
+        if not _binding_is_confirmed(edge):
             continue
         scene_id = str(edge.get("source") or "")
         metric_id = str(edge.get("target") or "")
@@ -670,26 +736,22 @@ def _matched_bindings_for_columns(
             continue
         if selected_metric_ids and metric_id not in selected_metric_ids:
             continue
-        semantic_key = str((edge.get("data") or {}).get("semantic_key") or "")
         for column in result_columns:
             if not isinstance(column, dict):
                 continue
             if str(column.get("type") or "").lower() != "metric":
                 continue
             key = str(column.get("key") or "")
-            column_semantic_key = str(column.get("semantic_key") or "")
-            if semantic_key and semantic_key in {key, column_semantic_key}:
+            if _edge_matches_column(edge, column, result_lineage):
+                edge_data = edge.get("data") or {}
+                semantic_key = str(edge_data.get("semantic_key") or "")
                 bindings.append(
                     {
                         "scene_id": scene_id,
                         "result_key": key,
                         "semantic_key": semantic_key,
                         "metric_id": metric_id,
-                        "matched_by": (
-                            "semantic_key"
-                            if column_semantic_key == semantic_key
-                            else "result_key"
-                        ),
+                        "matched_by": _edge_match_type(edge, column, result_lineage),
                         "confidence": "exact",
                         "evidence": "scene_binding",
                     }
@@ -701,23 +763,16 @@ def _matched_bindings_for_columns(
 
 
 def _column_is_bound(
-    key: str,
-    result_columns: list[dict[str, Any]],
+    column: dict[str, Any],
     edges: list[dict[str, Any]],
     scene_ids: set[str],
     selected_metric_ids: set[str],
+    result_lineage: list[dict[str, Any]],
 ) -> bool:
-    column = next(
-        (
-            item
-            for item in result_columns
-            if isinstance(item, dict) and str(item.get("key") or "") == key
-        ),
-        {},
-    )
-    semantic_key = str(column.get("semantic_key") or "")
     for edge in edges:
         if edge.get("type") != "scene_binding":
+            continue
+        if not _binding_is_confirmed(edge):
             continue
         if scene_ids and str(edge.get("source") or "") not in scene_ids:
             continue
@@ -726,10 +781,62 @@ def _column_is_bound(
             and str(edge.get("target") or "") not in selected_metric_ids
         ):
             continue
-        bound_key = str((edge.get("data") or {}).get("semantic_key") or "")
-        if bound_key and bound_key in {key, semantic_key}:
+        if _edge_matches_column(edge, column, result_lineage):
             return True
     return False
+
+
+def _edge_matches_column(
+    edge: dict[str, Any],
+    column: dict[str, Any],
+    result_lineage: list[dict[str, Any]],
+) -> bool:
+    data = edge.get("data") or {}
+    edge_scene_id = str(edge.get("source") or "")
+    column_scene_id = str(column.get("scene_id") or "")
+    if column_scene_id and edge_scene_id != column_scene_id:
+        return False
+    edge_snapshot_id = str(data.get("scene_snapshot_id") or "")
+    column_snapshot_id = str(column.get("scene_snapshot_id") or "")
+    if edge_snapshot_id and column_snapshot_id and edge_snapshot_id != column_snapshot_id:
+        return False
+    semantic_key = str(data.get("semantic_key") or "")
+    column_key = str(column.get("key") or "")
+    column_semantic_key = str(column.get("semantic_key") or "")
+    if semantic_key and semantic_key in {column_key, column_semantic_key}:
+        return True
+    binding_field_ref = str(data.get("field_ref") or "")
+    if not binding_field_ref:
+        return False
+    result_key = str(column.get("key") or "")
+    return any(
+        str(item.get("field_ref") or "") == binding_field_ref
+        and result_key in (item.get("result_keys") or [item.get("result_key")])
+        and bool(item.get("resolved", True))
+        for item in result_lineage
+        if isinstance(item, dict)
+    )
+
+
+def _binding_is_confirmed(edge: dict[str, Any]) -> bool:
+    data = edge.get("data") or {}
+    status = str(data.get("review_status") or data.get("status") or "").lower()
+    # Legacy snapshots predate review_status. Their explicit semantic binding
+    # remains usable for compatibility; newly published snapshots always carry
+    # an explicit candidate/confirmed status.
+    return not status or status == "confirmed"
+
+
+def _edge_match_type(
+    edge: dict[str, Any],
+    column: dict[str, Any],
+    result_lineage: list[dict[str, Any]],
+) -> str:
+    data = edge.get("data") or {}
+    semantic_key = str(data.get("semantic_key") or "")
+    if semantic_key in {str(column.get("key") or ""), str(column.get("semantic_key") or "")}:
+        return "semantic_key"
+    return "field_ref"
 
 
 def _split_values(value: str) -> set[str]:

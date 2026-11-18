@@ -216,9 +216,6 @@ def configure_sql_ask_data_services(
             llm_generator=_default_ontology_llm_generator(),
         )
     )
-    bundle.orchestrator.ontology_snapshot_provider = (
-        get_ontology_service().active_snapshot
-    )
     return bundle
 
 
@@ -285,13 +282,10 @@ def get_run_service():
         from ..query_service import SceneQueryService
         from ..run_service import RunExecutionService
         from ..snapshot.registry import SceneAgentRegistry
-        from .ontology import get_ontology_service
-
         registry = SceneAgentRegistry(_snapshot_service)
         orchestrator = AskDataOrchestrator(
             PlanValidator(registry),
             SceneQueryService(),
-            ontology_snapshot_provider=get_ontology_service().active_snapshot,
         )
         _run_service = RunExecutionService(orchestrator)
     return _run_service
@@ -302,12 +296,7 @@ def get_router_agent():
     if _router_agent is None:
         from ..agents.router import RouterAgent
         from ..snapshot.registry import SceneAgentRegistry
-        from .ontology import get_ontology_service
-
-        _router_agent = RouterAgent(
-            SceneAgentRegistry(_snapshot_service),
-            ontology_snapshot_provider=get_ontology_service().active_snapshot,
-        )
+        _router_agent = RouterAgent(SceneAgentRegistry(_snapshot_service))
     return _router_agent
 
 
