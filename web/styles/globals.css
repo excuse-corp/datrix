@@ -955,3 +955,86 @@ html[data-interface-style='industrial'] body.dark .dataman-sidebar .text-gray-30
     display: none;
   }
 }
+
+html[data-interface-style='industrial'] .dashboard-chat-primary-panel.dashboard-chat-panel-open {
+  flex: 1 1 0% !important;
+  width: auto !important;
+  max-width: none !important;
+}
+
+html[data-interface-style='industrial'] .dashboard-chat-context-panel.dashboard-chat-panel-open {
+  flex: 0 0 var(--dashboard-chat-right-panel-width) !important;
+  width: var(--dashboard-chat-right-panel-width) !important;
+  max-width: var(--dashboard-chat-right-panel-width) !important;
+}
+
+.dashboard-chat-panel-divider {
+  width: 8px;
+  flex: 0 0 8px;
+}
+
+.dashboard-chat-panel-resize-handle {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+}
+
+.dashboard-chat-panel-resize-handle::after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+  content: '';
+  transition: background-color 120ms ease;
+}
+
+.dashboard-chat-panel-resize-handle:hover::after,
+.dashboard-chat-panel-resize-handle:focus-visible::after,
+.dashboard-chat-panel-resizing .dashboard-chat-panel-resize-handle::after {
+  background: #209f85;
+}
+
+.dashboard-chat-panel-resizing,
+.dashboard-chat-panel-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+.dashboard-chat-panel-toggle {
+  left: 50%;
+}
+
+html[data-interface-style='industrial'] .dashboard-chat-context-panel {
+  min-width: 0;
+  overflow: hidden;
+}
+
+@media (max-width: 767px) {
+  .dashboard-chat-panel-divider {
+    width: 0;
+    flex-basis: 0;
+  }
+
+  .dashboard-chat-panel-resize-handle {
+    display: none;
+  }
+
+  html[data-interface-style='industrial'] .dashboard-chat-workspace {
+    flex-direction: column;
+    gap: 10px;
+    overflow-y: auto;
+  }
+
+  html[data-interface-style='industrial'] .dashboard-chat-primary-panel,
+  html[data-interface-style='industrial'] .dashboard-chat-context-panel {
+    flex: none !important;
+    width: 100% !important;
+    max-width: none !important;
+  }
+}

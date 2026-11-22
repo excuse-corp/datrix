@@ -1576,7 +1576,7 @@ const ManusRightPanel: React.FC<ManusRightPanelProps> = ({
   }, [visibleOutputs]);
 
   return (
-    <div className='relative flex flex-col h-full bg-[#f8f9fc] dark:bg-[#0d0e11]'>
+    <div className='relative flex flex-col h-full min-w-0 max-w-full overflow-hidden bg-[#f8f9fc] dark:bg-[#0d0e11]'>
       {/* Collapse button is rendered by the parent layout to avoid overflow clipping */}
 
       {/* View Toggle Tabs */}
@@ -1674,7 +1674,7 @@ const ManusRightPanel: React.FC<ManusRightPanelProps> = ({
       {/* Content Area */}
       <div
         className={classNames(
-          'flex-1 overflow-y-auto flex flex-col min-h-0',
+          'flex-1 min-h-0 min-w-0 max-w-full overflow-y-auto flex flex-col',
           panelView === 'html-preview' || panelView === 'image-preview' || panelView === 'skill-preview'
             ? 'p-0'
             : 'p-5 space-y-4',

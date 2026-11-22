@@ -81,7 +81,7 @@ export const ChatEn = {
   view_all_task_files: 'View all files in this task',
   db_gpt_thinking: 'Datrix is thinking...',
   planning_next_step: 'Planning next step',
-  generating_answer: 'Generating answer...',
+  generating_answer: 'Executing task...',
   replay_badge: 'Replay',
   replay_page_title: 'Datrix Conversation Replay',
   replay_page_title_with_question: '{{question}} · Datrix Replay',

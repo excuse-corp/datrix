@@ -89,7 +89,7 @@ export const ChatZh: Resources['translation'] = {
   view_all_task_files: '查看此任务中的所有文件',
   db_gpt_thinking: 'Datrix 正在思考 ···',
   planning_next_step: '正在规划下一步',
-  generating_answer: '正在生成回答...',
+  generating_answer: '正在执行任务...',
   replay_badge: '回放',
   replay_page_title: 'Datrix 对话回放',
   replay_page_title_with_question: '{{question}} · Datrix 回放',

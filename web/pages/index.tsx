@@ -48,11 +48,29 @@ import { Button, ConfigProvider, Dropdown, Input, Popover, Spin, Tag, Tooltip, U
 import { NextPage } from 'next';
 import Image from 'next/image';
 import { useRouter } from 'next/router';
-import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 
 const MAX_CHAT_UPLOAD_FILES = 5;
 const MAX_CHAT_UPLOAD_FILE_SIZE_BYTES = 30 * 1024 * 1024;
+const RIGHT_PANEL_WIDTH_STORAGE_KEY = 'datrix.chat.right-panel-width.v1';
+const DEFAULT_RIGHT_PANEL_WIDTH = 420;
+const MIN_RIGHT_PANEL_WIDTH = 320;
+const MAX_RIGHT_PANEL_WIDTH = 720;
+const MIN_CHAT_PANEL_WIDTH = 360;
+const PANEL_DIVIDER_WIDTH = 8;
+
+const getAvailableRightPanelWidth = (workspace: HTMLElement) => {
+  const styles = window.getComputedStyle(workspace);
+  const horizontalPadding = parseFloat(styles.paddingLeft) + parseFloat(styles.paddingRight);
+  return Math.max(
+    0,
+    Math.min(
+      MAX_RIGHT_PANEL_WIDTH,
+      workspace.clientWidth - horizontalPadding - MIN_CHAT_PANEL_WIDTH - PANEL_DIVIDER_WIDTH,
+    ),
+  );
+};
 
 const generateUUID = () => {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
@@ -1324,6 +1342,13 @@ const Playground: NextPage = () => {
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(true);
   const [rightPanelView, setRightPanelView] = useState<PanelView>('execution');
+  const [rightPanelWidth, setRightPanelWidth] = useState(DEFAULT_RIGHT_PANEL_WIDTH);
+  const [rightPanelMaxWidth, setRightPanelMaxWidth] = useState(MAX_RIGHT_PANEL_WIDTH);
+  const [isRightPanelResizing, setIsRightPanelResizing] = useState(false);
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  const rightPanelRef = useRef<HTMLDivElement>(null);
+  const rightPanelWidthRef = useRef(DEFAULT_RIGHT_PANEL_WIDTH);
+  const resizePointerIdRef = useRef<number | null>(null);
   const selectedStepIdRef = useRef(selectedStepId);
   const rightPanelViewRef = useRef(rightPanelView);
   useEffect(() => {
@@ -1332,6 +1357,108 @@ const Playground: NextPage = () => {
   useEffect(() => {
     rightPanelViewRef.current = rightPanelView;
   }, [rightPanelView]);
+
+  useEffect(() => {
+    try {
+      const storedWidth = Number(window.localStorage.getItem(RIGHT_PANEL_WIDTH_STORAGE_KEY));
+      if (
+        Number.isFinite(storedWidth) &&
+        storedWidth >= MIN_RIGHT_PANEL_WIDTH &&
+        storedWidth <= MAX_RIGHT_PANEL_WIDTH
+      ) {
+        rightPanelWidthRef.current = storedWidth;
+        setRightPanelWidth(storedWidth);
+      }
+    } catch {
+      // Keep the default width when browser storage is unavailable.
+    }
+  }, []);
+
+  useEffect(() => {
+    const workspace = workspaceRef.current;
+    if (!workspace) return;
+
+    const updateMaxWidth = () => setRightPanelMaxWidth(getAvailableRightPanelWidth(workspace));
+    updateMaxWidth();
+
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateMaxWidth);
+      return () => window.removeEventListener('resize', updateMaxWidth);
+    }
+
+    const observer = new ResizeObserver(updateMaxWidth);
+    observer.observe(workspace);
+    return () => observer.disconnect();
+  }, [messages.length]);
+
+  const saveRightPanelWidth = useCallback((width: number) => {
+    const boundedWidth = Math.round(Math.max(MIN_RIGHT_PANEL_WIDTH, Math.min(MAX_RIGHT_PANEL_WIDTH, width)));
+    rightPanelWidthRef.current = boundedWidth;
+    setRightPanelWidth(boundedWidth);
+    try {
+      window.localStorage.setItem(RIGHT_PANEL_WIDTH_STORAGE_KEY, String(boundedWidth));
+    } catch {
+      // Resizing remains available when browser storage is unavailable.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isRightPanelResizing) return;
+
+    const onPointerMove = (event: PointerEvent) => {
+      if (event.pointerId !== resizePointerIdRef.current) return;
+      const workspace = workspaceRef.current;
+      const panel = rightPanelRef.current;
+      if (!workspace || !panel) return;
+
+      const maxWidth = getAvailableRightPanelWidth(workspace);
+      const minWidth = Math.min(MIN_RIGHT_PANEL_WIDTH, maxWidth);
+      const nextWidth = Math.max(minWidth, Math.min(maxWidth, panel.getBoundingClientRect().right - event.clientX));
+      rightPanelWidthRef.current = nextWidth;
+      setRightPanelWidth(nextWidth);
+    };
+
+    const onPointerEnd = (event: PointerEvent) => {
+      if (event.pointerId !== resizePointerIdRef.current) return;
+      resizePointerIdRef.current = null;
+      saveRightPanelWidth(rightPanelWidthRef.current);
+      setIsRightPanelResizing(false);
+    };
+
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerEnd);
+    window.addEventListener('pointercancel', onPointerEnd);
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerEnd);
+      window.removeEventListener('pointercancel', onPointerEnd);
+    };
+  }, [isRightPanelResizing, saveRightPanelWidth]);
+
+  const effectiveRightPanelWidth = Math.min(rightPanelWidth, rightPanelMaxWidth);
+  const rightPanelWidthStyle = {
+    '--dashboard-chat-right-panel-width': `${effectiveRightPanelWidth}px`,
+  } as CSSProperties;
+
+  const handlePanelResizeKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const workspace = workspaceRef.current;
+    if (!workspace) return;
+
+    const maxWidth = getAvailableRightPanelWidth(workspace);
+    const minWidth = Math.min(MIN_RIGHT_PANEL_WIDTH, maxWidth);
+    const step = event.shiftKey ? 40 : 16;
+    let nextWidth: number;
+
+    if (event.key === 'ArrowLeft') nextWidth = effectiveRightPanelWidth + step;
+    else if (event.key === 'ArrowRight') nextWidth = effectiveRightPanelWidth - step;
+    else if (event.key === 'Home') nextWidth = minWidth;
+    else if (event.key === 'End') nextWidth = maxWidth;
+    else return;
+
+    event.preventDefault();
+    saveRightPanelWidth(Math.max(minWidth, Math.min(maxWidth, nextWidth)));
+  };
+
   const [previewArtifact, setPreviewArtifact] = useState<Artifact | null>(null);
 
   // Active round tracking: which view message is currently selected for the right panel
@@ -3852,7 +3979,10 @@ const Playground: NextPage = () => {
               <Spin size='large' tip='加载对话历史...' />
             </div>
           ) : messages.length > 0 ? (
-            <div className='dashboard-chat-workspace flex-1 flex overflow-hidden'>
+            <div
+              ref={workspaceRef}
+              className={`dashboard-chat-workspace flex-1 flex overflow-hidden ${isRightPanelResizing ? 'dashboard-chat-panel-resizing' : ''}`}
+            >
               <div
                 className={`dashboard-chat-primary-panel ${rightPanelCollapsed ? 'dashboard-chat-panel-collapsed flex-1 max-w-[800px] border-r-0' : 'dashboard-chat-panel-open flex-[2] min-w-0 border-r border-gray-200/80 dark:border-gray-800'} flex flex-col overflow-hidden bg-white dark:bg-[#111217] relative`}
               >
@@ -4318,7 +4448,25 @@ const Playground: NextPage = () => {
                 )}
               </div>
               {/* Panel toggle handle — placed between panels to avoid overflow clipping */}
-              <div className='relative z-20 flex-shrink-0'>
+              <div className='dashboard-chat-panel-divider relative z-20 flex-shrink-0'>
+                <div
+                  className='dashboard-chat-panel-resize-handle'
+                  role='separator'
+                  aria-label='调整右侧面板宽度'
+                  aria-orientation='vertical'
+                  aria-valuemin={Math.min(MIN_RIGHT_PANEL_WIDTH, rightPanelMaxWidth)}
+                  aria-valuemax={rightPanelMaxWidth}
+                  aria-valuenow={effectiveRightPanelWidth}
+                  aria-hidden={rightPanelCollapsed}
+                  tabIndex={rightPanelCollapsed ? -1 : 0}
+                  onPointerDown={event => {
+                    if (rightPanelCollapsed || event.button !== 0) return;
+                    event.preventDefault();
+                    resizePointerIdRef.current = event.pointerId;
+                    setIsRightPanelResizing(true);
+                  }}
+                  onKeyDown={handlePanelResizeKeyDown}
+                />
                 <Tooltip title={rightPanelCollapsed ? t('expand_panel') : t('collapse_panel')} placement='left'>
                   <button
                     onClick={() => setRightPanelCollapsed(prev => !prev)}
@@ -4333,7 +4481,9 @@ const Playground: NextPage = () => {
                 </Tooltip>
               </div>
               <div
-                className={`dashboard-chat-context-panel ${rightPanelCollapsed ? 'w-0 min-w-0 overflow-hidden opacity-0 invisible' : 'flex-[3] min-w-0 overflow-hidden'} bg-[#f8f8fb] dark:bg-[#0f1114] flex flex-col`}
+                ref={rightPanelRef}
+                style={rightPanelWidthStyle}
+                className={`dashboard-chat-context-panel ${rightPanelCollapsed ? 'w-0 min-w-0 overflow-hidden opacity-0 invisible' : 'dashboard-chat-panel-open min-w-0 overflow-hidden'} bg-[#f8f8fb] dark:bg-[#0f1114] flex flex-col`}
               >
                 {(() => {
                   const activeViewMsg = messages.find(m => m.id === selectedViewMsgId && m.role === 'view');

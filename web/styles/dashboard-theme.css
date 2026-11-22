@@ -378,9 +378,9 @@ html[data-interface-style='dashboard']
 html[data-interface-style='dashboard']
   .dashboard-chat-host
   .dashboard-chat-primary-panel.dashboard-chat-panel-open {
-  flex: 0 1 auto !important;
-  width: min(56vw, 920px) !important;
-  max-width: min(56vw, 920px) !important;
+  flex: 1 1 0% !important;
+  width: auto !important;
+  max-width: none !important;
 }
 
 html[data-interface-style='dashboard'] .dashboard-chat-panel-toggle {
@@ -414,6 +414,12 @@ html[data-interface-style='dashboard'] .dashboard-chat-context-panel {
   background: transparent !important;
   box-shadow: none;
   z-index: 1;
+}
+
+html[data-interface-style='dashboard'] .dashboard-chat-context-panel.dashboard-chat-panel-open {
+  flex: 0 0 var(--dashboard-chat-right-panel-width) !important;
+  width: var(--dashboard-chat-right-panel-width) !important;
+  max-width: var(--dashboard-chat-right-panel-width) !important;
 }
 
 html[data-interface-style='dashboard'] .dashboard-chat-context-panel.w-0 {
@@ -723,11 +729,26 @@ html[data-interface-style='dashboard'] .dashboard-main-canvas .ant-select-focuse
     min-height: 0;
   }
 
+  html[data-interface-style='dashboard'] .dashboard-chat-context-panel.dashboard-chat-panel-open {
+    flex: none !important;
+    width: 100% !important;
+    max-width: none !important;
+  }
+
   html[data-interface-style='dashboard'] .dashboard-chat-panel-toggle {
     left: calc(100% - 10px);
     width: 22px !important;
     height: 44px !important;
     transform: translate(-100%, -50%) !important;
+  }
+
+  html[data-interface-style='dashboard'] .dashboard-chat-panel-divider {
+    width: 0;
+    flex-basis: 0;
+  }
+
+  html[data-interface-style='dashboard'] .dashboard-chat-panel-resize-handle {
+    display: none;
   }
 
   html[data-interface-style='dashboard'] .dashboard-chat-context-panel.w-0 {

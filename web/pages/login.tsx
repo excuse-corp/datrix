@@ -1,6 +1,6 @@
 import { resetAuthExpiryHandling } from '@/utils/auth-session';
 import { LockOutlined, UserOutlined } from '@ant-design/icons';
-import { Alert, Button, Form, Input, message } from 'antd';
+import { Button, Form, Input, message } from 'antd';
 import { useRouter } from 'next/router';
 import { useEffect, useState } from 'react';
 import './login.css';
@@ -67,16 +67,6 @@ export default function LoginPage() {
           </div>
           <h2 className='dataman-login-title'>登录 Datrix</h2>
           <p className='dataman-login-subtitle'>数据查询与分析平台</p>
-
-          {router.query.expired === '1' && (
-            <Alert
-              className='mb-5'
-              type='warning'
-              showIcon
-              message='登录状态已失效，请重新登录'
-              description='刚才未完成的操作不会自动重试；登录后会返回当前页面，请检查并重新提交。'
-            />
-          )}
 
           <Form layout='vertical' onFinish={loginLocal} requiredMark={false} className='dataman-login-form'>
             <Form.Item
