@@ -994,11 +994,10 @@ __name__ = "__main__"
         args_repr = repr(adapted_args)
         wrapper_code = f"""import sys
 import json
+import runpy
 
-sys.argv = ["script", json.dumps({args_repr})]
-__name__ = "__main__"
-
-{code}
+sys.argv = [{script_path!r}, json.dumps({args_repr})]
+runpy.run_path({script_path!r}, run_name="__main__")
 """
 
         try:

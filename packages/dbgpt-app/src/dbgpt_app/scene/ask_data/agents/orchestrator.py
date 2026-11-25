@@ -65,6 +65,7 @@ class AskDataOrchestrator:
         max_agents: int | None = None,
         sql_by_task: dict[str, str] | None = None,
         on_task_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        on_combine_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         authorized_scene_ids: list[str] | None = None,
         is_platform_admin: bool = True,
     ) -> QueryRunResult:
@@ -92,6 +93,7 @@ class AskDataOrchestrator:
                 max_agents=max_agents,
                 sql_by_task=sql_by_task,
                 on_task_event=on_task_event,
+                on_combine_event=on_combine_event,
                 authorized_scene_ids=authorized_scene_ids,
                 is_platform_admin=is_platform_admin,
             )
@@ -107,6 +109,7 @@ class AskDataOrchestrator:
         max_agents: int | None = None,
         sql_by_task: dict[str, str] | None = None,
         on_task_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        on_combine_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         authorized_scene_ids: list[str] | None = None,
         is_platform_admin: bool = True,
     ) -> QueryRunResult:
@@ -189,7 +192,11 @@ class AskDataOrchestrator:
                 result: Any | None = None,
                 error: dict[str, str] | None = None,
             ) -> None:
-                if on_task_event is None or task_started is None or task_started_at is None:
+                if (
+                    on_task_event is None
+                    or task_started is None
+                    or task_started_at is None
+                ):
                     return
                 ended_at = (
                     datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -341,14 +348,44 @@ class AskDataOrchestrator:
             if results
             else "failed"
         )
-        bundle = self.result_builder.build(
-            results=results,
-            snapshots={snapshot.scene_id: snapshot for snapshot in snapshots.values()},
-            mode=plan.combine.mode if plan.combine else "separate",
-            keys=plan.combine.keys if plan.combine else None,
-            derived_metrics=plan.combine.derived_metrics if plan.combine else None,
-            status=status,
-        )
+        # Task coroutines complete in arbitrary order. Use the validated plan
+        # order in the response and in the deterministic result combiner.
+        task_order = {task.task_id: index for index, task in enumerate(plan.tasks)}
+        results.sort(key=lambda item: task_order[item.task_id])
+        errors.sort(key=lambda item: task_order.get(item["task_id"], len(task_order)))
+        report_combine = on_combine_event if len(plan.tasks) > 1 and results else None
+        counts = {
+            "task_count": len(plan.tasks),
+            "result_count": len(results),
+            "error_count": len(errors),
+        }
+        if report_combine:
+            await report_combine({"status": "running", "result": counts})
+        try:
+            bundle = self.result_builder.build(
+                results=results,
+                snapshots={
+                    snapshot.scene_id: snapshot for snapshot in snapshots.values()
+                },
+                mode=plan.combine.mode if plan.combine and not errors else "separate",
+                keys=plan.combine.keys if plan.combine else None,
+                derived_metrics=plan.combine.derived_metrics if plan.combine else None,
+                status=status,
+            )
+        except Exception:
+            if report_combine:
+                await report_combine({"status": "failed", "result": counts})
+            raise
+        if report_combine:
+            await report_combine(
+                {
+                    "status": "done",
+                    "result": {
+                        **counts,
+                        "mode": bundle.combined.mode if bundle.combined else "separate",
+                    },
+                }
+            )
         return QueryRunResult(
             status=status,
             results=results,

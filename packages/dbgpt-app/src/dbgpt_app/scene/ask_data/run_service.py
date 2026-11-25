@@ -41,6 +41,7 @@ class RunExecutionService:
         entry_type: str = "main_agent",
         sql_by_task: dict[str, str] | None = None,
         on_task_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        on_combine_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         authorized_scene_ids: list[str] | None = None,
         is_platform_admin: bool = True,
         authz_version: int = 0,
@@ -148,6 +149,8 @@ class RunExecutionService:
                 execute_kwargs["sql_by_task"] = sql_by_task
             if on_task_event is not None:
                 execute_kwargs["on_task_event"] = on_task_event
+            if on_combine_event is not None:
+                execute_kwargs["on_combine_event"] = on_combine_event
             if authorized_scene_ids is not None:
                 execute_kwargs["authorized_scene_ids"] = authorized_scene_ids
                 execute_kwargs["is_platform_admin"] = is_platform_admin

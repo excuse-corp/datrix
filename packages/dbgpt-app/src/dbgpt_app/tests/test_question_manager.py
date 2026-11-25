@@ -45,3 +45,24 @@ def test_reject_by_conv_releases_only_matching_pending_questions():
     assert not second.event.is_set()
 
     assert manager.reject_by_conv("missing") == 0
+
+
+def test_reject_by_run_releases_only_questions_from_that_run():
+    manager = QuestionManager()
+    first = manager.create(
+        "conv-a", [{"question": "A"}], user_id="alice", run_id="run-a"
+    )
+    second = manager.create(
+        "conv-a", [{"question": "B"}], user_id="alice", run_id="run-b"
+    )
+    third = manager.create(
+        "conv-b", [{"question": "C"}], user_id="alice", run_id="run-a"
+    )
+
+    assert manager.reject_by_run("run-a", user_id="alice") == 2
+    assert first.rejected is True
+    assert first.event.is_set()
+    assert third.rejected is True
+    assert third.event.is_set()
+    assert second.rejected is False
+    assert not second.event.is_set()

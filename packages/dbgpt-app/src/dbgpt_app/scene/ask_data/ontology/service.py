@@ -13,6 +13,7 @@ from uuid import uuid4
 
 from ..query.capabilities import semantic_keys
 from ..scene.markdown import SemanticMarkdownParser
+from .display_graph import RULE_REFERENCE, with_display_references
 from .fragments import (
     build_scene_fragment,
     merge_graphs,
@@ -43,6 +44,7 @@ from .repository import (
     SqlOntologyRepository,
 )
 from .schemas import (
+    OntologyGraph,
     OntologyRevision,
     OntologyRevisionStatus,
     OntologySnapshot,
@@ -518,22 +520,17 @@ class OntologyLifecycleService:
         scene_snapshots: list[Any] | None = None,
     ) -> dict[str, Any]:
         current = self._revision(revision)
+        graph, _ = self._draft_graph(current, scene_snapshots)
         try:
             _, _, content, _, state = self._publication_parts(
                 current, scene_snapshots or []
             )
             current_content_hash = self._hash(content)
         except OntologyServiceError as exc:
-            graph_data = self.graph(
-                revision=revision,
-                user_id=user_id,
-                scene_snapshots=scene_snapshots,
-            )["graph"]
-            state = self._review_state_for_graph(
-                revision, self._graph_from_json(graph_data)
-            )
+            state = self._review_state_for_graph(revision, graph)
             current_content_hash = None
             state["blocking_issue"] = {"code": exc.code, "message": str(exc)}
+        state["items"].extend(self._rule_reference_reviews(revision, with_display_references(graph)))
         approval = self._latest_revision_approval(revision)
         state.update(
             {
@@ -672,6 +669,10 @@ class OntologyLifecycleService:
             raise OntologyConflictError(
                 "ONTOLOGY_REVIEW_TARGET_CHANGED",
                 "该对象在审核期间已发生变化，请刷新对象后重新审核。",
+            )
+        if item["object_type"] == RULE_REFERENCE:
+            raise OntologyServiceError(
+                "ONTOLOGY_RULE_REFERENCE_REVIEW_ONLY", "请使用驳回处理规则候选连线。"
             )
         cleaned_markdown = _remove_review_object_references(
             current.ontology_md,
@@ -1218,18 +1219,7 @@ class OntologyLifecycleService:
             if revision is not None
             else self.draft(user_id=user_id)
         )
-        if current.graph_json is None:
-            preview = self.preview(current.ontology_md)
-            graph = self._graph_from_json(preview["graph"])
-            issues = preview["issues"]
-        else:
-            graph = self._graph_from_json(current.graph_json)
-            issues = current.validation_issues
-        generated_graphs = [
-            build_scene_fragment(item) for item in (scene_snapshots or [])
-        ]
-        merged_graph = merge_graphs(graph, *generated_graphs)
-        merged_graph = self._without_excluded_objects(current.revision, merged_graph)
+        merged_graph, issues = self._draft_graph(current, scene_snapshots)
         review_state = self._review_state_for_graph(current.revision, merged_graph)
         rendered_graph = self._graph_with_review_status(
             merged_graph, review_state["items"]
@@ -1242,6 +1232,62 @@ class OntologyLifecycleService:
             "issues": issues,
             "layout": self.repository.get_layout(current.revision),
         }
+
+    def _draft_graph(
+        self, current: OntologyRevision, scene_snapshots: list[Any] | None
+    ) -> tuple[OntologyGraph, list[dict[str, Any]]]:
+        if current.graph_json is None:
+            preview = self.preview(current.ontology_md)
+            graph = self._graph_from_json(preview["graph"])
+            issues = preview["issues"]
+        else:
+            graph = self._graph_from_json(current.graph_json)
+            issues = current.validation_issues
+        generated_graphs = [
+            build_scene_fragment(item) for item in (scene_snapshots or [])
+        ]
+        merged_graph = merge_graphs(graph, *generated_graphs)
+        merged_graph = self._without_excluded_objects(current.revision, merged_graph)
+        return merged_graph, issues
+
+    def _rule_reference_reviews(
+        self, revision: int, display_graph: OntologyGraph
+    ) -> list[dict[str, Any]]:
+        references = OntologyGraph(
+            edges=[edge for edge in display_graph.edges if edge.type == RULE_REFERENCE]
+        )
+        return self._review_state_for_graph(revision, references)["items"]
+
+    def display_graph(
+        self,
+        graph_data: dict[str, Any],
+        *,
+        revision: int | None = None,
+        include_rule_mentions: bool = True,
+        scene_snapshots: list[Any] | None = None,
+    ) -> dict[str, Any]:
+        graph = self._graph_from_json(graph_data)
+        if scene_snapshots:
+            fragments = [build_scene_fragment(item) for item in scene_snapshots]
+            graph = merge_graphs(graph, *fragments)
+        graph = with_display_references(graph, include_rule_mentions=include_rule_mentions)
+        if revision is None or not include_rule_mentions:
+            return graph.model_dump(mode="json")
+
+        reviews = {
+            item["target_id"]: item["status"]
+            for item in self._rule_reference_reviews(revision, graph)
+        }
+        projected = graph.model_dump(mode="json")
+        projected["edges"] = [
+            edge
+            for edge in projected["edges"]
+            if reviews.get(edge["id"]) != "rejected"
+        ]
+        for edge in projected["edges"]:
+            if edge["id"] in reviews:
+                edge["data"]["review_status"] = reviews[edge["id"]]
+        return projected
 
     def save_layout(
         self, revision: int, layout: dict[str, Any], user_id: str
@@ -1460,9 +1506,7 @@ class OntologyLifecycleService:
             raise OntologyServiceError(str(exc), str(exc)) from exc
 
     @staticmethod
-    def _graph_from_json(value: dict[str, Any]):
-        from .schemas import OntologyGraph
-
+    def _graph_from_json(value: dict[str, Any]) -> OntologyGraph:
         return OntologyGraph.model_validate(value)
 
     @staticmethod

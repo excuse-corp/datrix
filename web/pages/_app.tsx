@@ -1,4 +1,5 @@
 import { ChatContext, ChatContextProvider } from '@/app/chat-context';
+import { ReactRunManagerProvider, useReactRunManager } from '@/app/react-run-manager';
 import SideBar from '@/components/layout/side-bar';
 import { installAxiosAuthRetry, installFetchAuthRetry, isAuthExpiryRedirecting } from '@/utils/auth-session';
 import { STORAGE_LANG_KEY, STORAGE_USERINFO_KEY } from '@/utils/constants/index';
@@ -11,7 +12,7 @@ import classNames from 'classnames';
 import type { AppProps } from 'next/app';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
-import React, { useContext, useEffect, useState } from 'react';
+import React, { useContext, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import 'reactflow/dist/style.css';
 import '../app/i18n';
@@ -85,7 +86,6 @@ function LayoutWrapper({ children }: { children: React.ReactNode }) {
       return;
     }
     let active = true;
-    setIsAuthenticated(false);
     fetch('/api/v1/auth/me', { credentials: 'same-origin' })
       .then(async response => {
         if (!response.ok) throw new Error('AUTH_REQUIRED');
@@ -238,14 +238,62 @@ function LayoutWrapper({ children }: { children: React.ReactNode }) {
   );
 }
 
+function PersistentMainPage({
+  Component,
+  pageProps,
+}: {
+  Component: AppProps['Component'];
+  pageProps: AppProps['pageProps'];
+}) {
+  const router = useRouter();
+  const runManager = useReactRunManager();
+  const mainPageRef = useRef<{
+    Component: AppProps['Component'];
+    pageProps: AppProps['pageProps'];
+  } | null>(null);
+  const isMainPage = router.pathname === '/';
+  const isPublicPage =
+    router.pathname === '/login' || router.pathname === '/setup' || router.pathname.startsWith('/share');
+
+  useEffect(() => {
+    if (isPublicPage) runManager.clear();
+  }, [isPublicPage, runManager]);
+
+  if (isPublicPage) {
+    mainPageRef.current = null;
+    return <Component {...pageProps} />;
+  }
+
+  if (isMainPage) {
+    mainPageRef.current = { Component, pageProps };
+  }
+
+  const mainPage = mainPageRef.current;
+  if (!mainPage) return <Component {...pageProps} />;
+
+  return (
+    <>
+      <div
+        className={`h-full min-h-0 w-full ${isMainPage ? 'flex-1' : ''}`}
+        style={isMainPage ? undefined : { display: 'none' }}
+      >
+        <mainPage.Component {...mainPage.pageProps} />
+      </div>
+      {!isMainPage && <Component {...pageProps} />}
+    </>
+  );
+}
+
 function MyApp({ Component, pageProps }: AppProps) {
   return (
     <ChatContextProvider>
-      <CssWrapper>
-        <LayoutWrapper>
-          <Component {...pageProps} />
-        </LayoutWrapper>
-      </CssWrapper>
+      <ReactRunManagerProvider>
+        <CssWrapper>
+          <LayoutWrapper>
+            <PersistentMainPage Component={Component} pageProps={pageProps} />
+          </LayoutWrapper>
+        </CssWrapper>
+      </ReactRunManagerProvider>
     </ChatContextProvider>
   );
 }

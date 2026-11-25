@@ -150,7 +150,7 @@ export default function SceneEditorForm({
             type='info'
             showIcon
             message='业务语义文档用于解释业务关系、粒度、口径、结果分析规则和边界。'
-            description='数据字典和业务语义文档同时为场景问数和全局本体提供原材料。本体只在查数完成后参与分析，不参与 SQL 生成。'
+            description='场景问数使用数据字典和已提供的业务语义。本体在查数完成后参与结果分析。'
           />
           <div className='min-w-0'>
             <div className='mb-3 flex items-center justify-between gap-3'>
@@ -177,16 +177,14 @@ export default function SceneEditorForm({
           <div className='min-w-0'>
             <div className='mb-3 flex items-center justify-between gap-3'>
               <div>
-                <h3 className='m-0 text-sm font-medium text-gray-900 dark:text-gray-100'>
-                  <span className='mr-1 text-red-500'>*</span>业务语义文档
-                </h3>
+                <h3 className='m-0 text-sm font-medium text-gray-900 dark:text-gray-100'>业务语义文档（选填）</h3>
                 <p className='mt-1 mb-0 text-xs text-gray-500'>业务关系、口径、默认解释和问数边界</p>
               </div>
               <Upload accept='.md' showUploadList={false} beforeUpload={importDocument('business_semantics_md')}>
                 <Button icon={<UploadOutlined />}>上传</Button>
               </Upload>
             </div>
-            <Form.Item name='business_semantics_md' rules={required('业务语义文档')} className='!mb-0'>
+            <Form.Item name='business_semantics_md' className='!mb-0'>
               <Input.TextArea
                 spellCheck={false}
                 className='!min-h-[420px] !resize-y !font-mono !text-[13px] !leading-6'

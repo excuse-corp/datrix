@@ -91,6 +91,14 @@ export type OntologyGraphResponse = {
   layout: Record<string, unknown>;
 };
 
+export type OntologyNeighborhoodResponse = {
+  revision: number;
+  center_node_id: string;
+  total_node_count: number;
+  total_edge_count: number;
+  graph: OntologyGraph;
+};
+
 export type OntologyReviewItem = {
   target_type: 'node' | 'edge';
   target_id: string;
@@ -222,6 +230,12 @@ export const getOntology = () =>
 
 export const getOntologyGraph = (revision?: number) =>
   request<OntologyGraphResponse>(`/graph${revision ? `?revision=${revision}` : ''}`);
+
+export const getOntologyGraphNeighborhood = (nodeId: string, revision?: number, nodeLimit = 120, edgeLimit = 300) => {
+  const params = new URLSearchParams({ node_id: nodeId, node_limit: String(nodeLimit), edge_limit: String(edgeLimit) });
+  if (revision) params.set('revision', String(revision));
+  return request<OntologyNeighborhoodResponse>(`/graph/neighborhood?${params.toString()}`);
+};
 
 export const previewOntology = (markdown: string) =>
   request<Pick<OntologyGraphResponse, 'valid' | 'graph' | 'prompt_projection' | 'issues'>>('/compile-preview', {

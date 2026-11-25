@@ -8,6 +8,7 @@ import {
   generateOntologyFromScenes,
   getOntology,
   getOntologyGraph,
+  getOntologyGraphNeighborhood,
   getOntologyNeo4jHealth,
   getOntologyReviewState,
   getOntologySnapshotSyncStatus,
@@ -265,7 +266,7 @@ export default function OntologyPage() {
     decision: 'confirmed' | 'rejected' | 'candidate',
     comment: string,
   ) => {
-    if (!draft) return;
+    if (!draft || changed) return;
     setSaving(true);
     try {
       const result = await reviewOntologyObject(draft.revision, {
@@ -471,30 +472,6 @@ export default function OntologyPage() {
           ].includes(type)
         ? 'analysis_explanations'
         : 'business_semantics';
-  const layerForEdge = (type: string): OntologyLayer =>
-    [
-      'scene_binding',
-      'provided_by',
-      'has_snapshot',
-      'declares_binding',
-      'maps_to',
-      'supported_by',
-      'from_document',
-      'reviews',
-    ].includes(type)
-      ? 'mapping_governance'
-      : [
-            'cross_scene_join',
-            'metric_relation',
-            'clarification_rule',
-            'applies_to_metric',
-            'applies_to_entity',
-            'from_metric',
-            'to_metric',
-            'requires',
-          ].includes(type)
-        ? 'analysis_explanations'
-        : 'business_semantics';
   const layerCounts = (graph?.nodes ?? []).reduce<Record<OntologyLayer, number>>(
     (counts, node) => {
       counts[layerForNode(node.type)] += 1;
@@ -505,20 +482,15 @@ export default function OntologyPage() {
   const reviewQueue = [...(reviewState?.items ?? [])]
     .filter(item => item.required && item.status !== 'confirmed')
     .sort((left, right) => Number(right.status === 'rejected') - Number(left.status === 'rejected'));
+  const ruleReferenceReviews = (reviewState?.items ?? []).filter(
+    item => item.object_type === 'rule_reference' && item.status !== 'confirmed',
+  );
+  const reviewingRuleReference = reviewTarget?.object_type === 'rule_reference';
   const reviewObjectDetails =
     reviewTarget?.object ??
     (reviewTarget?.target_type === 'node'
       ? graph?.nodes.find(node => node.id === reviewTarget.target_id)
       : graph?.edges.find(edge => edge.id === reviewTarget?.target_id));
-  const visibleGraph =
-    !graph || graphLayer === 'all'
-      ? graph
-      : (() => {
-          const edges = graph.edges.filter(edge => layerForEdge(edge.type) === graphLayer);
-          const includedIds = new Set(edges.flatMap(edge => [edge.source, edge.target]));
-          const nodes = graph.nodes.filter(node => layerForNode(node.type) === graphLayer || includedIds.has(node.id));
-          return { nodes, edges };
-        })();
   const publishStatusIcon = active ? (
     <Tooltip title={`已发布 v${active.revision}`}>
       <CheckCircleFilled className='text-[15px] text-emerald-500' />
@@ -801,6 +773,43 @@ export default function OntologyPage() {
             </div>
           </div>
         </div>
+        {ruleReferenceReviews.length > 0 && (
+          <details className='mx-4 mt-4 rounded-md border border-gray-200 p-4 dark:border-white/10'>
+            <summary className='cursor-pointer font-medium'>
+              规则引用审核 · {ruleReferenceReviews.filter(item => item.status === 'candidate').length} 项待确认
+            </summary>
+            <div className='mt-3 max-h-64 space-y-2 overflow-auto'>
+              {ruleReferenceReviews.map(item => {
+                const edge = item.object && 'source' in item.object ? item.object : undefined;
+                return (
+                  <div
+                    key={item.target_id}
+                    className='flex items-center justify-between gap-3 border-b border-gray-100 pb-2 dark:border-white/10'
+                  >
+                    <div>
+                      <span>{graph?.nodes.find(node => node.id === edge?.source)?.name}</span>
+                      <span className='mx-1 text-gray-400'>→</span>
+                      <span>{graph?.nodes.find(node => node.id === edge?.target)?.name}</span>
+                      <Tag className='ml-2' color={item.status === 'rejected' ? 'red' : 'gold'}>
+                        {item.status === 'rejected' ? '已驳回' : '待确认'}
+                      </Tag>
+                    </div>
+                    <Button
+                      size='small'
+                      disabled={changed}
+                      onClick={() => {
+                        setReviewTarget(item);
+                        setReviewComment('');
+                      }}
+                    >
+                      查看并审核
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          </details>
+        )}
         <div className='mx-4 mt-4 rounded-md border border-gray-200 p-4 dark:border-white/10'>
           <div className='mb-3 flex items-center justify-between'>
             <div>
@@ -937,28 +946,19 @@ export default function OntologyPage() {
                 <ApartmentOutlined className='text-blue-600' />
                 <span className='text-sm font-medium'>本体图谱</span>
               </div>
-              <div className='flex items-center gap-3'>
-                <Segmented<OntologyLayerView>
-                  size='small'
-                  value={graphLayer}
-                  onChange={setGraphLayer}
-                  options={[
-                    { value: 'all', label: '全部' },
-                    { value: 'business_semantics', label: `业务语义 ${layerCounts.business_semantics}` },
-                    { value: 'analysis_explanations', label: `分析解释 ${layerCounts.analysis_explanations}` },
-                    { value: 'mapping_governance', label: `映射治理 ${layerCounts.mapping_governance}` },
-                  ]}
-                />
-                <span className='text-xs text-gray-500'>布局独立于业务版本</span>
-              </div>
             </div>
             <div className='min-h-0 flex-1 p-3'>
-              <div className='h-[632px] rounded-md bg-slate-50 dark:bg-[#111217]'>
+              <div className='h-[720px] rounded-md bg-slate-50 dark:bg-[#111217]'>
                 <OntologyGraphCanvas
-                  graph={visibleGraph}
+                  graph={graph}
+                  graphLayer={graphLayer}
+                  onGraphLayerChange={setGraphLayer}
+                  graphRevision={draft?.revision}
+                  hasUnsavedGraph={changed}
                   layout={layout}
                   reviewState={reviewState}
                   onReviewObject={reviewObject}
+                  onLoadNeighborhood={nodeId => getOntologyGraphNeighborhood(nodeId, draft?.revision)}
                   focusTarget={focusTarget}
                   onFocusTargetHandled={clearFocusTarget}
                   onSaveLayout={async value => {
@@ -1061,13 +1061,15 @@ export default function OntologyPage() {
         ) : (
           <Alert type='warning' message='当前对象详情不可用，请刷新后重新审核。' />
         )}
-        <Alert
-          className='mt-4'
-          type='info'
-          showIcon
-          message='驳回与不纳入的区别'
-          description='驳回会保留对象并要求修改；不纳入本体会从当前草稿删除对象及关联引用。两种操作都需要填写原因。'
-        />
+        {!reviewingRuleReference && (
+          <Alert
+            className='mt-4'
+            type='info'
+            showIcon
+            message='驳回与不纳入的区别'
+            description='驳回会保留对象并要求修改；不纳入本体会从当前草稿删除对象及关联引用。两种操作都需要填写原因。'
+          />
+        )}
         <Input.TextArea
           className='mt-4'
           aria-label='审核意见'
@@ -1093,23 +1095,31 @@ export default function OntologyPage() {
           >
             驳回
           </Button>
-          <Popconfirm
-            title='确认将对象从当前本体草稿移除？'
-            okText='移除'
-            cancelText='取消'
-            onConfirm={() => reviewTarget && void excludeObject(reviewTarget, reviewComment)}
-          >
-            <Button
-              danger
-              type='primary'
-              ghost
-              loading={saving}
-              disabled={!reviewObjectDetails || changed || !reviewComment.trim()}
-            >
-              不纳入本体
+          {reviewingRuleReference && reviewTarget?.status === 'rejected' && (
+            <Button disabled={saving || changed} onClick={() => void reviewObject(reviewTarget, 'candidate', '')}>
+              恢复待确认
             </Button>
-          </Popconfirm>
+          )}
+          {!reviewingRuleReference && (
+            <Popconfirm
+              title='确认将对象从当前本体草稿移除？'
+              okText='移除'
+              cancelText='取消'
+              onConfirm={() => reviewTarget && void excludeObject(reviewTarget, reviewComment)}
+            >
+              <Button
+                danger
+                type='primary'
+                ghost
+                loading={saving}
+                disabled={!reviewObjectDetails || changed || !reviewComment.trim()}
+              >
+                不纳入本体
+              </Button>
+            </Popconfirm>
+          )}
           <Button
+            disabled={reviewingRuleReference && reviewTarget?.status === 'rejected'}
             onClick={() => {
               if (!reviewTarget) return;
               setMode('graph');

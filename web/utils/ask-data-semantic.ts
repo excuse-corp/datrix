@@ -90,7 +90,7 @@ export type SceneEditorValues = {
   data_source_name: string;
   view_name: string;
   data_dictionary_md: string;
-  business_semantics_md: string;
+  business_semantics_md?: string;
   query_limits: QueryLimits;
 };
 
@@ -133,7 +133,7 @@ export const buildSemanticMarkdown = (sceneId: string, values: SceneEditorValues
     BUSINESS_SEMANTICS_MARKER,
     '# 业务语义说明',
     '',
-    values.business_semantics_md.trim(),
+    values.business_semantics_md?.trim() ?? '',
   ].join('\n');
   return `---\n${stringify(config, { lineWidth: 0 }).trim()}\n---\n\n${body}\n`;
 };

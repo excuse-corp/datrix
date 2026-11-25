@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import Any
 
+from ..query.capabilities import metric_definition as snapshot_metric_definition
+from ..query.capabilities import query_metrics
 from ..query.query_spec import SceneResult
 from ..schemas.combine import CombinedColumn, CombinedResult
 from ..schemas.snapshot import Snapshot
-from ..query.capabilities import metric_definition as snapshot_metric_definition
-from ..query.capabilities import query_metrics
 
 
 class ResultCombiner:
@@ -106,6 +107,13 @@ class ResultCombiner:
                         "message": "Time ranges are not compatible",
                     }
                 )
+            if result.time_basis != first.time_basis:
+                warnings.append(
+                    {
+                        "code": "TIME_BASIS_MISMATCH",
+                        "message": "Time bases are not compatible",
+                    }
+                )
             if result.grain != first.grain:
                 warnings.append(
                     {
@@ -127,6 +135,18 @@ class ResultCombiner:
                     "message": "Requested key is not present in every scene result",
                 }
             )
+        elif keys and not all(
+            self._has_unique_row_keys(result, keys) for result in results
+        ):
+            warnings.append(
+                {
+                    "code": "INVALID_ROW_KEYS",
+                    "message": (
+                        "Alignment requires complete and unique row keys "
+                        "in each result"
+                    ),
+                }
+            )
         if not keys:
             warnings.append(
                 {
@@ -145,43 +165,54 @@ class ResultCombiner:
         return True
 
     @staticmethod
+    def _has_unique_row_keys(result: SceneResult, keys: list[str]) -> bool:
+        seen = set()
+        for row in result.rows:
+            identity = tuple(row.get(key) for key in keys)
+            if any(value is None for value in identity):
+                return False
+            try:
+                if identity in seen:
+                    return False
+                seen.add(identity)
+            except TypeError:
+                return False
+        return True
+
+    @staticmethod
     def _align(
         results: list[SceneResult], keys: list[str], snapshots: dict[str, Snapshot]
     ) -> tuple[list[dict[str, Any]], list[CombinedColumn]]:
         merged: dict[tuple[Any, ...], dict[str, Any]] = {}
         columns = [CombinedColumn(key=key, name=key, type="dimension") for key in keys]
-        metric_occurrences: dict[str, int] = {}
-        metric_signatures: dict[str, set[tuple[Any, ...]]] = {}
+        metric_occurrences = Counter(
+            column.key
+            for result in results
+            for column in result.columns
+            if column.type == "metric"
+        )
+        scene_occurrences = Counter(result.scene_id for result in results)
+        used_keys = set(keys)
         for result in results:
-            for column in result.columns:
-                if column.type == "metric":
-                    metric_occurrences[column.key] = (
-                        metric_occurrences.get(column.key, 0) + 1
-                    )
-                    metadata = {item["key"]: item for item in query_metrics(snapshots[result.scene_id])}
-                    definition = metadata.get(column.key, {})
-                    metric_signatures.setdefault(column.key, set()).add(
-                        (
-                            definition.get("name"),
-                            definition.get("unit"),
-                            definition.get("aggregation"),
-                        )
-                    )
-        for result in results:
-            metric_keys = {
-                column.key for column in result.columns if column.type == "metric"
+            metadata = {
+                item["key"]: item for item in query_metrics(snapshots[result.scene_id])
             }
-            metadata = {item["key"]: item for item in query_metrics(snapshots[result.scene_id])}
-            for metric_key in metric_keys:
+            metric_output_keys = {}
+            for column in result.columns:
+                if column.type != "metric":
+                    continue
+                metric_key = column.key
                 item = metadata.get(metric_key, {})
-                output_key = (
-                    f"{result.scene_id}__{metric_key}"
-                    if (
-                        metric_occurrences.get(metric_key, 0) > 1
-                        and len(metric_signatures.get(metric_key, set())) > 1
-                    )
-                    else metric_key
-                )
+                output_key = metric_key
+                if metric_occurrences[metric_key] > 1:
+                    prefix = result.scene_id
+                    if scene_occurrences[result.scene_id] > 1:
+                        prefix = f"{prefix}__{result.task_id}"
+                    output_key = f"{prefix}__{metric_key}"
+                while output_key in used_keys:
+                    output_key = f"{result.task_id}__{output_key}"
+                used_keys.add(output_key)
+                metric_output_keys[metric_key] = output_key
                 columns.append(
                     CombinedColumn(
                         key=output_key,
@@ -196,15 +227,7 @@ class ResultCombiner:
                 row = merged.setdefault(
                     identity, {key: source_row.get(key) for key in keys}
                 )
-                for metric_key in metric_keys:
-                    output_key = (
-                        f"{result.scene_id}__{metric_key}"
-                        if (
-                            metric_occurrences.get(metric_key, 0) > 1
-                            and len(metric_signatures.get(metric_key, set())) > 1
-                        )
-                        else metric_key
-                    )
+                for metric_key, output_key in metric_output_keys.items():
                     row[output_key] = source_row.get(metric_key)
         return list(merged.values()), columns
 

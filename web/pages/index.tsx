@@ -1,4 +1,5 @@
 import { ChatContext } from '@/app/chat-context';
+import { useReactRunManager } from '@/app/react-run-manager';
 import ModelSelector from '@/components/chat/header/model-selector';
 import { ColumnAnalysis, PreprocessingResult, analyzeDataset } from '@/new-components/analysis';
 import { ChartConfig, ChartType } from '@/new-components/charts';
@@ -183,6 +184,7 @@ const hasAskDataSceneReference = (...values: unknown[]): boolean =>
 const getAskDataStageDisplay = (stage?: unknown, sceneNameById: AskDataSceneNameLookup = {}): string => {
   const stageText = textValue(stage);
   if (!stageText) return '';
+  if (stageText === 'combine') return '合并查数结果';
   if (stageText === 'query') return '业务问数';
   if (stageText === 'routing') return '业务场景语义选择';
   if (stageText === 'planning') return '业务场景规划';
@@ -930,6 +932,45 @@ interface ActiveRun {
   pendingQuestionRequestId?: string | null;
   taskPlanVersion?: { planId: string; revision: number; sequence: number };
   seenTaskPlanIds: Set<string>;
+  terminatedStepIds: Set<string>;
+  bufferedEvents: any[];
+  processPayload?: (payload: any) => void;
+  completed?: boolean;
+}
+
+interface ConversationSurfaceSnapshot {
+  messages: ChatMessage[];
+  executionMap: Record<string, any>;
+  artifacts: Artifact[];
+  taskPlan: TaskItem[];
+  pendingQuestion: PlaygroundPendingQuestion | null;
+  streamingSummary: string;
+  summaryComplete: boolean;
+  activeMessageId: string | null;
+  activeViewMsgId: string | null;
+  rightPanelTab: RightPanelTab;
+  rightPanelView: PanelView;
+  selectedStepId: string | null;
+  previewArtifact: Artifact | null;
+  chartPreview: ChartPreview | null;
+  dataAnalysis: ColumnAnalysis[] | null;
+  createdSkillNames: Record<string, string>;
+  filePreview: FilePreview | null;
+  filePreviewError: string | null;
+  uploadedFilePath: string | null;
+  contextStatus: ContextStatus;
+}
+
+interface PlaygroundPendingQuestion {
+  request_id: string;
+  conv_id: string;
+  questions: Array<{
+    question: string;
+    header?: string;
+    options?: Array<{ label: string; description?: string }>;
+    multiple?: boolean;
+    custom?: boolean;
+  }>;
 }
 
 const getTodoProgressMeta = (tasks: TaskItem[]): NonNullable<ExecutionStep['todoMeta']> => {
@@ -1240,6 +1281,7 @@ const convertToManusFormat = (
 
 const Playground: NextPage = () => {
   const router = useRouter();
+  const runManager = useReactRunManager();
   const { t: translate } = useTranslation();
   const t = translate as unknown as (key: string, options?: Record<string, unknown>) => string;
   const { model, setModel } = useContext(ChatContext);
@@ -1465,34 +1507,88 @@ const Playground: NextPage = () => {
   const [activeViewMsgId, setActiveViewMsgId] = useState<string | null>(null);
 
   // Track step IDs that belong to a terminate action so we can suppress them
-  const terminatedStepIdsRef = useRef<Set<string>>(new Set());
   const preloadedFilePathRef = useRef<string | null>(null);
   const historyLoadSeqRef = useRef(0);
   const activeRunRef = useRef<ActiveRun | null>(null);
+  const selectedConversationRef = useRef<string | null>(null);
+  const currentSurfaceRef = useRef<ConversationSurfaceSnapshot | null>(null);
 
   const [historyLoading, setHistoryLoading] = useState(false);
   const [contextStatus, setContextStatus] = useState<ContextStatus>(() => getInitialContextStatus());
-  const [pendingQuestion, setPendingQuestion] = useState<{
-    request_id: string;
-    conv_id: string;
-    questions: Array<{
-      question: string;
-      header?: string;
-      options?: Array<{ label: string; description?: string }>;
-      multiple?: boolean;
-      custom?: boolean;
-    }>;
-  } | null>(null);
+  const [pendingQuestion, setPendingQuestion] = useState<PlaygroundPendingQuestion | null>(null);
   const [taskPlan, setTaskPlan] = useState<TaskItem[]>([]);
 
+  useEffect(() => {
+    selectedConversationRef.current = conversationId;
+  }, [conversationId]);
+
+  useEffect(() => {
+    const conversationRun = runManager.findByConversation(conversationId);
+    activeRunRef.current = conversationRun?.detached ? null : (conversationRun as ActiveRun | null);
+    runManager.activateConversation(conversationId);
+    setLoading(Boolean(conversationRun));
+  }, [conversationId, runManager]);
+
+  currentSurfaceRef.current = {
+    messages,
+    executionMap,
+    artifacts,
+    taskPlan,
+    pendingQuestion,
+    streamingSummary,
+    summaryComplete: _summaryComplete,
+    activeMessageId,
+    activeViewMsgId,
+    rightPanelTab: _rightPanelTab,
+    rightPanelView,
+    selectedStepId,
+    previewArtifact,
+    chartPreview,
+    dataAnalysis: _dataAnalysis,
+    createdSkillNames,
+    filePreview,
+    filePreviewError: _filePreviewError,
+    uploadedFilePath,
+    contextStatus,
+  };
+
+  const cacheCurrentSurface = useCallback(
+    (convUid: string | null) => {
+      const surface = currentSurfaceRef.current;
+      if (convUid && surface) runManager.cacheSurface(convUid, surface);
+    },
+    [runManager],
+  );
+
+  const restoreSurface = useCallback((surface: ConversationSurfaceSnapshot) => {
+    setMessages(surface.messages);
+    setExecutionMap(surface.executionMap);
+    setArtifacts(surface.artifacts);
+    setTaskPlan(surface.taskPlan);
+    setPendingQuestion(surface.pendingQuestion);
+    setStreamingSummary(surface.streamingSummary);
+    setSummaryComplete(surface.summaryComplete);
+    setActiveMessageId(surface.activeMessageId);
+    setActiveViewMsgId(surface.activeViewMsgId);
+    setRightPanelTab(surface.rightPanelTab);
+    setRightPanelView(surface.rightPanelView);
+    setSelectedStepId(surface.selectedStepId);
+    setPreviewArtifact(surface.previewArtifact);
+    setChartPreview(surface.chartPreview);
+    setDataAnalysis(surface.dataAnalysis);
+    setCreatedSkillNames(surface.createdSkillNames);
+    setFilePreview(surface.filePreview);
+    setFilePreviewError(surface.filePreviewError);
+    setUploadedFilePath(surface.uploadedFilePath);
+    setContextStatus(surface.contextStatus);
+    setLoading(surface.messages.some(msg => msg.role === 'view' && msg.thinking));
+  }, []);
+
   const resetConversationSurface = useCallback(() => {
-    const run = activeRunRef.current;
-    if (run) {
-      run.cancelled = true;
-      run.reader?.cancel().catch(() => undefined);
-      run.controller.abort();
-      activeRunRef.current = null;
-    }
+    cacheCurrentSurface(selectedConversationRef.current);
+    selectedConversationRef.current = null;
+    activeRunRef.current = null;
+    runManager.setActiveConversation(null);
     setMessages([]);
     setQuery('');
     setExecutionMap({});
@@ -1513,7 +1609,18 @@ const Playground: NextPage = () => {
     setTaskPlan([]);
     setSelectedStepId(null);
     setPreviewArtifact(null);
-  }, []);
+    setLoading(false);
+  }, [cacheCurrentSurface, runManager]);
+
+  useEffect(
+    () => () => {
+      const convUid = selectedConversationRef.current;
+      cacheCurrentSurface(convUid);
+      runManager.detachConversation(convUid);
+      activeRunRef.current = null;
+    },
+    [cacheCurrentSurface, runManager],
+  );
 
   const replyQuestion = useCallback(async (requestId: string, answers: string[][]) => {
     try {
@@ -1683,12 +1790,13 @@ const Playground: NextPage = () => {
     if (run.cancelled) return;
     run.cancelled = true;
     requestBackendRunCancel(run, questionRequestId);
+    runManager.remove(run.runId);
     run.reader?.cancel().catch(() => undefined);
     run.controller.abort();
     activeRunRef.current = null;
     markRunCancelled(run.responseId);
     notifyChatDialogueRefresh();
-  }, [conversationId, markRunCancelled, pendingQuestion?.request_id, requestBackendRunCancel]);
+  }, [conversationId, markRunCancelled, pendingQuestion?.request_id, requestBackendRunCancel, runManager]);
 
   const normalizeText = (value: unknown): string => {
     if (typeof value === 'string') return value;
@@ -1765,7 +1873,7 @@ const Playground: NextPage = () => {
   }, [messages]);
 
   useEffect(() => {
-    if (!router.isReady) return;
+    if (!router.isReady || router.pathname !== '/') return;
     const rawConvId = router.query.id;
     const convId = Array.isArray(rawConvId) ? rawConvId[0] : rawConvId;
     if (convId && convId !== conversationId) {
@@ -2477,6 +2585,11 @@ const Playground: NextPage = () => {
       return;
     }
     if (!inputQuery.trim() && effectiveFiles.length === 0) return;
+    if (conversationId && runManager.findByConversation(conversationId)) {
+      setLoading(true);
+      message.info('此会话已有任务正在运行，请等待完成或停止任务。');
+      return;
+    }
 
     let finalQuery = inputQuery;
     const appCode = 'chat_react_agent';
@@ -2652,12 +2765,15 @@ const Playground: NextPage = () => {
       runId,
       cancelled: false,
       seenTaskPlanIds: new Set(),
+      terminatedStepIds: new Set(),
+      bufferedEvents: [],
     };
     activeRunRef.current = activeRun;
+    runManager.register(activeRun);
+    runManager.activateConversation(currentConvId);
 
-    const isCurrentRun = () => activeRunRef.current?.runId === runId && !activeRunRef.current.cancelled;
+    const isCurrentRun = () => !activeRun.cancelled && !activeRun.completed;
 
-    terminatedStepIdsRef.current.clear();
     setExecutionMap(prev => ({
       ...prev,
       [responseId]: {
@@ -2671,8 +2787,6 @@ const Playground: NextPage = () => {
     setActiveMessageId(responseId);
 
     const settleResponseState = (runningStepStatus: 'done' | 'failed' | 'cancelled' = 'done') => {
-      const stillCurrent = activeRunRef.current?.runId === runId;
-      if (!stillCurrent && runningStepStatus !== 'cancelled') return;
       setExecutionMap(prev => {
         const current = prev[responseId];
         if (!current) return prev;
@@ -2685,10 +2799,10 @@ const Playground: NextPage = () => {
       setMessages(prev =>
         prev.map(msg => (msg.id === responseId && msg.role === 'view' ? { ...msg, thinking: false } : msg)),
       );
-      if (stillCurrent) {
+      if (activeRunRef.current?.runId === runId) {
         activeRunRef.current = null;
       }
-      setLoading(false);
+      if (selectedConversationRef.current === currentConvId) setLoading(false);
     };
 
     const applyRunOutcome = (payload: any) => {
@@ -2744,6 +2858,17 @@ const Playground: NextPage = () => {
         signal: controller.signal,
       });
 
+      if (!response.ok) {
+        const errorPayload = await response.json().catch(() => null);
+        const detail =
+          typeof errorPayload?.detail === 'string'
+            ? errorPayload.detail
+            : typeof errorPayload?.detail?.message === 'string'
+              ? errorPayload.detail.message
+              : errorPayload?.message || response.statusText;
+        throw new Error(detail || `HTTP ${response.status}`);
+      }
+
       if (!response.body) {
         throw new Error('No response body');
       }
@@ -2753,17 +2878,8 @@ const Playground: NextPage = () => {
       const decoder = new TextDecoder('utf-8');
       let buffer = '';
 
-      const processEvent = (raw: string) => {
-        if (!raw.startsWith('data:')) return;
-        const data = raw.slice(5).trim();
-        if (!data) return;
-        let payload: any;
-        try {
-          payload = JSON.parse(data);
-        } catch (_err) {
-          return;
-        }
-        if (!isCurrentRun()) return;
+      const processPayload = (payload: any) => {
+        if (activeRun.cancelled) return;
         if (payload.type === 'context.status') {
           const budget = Number(payload.budget ?? 0);
           if (!Number.isFinite(budget) || budget <= 0) {
@@ -3155,14 +3271,15 @@ const Playground: NextPage = () => {
             return;
           }
           activeRun.cancelled = true;
-          activeRunRef.current = null;
+          if (activeRunRef.current?.runId === runId) activeRunRef.current = null;
+          runManager.remove(runId);
           markRunCancelled(responseId);
           notifyChatDialogueRefresh();
           return;
         }
         if (payload.type === 'step.start') {
           const id = payload.id || `${payload.step}`;
-          if (terminatedStepIdsRef.current.has(id)) return;
+          if (activeRun.terminatedStepIds.has(id)) return;
           setExecutionMap(prev => {
             const current = prev[responseId] || {
               steps: [],
@@ -3225,7 +3342,7 @@ const Playground: NextPage = () => {
           setActiveMessageId(responseId);
         } else if (payload.type === 'step.meta') {
           if (payload.action && payload.action.toLowerCase() === 'terminate') {
-            terminatedStepIdsRef.current.add(payload.id);
+            activeRun.terminatedStepIds.add(payload.id);
             setExecutionMap(prev => {
               const current = prev[responseId];
               if (!current) return prev;
@@ -3324,7 +3441,7 @@ const Playground: NextPage = () => {
             };
           });
         } else if (payload.type === 'step.output') {
-          if (terminatedStepIdsRef.current.has(payload.id || '')) return;
+          if (activeRun.terminatedStepIds.has(payload.id || '')) return;
           setExecutionMap(prev => {
             const current = prev[responseId];
             if (!current) return prev;
@@ -3339,7 +3456,7 @@ const Playground: NextPage = () => {
           });
         } else if (payload.type === 'step.chunk') {
           const id = payload.id;
-          if (terminatedStepIdsRef.current.has(id || '')) return;
+          if (activeRun.terminatedStepIds.has(id || '')) return;
           setExecutionMap(prev => {
             const current = prev[responseId];
             if (!current) return prev;
@@ -3360,7 +3477,7 @@ const Playground: NextPage = () => {
           // not during streaming — to avoid showing intermediate outputs as artifacts
         } else if (payload.type === 'step.done') {
           const id = payload.id;
-          if (terminatedStepIdsRef.current.has(id || '')) return;
+          if (activeRun.terminatedStepIds.has(id || '')) return;
           setExecutionMap(prev => {
             const current = prev[responseId];
             if (!current) return prev;
@@ -3575,6 +3692,21 @@ const Playground: NextPage = () => {
         }
       };
 
+      activeRun.processPayload = processPayload;
+
+      const processEvent = (raw: string) => {
+        if (!raw.startsWith('data:')) return;
+        const data = raw.slice(5).trim();
+        if (!data) return;
+        let payload: any;
+        try {
+          payload = JSON.parse(data);
+        } catch (_err) {
+          return;
+        }
+        runManager.dispatch(runId, payload);
+      };
+
       // eslint-disable-next-line no-constant-condition
       while (true) {
         if (!isCurrentRun()) break;
@@ -3589,31 +3721,85 @@ const Playground: NextPage = () => {
       if (buffer.trim() && isCurrentRun()) {
         processEvent(buffer);
       }
-      if (isCurrentRun()) {
+      if (isCurrentRun() && selectedConversationRef.current === currentConvId) {
         settleResponseState();
-        notifyChatDialogueRefresh();
       }
+      if (isCurrentRun()) notifyChatDialogueRefresh();
+      runManager.complete(runId);
     } catch (err: any) {
       if (err?.name === 'AbortError' || activeRun.cancelled) {
-        markRunCancelled(responseId);
+        runManager.remove(runId);
+        if (selectedConversationRef.current === currentConvId) markRunCancelled(responseId);
         return;
       }
       if (!isCurrentRun()) return;
-      settleResponseState('failed');
-      notifyChatDialogueRefresh();
-      message.error(err?.message || 'Failed to get response');
-      setMessages(prev => {
-        const newMessages = [...prev];
-        const lastMsg = newMessages[newMessages.length - 1];
-        if (lastMsg && lastMsg.role === 'view') {
-          lastMsg.context = err?.message || 'Error occurred';
-          lastMsg.thinking = false;
-          lastMsg.runStatus = 'failed';
-          lastMsg.terminationReason = 'frontend_exception';
-          lastMsg.errorMessage = err?.message || 'Failed to get response';
+      const errorMessage = err?.message || 'Failed to get response';
+      const updateFailedSnapshot = (snapshot: ConversationSurfaceSnapshot) => {
+        snapshot.messages = snapshot.messages.map(msg =>
+          msg.id === responseId && msg.role === 'view'
+            ? {
+                ...msg,
+                context: errorMessage,
+                thinking: false,
+                runStatus: 'failed',
+                terminationReason: 'frontend_exception',
+                errorMessage,
+              }
+            : msg,
+        );
+        const execution = snapshot.executionMap[responseId];
+        if (execution) {
+          snapshot.executionMap = {
+            ...snapshot.executionMap,
+            [responseId]: {
+              ...execution,
+              steps: execution.steps.map((step: ExecutionStep) =>
+                step.status === 'running' ? { ...step, status: 'failed' } : step,
+              ),
+            },
+          };
         }
-        return newMessages;
-      });
+      };
+
+      if (activeRun.processPayload) {
+        runManager.dispatch(runId, {
+          type: 'run.failed',
+          status: 'failed',
+          termination_reason: 'frontend_exception',
+          error_message: errorMessage,
+        });
+        runManager.dispatch(runId, {
+          type: 'final',
+          status: 'failed',
+          termination_reason: 'frontend_exception',
+          error_message: errorMessage,
+          content: errorMessage,
+        });
+      } else {
+        if (selectedConversationRef.current === currentConvId) {
+          settleResponseState('failed');
+          setMessages(prev =>
+            prev.map(msg =>
+              msg.id === responseId && msg.role === 'view'
+                ? {
+                    ...msg,
+                    context: errorMessage,
+                    thinking: false,
+                    runStatus: 'failed',
+                    terminationReason: 'frontend_exception',
+                    errorMessage,
+                  }
+                : msg,
+            ),
+          );
+        } else {
+          const snapshot = runManager.getSurface<ConversationSurfaceSnapshot>(currentConvId);
+          if (snapshot) updateFailedSnapshot(snapshot);
+        }
+      }
+      if (selectedConversationRef.current === currentConvId) message.error(errorMessage);
+      notifyChatDialogueRefresh();
+      runManager.complete(runId);
     }
   };
 
@@ -3868,10 +4054,16 @@ const Playground: NextPage = () => {
   const loadConversation = async (convUid: string) => {
     const requestSeq = historyLoadSeqRef.current + 1;
     historyLoadSeqRef.current = requestSeq;
+    const cachedSurface = runManager.getSurface<ConversationSurfaceSnapshot>(convUid);
+    const hasConversationRun = runManager.hasConversationRun(convUid);
     setHistoryLoading(true);
     setConversationId(convUid);
     resetConversationSurface();
     try {
+      if (cachedSurface && hasConversationRun) {
+        restoreSurface(cachedSurface);
+        return;
+      }
       const res: any = await axios.get(`/api/v1/chat/dialogue/messages/history?con_uid=${convUid}`);
       if (historyLoadSeqRef.current !== requestSeq) return;
       let msgList: any[] | null = null;
@@ -3884,6 +4076,8 @@ const Playground: NextPage = () => {
       } else if (Array.isArray(res)) {
         msgList = res;
       }
+      runManager.deleteSurface(convUid);
+      runManager.discardCompletedRuns(convUid);
       restoreFromHistory(
         (msgList || []).map((m: any) => ({
           role: m.role,
@@ -3894,6 +4088,11 @@ const Playground: NextPage = () => {
       );
     } catch (e) {
       if (historyLoadSeqRef.current !== requestSeq) return;
+      if (cachedSurface) {
+        restoreSurface(cachedSurface);
+        message.warning('历史消息加载失败，已恢复当前会话缓存。');
+        return;
+      }
       console.error('Failed to load conversation', e);
       message.error('加载历史对话失败');
     } finally {
@@ -3911,13 +4110,15 @@ const Playground: NextPage = () => {
   useEffect(() => {
     if (!conversationId || !hasRestoredPendingRun || activeRunRef.current) return;
     const timer = window.setInterval(() => {
-      void loadConversation(conversationId);
+      if (!runManager.findByConversation(conversationId)) {
+        void loadConversation(conversationId);
+      }
     }, 4000);
     return () => window.clearInterval(timer);
     // loadConversation is intentionally omitted: it is recreated each render and
     // the polling target is fully determined by conversationId.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversationId, hasRestoredPendingRun]);
+  }, [conversationId, hasRestoredPendingRun, runManager]);
 
   const _QuickAction = ({ icon, text, onClick }: { icon: any; text: string; onClick?: () => void }) => (
     <div

@@ -7,9 +7,44 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List
 
+from dbgpt.agent.core.action.base import ActionOutput
 from dbgpt.agent.resource.tool.base import tool
 
 logger = logging.getLogger(__name__)
+
+
+async def _build_dashboard_report(report: dict, conv_id: str) -> str:
+    from dbgpt._private.config import Config
+    from dbgpt.agent.skill.manage import get_skill_manager
+    from dbgpt.configs.model_config import PILOT_PATH
+    from dbgpt_app.openapi.api_v1.tools.skill_tools import _skill_unavailable_message
+
+    skill_name = "dashboard-data-report"
+    manager = get_skill_manager(Config().SYSTEM_APP)
+    unavailable = _skill_unavailable_message(
+        skill_name, manager._get_skill_path(skill_name)
+    )
+    if unavailable:
+        raise ValueError(unavailable)
+
+    output_dir = Path(PILOT_PATH) / "tmp" / conv_id
+    result = await manager.execute_skill_script_file(
+        skill_name,
+        "build_report.py",
+        {"data": report.get("data"), "calcs": report.get("calcs", {})},
+        output_dir=str(output_dir),
+    )
+    chunks = json.loads(result)["chunks"]
+    if len(chunks) != 1:
+        raise ValueError("\n".join(item["content"] for item in chunks))
+    try:
+        path = Path(json.loads(chunks[0]["content"])["file_path"]).resolve()
+        path.relative_to(output_dir.resolve())
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(chunks[0]["content"]) from exc
+    if not path.is_file():
+        raise ValueError("报告文件未生成")
+    return str(path)
 
 
 def make_html_interpreter(react_state: Dict[str, Any], skills_dir: str):
@@ -26,7 +61,10 @@ def make_html_interpreter(react_state: Dict[str, Any], skills_dir: str):
             "如果正在使用技能（skill），可以用模板模式："
             '{"template_path": "技能名/templates/模板.html", '
             '"data": {"KEY": "值"}, "title": "标题"}。'
-            '也可以用文件模式：{"file_path": "/path/to/report.html"}'
+            '也可以用文件模式：{"file_path": "/path/to/report.html"}。'
+            'dashboard-data-report 技能可使用 {"dashboard_report": {"data": {...}, '
+            '"calcs": {...}, "brief_delivery": true}, "title": "标题"}，'
+            "一次计算、生成、检查并展示报告。"
         )
     )
     async def html_interpreter(
@@ -35,11 +73,27 @@ def make_html_interpreter(react_state: Dict[str, Any], skills_dir: str):
         file_path: str = "",
         template_path: str = "",
         data: dict | str = None,
-    ) -> str:
+        dashboard_report: dict | None = None,
+    ) -> str | ActionOutput:
         """Render HTML as an interactive web report."""
         from dbgpt.configs.model_config import STATIC_MESSAGE_IMG_PATH
 
         skills_path = Path(skills_dir).expanduser().resolve()
+        react_state["brief_dashboard_delivery"] = False
+        if dashboard_report is not None:
+            try:
+                if html or file_path or template_path:
+                    raise ValueError("dashboard_report 单独使用")
+                file_path = await _build_dashboard_report(
+                    dashboard_report, react_state.get("conv_id") or "default"
+                )
+                if not title or title == "Report":
+                    title = dashboard_report["data"]["meta"]["title"]
+            except (ValueError, TypeError, KeyError, OSError) as exc:
+                return ActionOutput(
+                    is_exe_success=False,
+                    content=f"报告生成失败：{exc}",
+                )
 
         # ── Mode 1: template_path + data ──
         if template_path and template_path.strip():
@@ -270,6 +324,16 @@ def make_html_interpreter(react_state: Dict[str, Any], skills_dir: str):
         chunks: List[Dict[str, Any]] = [
             {"output_type": "html", "content": fixed_html, "title": title},
         ]
-        return json.dumps({"chunks": chunks}, ensure_ascii=False)
+        content = json.dumps({"chunks": chunks}, ensure_ascii=False)
+        if dashboard_report is not None:
+            react_state["brief_dashboard_delivery"] = (
+                dashboard_report.get("brief_delivery") is True
+            )
+            return ActionOutput(
+                is_exe_success=True,
+                content=content,
+                observations=f"HTML 报告《{title}》已生成、校验并展示在报告面板。",
+            )
+        return content
 
     return html_interpreter

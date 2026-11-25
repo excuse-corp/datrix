@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from dbgpt_app.openapi.api_view_model import Result
@@ -317,7 +317,11 @@ def compile_preview(
 ):
     _require_admin(principal)
     try:
-        return {"status": "succeeded", "data": service.preview(payload.markdown)}
+        preview = service.preview(payload.markdown)
+        preview["graph"] = service.display_graph(
+            preview["graph"], scene_snapshots=_authorized_scene_sources(principal)
+        )
+        return {"status": "succeeded", "data": preview}
     except OntologyServiceError as exc:
         raise _http_error(exc) from exc
     except ValueError as exc:
@@ -586,6 +590,53 @@ def sync_ontology_snapshot(
         raise _http_error(exc) from exc
 
 
+def _graph_payload_for_principal(
+    service: OntologyLifecycleService,
+    principal: AskDataPrincipal,
+    revision: int | None = None,
+) -> dict[str, Any] | None:
+    if not principal.can_manage_ask_data:
+        active = service.active_snapshot()
+        if active is None:
+            return None
+        from ..ontology.context import relevant_ontology_projection
+
+        projection = relevant_ontology_projection(
+            active,
+            authorized_scene_ids=sorted(principal.scene_ids),
+            is_platform_admin=principal.is_platform_admin,
+        )
+        return {
+            "revision": active.revision,
+            "valid": True,
+            "graph": service.display_graph(
+                {"nodes": projection["nodes"], "edges": projection["edges"]},
+                include_rule_mentions=False,
+            ),
+            "prompt_projection": {
+                key: projection[key]
+                for key in (
+                    "entities",
+                    "metrics",
+                    "analysis_dimensions",
+                    "metric_relations",
+                    "cross_scene_analysis_paths",
+                    "result_analysis_rules",
+                    "clarification_rules",
+                )
+            },
+            "issues": [],
+            "layout": {},
+        }
+    payload = service.graph(
+        revision=revision,
+        user_id=principal.user_id,
+        scene_snapshots=_authorized_scene_sources(principal),
+    )
+    payload["graph"] = service.display_graph(payload["graph"], revision=payload["revision"])
+    return payload
+
+
 @router.get("/graph")
 def get_graph(
     revision: int | None = None,
@@ -593,49 +644,85 @@ def get_graph(
     principal: AskDataPrincipal = Depends(get_principal),
 ):
     try:
-        if not principal.can_manage_ask_data:
-            active = service.active_snapshot()
-            if active is None:
-                return {"status": "succeeded", "data": None}
-            from ..ontology.context import relevant_ontology_projection
-
-            projection = relevant_ontology_projection(
-                active,
-                authorized_scene_ids=sorted(principal.scene_ids),
-                is_platform_admin=principal.is_platform_admin,
-            )
-            return {
-                "status": "succeeded",
-                "data": {
-                    "revision": active.revision,
-                    "valid": True,
-                    "graph": {
-                        "nodes": projection["nodes"],
-                        "edges": projection["edges"],
-                    },
-                    "prompt_projection": {
-                        key: projection[key]
-                        for key in (
-                            "entities",
-                            "metrics",
-                            "analysis_dimensions",
-                            "metric_relations",
-                            "cross_scene_analysis_paths",
-                            "result_analysis_rules",
-                            "clarification_rules",
-                        )
-                    },
-                    "issues": [],
-                    "layout": {},
-                },
-            }
         return {
             "status": "succeeded",
-            "data": service.graph(
-                revision=revision,
-                user_id=principal.user_id,
-                scene_snapshots=_authorized_scene_sources(principal),
-            ),
+            "data": _graph_payload_for_principal(service, principal, revision),
+        }
+    except OntologyServiceError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.get("/graph/neighborhood")
+def get_graph_neighborhood(
+    node_id: str,
+    revision: int | None = None,
+    node_limit: int = Query(default=120, ge=1, le=300),
+    edge_limit: int = Query(default=300, ge=1, le=1000),
+    service: OntologyLifecycleService = Depends(get_ontology_service),
+    principal: AskDataPrincipal = Depends(get_principal),
+):
+    try:
+        payload = _graph_payload_for_principal(service, principal, revision)
+        if payload is None:
+            raise HTTPException(status_code=404, detail="本体图谱不存在")
+        graph = payload["graph"]
+        graph_revision = payload["revision"]
+
+        nodes = graph.get("nodes", [])
+        edges = graph.get("edges", [])
+        nodes_by_id = {str(node["id"]): node for node in nodes}
+        center_id = str(node_id)
+        if center_id not in nodes_by_id:
+            raise HTTPException(status_code=404, detail="未找到本体节点")
+
+        neighbor_ids: set[str] = set()
+        node_degree: dict[str, int] = {}
+        center_edges = []
+        for edge in edges:
+            source = str(edge.get("source", ""))
+            target = str(edge.get("target", ""))
+            node_degree[source] = node_degree.get(source, 0) + 1
+            node_degree[target] = node_degree.get(target, 0) + 1
+            if source == center_id:
+                neighbor_ids.add(target)
+                center_edges.append(edge)
+            elif target == center_id:
+                neighbor_ids.add(source)
+                center_edges.append(edge)
+
+        neighbor_ids.discard(center_id)
+        selected_neighbor_ids = sorted(
+            (neighbor_id for neighbor_id in neighbor_ids if neighbor_id in nodes_by_id),
+            key=lambda item: (-node_degree.get(item, 0), item),
+        )[: max(0, node_limit - 1)]
+        included_ids = {center_id, *selected_neighbor_ids}
+        selected_nodes = [nodes_by_id[center_id]] + [nodes_by_id[item] for item in selected_neighbor_ids]
+        selected_edges = [
+            edge
+            for edge in edges
+            if str(edge.get("source", "")) in included_ids
+            and str(edge.get("target", "")) in included_ids
+        ]
+        included_center_edges = [
+            edge
+            for edge in center_edges
+            if str(edge.get("source", "")) in included_ids
+            and str(edge.get("target", "")) in included_ids
+        ]
+        center_edge_ids = {id(edge) for edge in included_center_edges}
+        ordered_edges = included_center_edges + [
+            edge for edge in selected_edges if id(edge) not in center_edge_ids
+        ]
+        selected_edges = ordered_edges[:edge_limit]
+        return {
+            "status": "succeeded",
+            "data": {
+                "revision": graph_revision,
+                "center_node_id": center_id,
+                "total_node_count": len(nodes),
+                "total_edge_count": len(edges),
+                "graph": {"nodes": selected_nodes, "edges": selected_edges},
+            },
         }
     except OntologyServiceError as exc:
         raise _http_error(exc) from exc

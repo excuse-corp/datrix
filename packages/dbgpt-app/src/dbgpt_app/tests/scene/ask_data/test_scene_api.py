@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -35,7 +36,12 @@ def _schema() -> ViewSchema:
     )
 
 
-def _document(scene_id: str, *, name: str = "Contracts") -> str:
+def _document(
+    scene_id: str,
+    *,
+    name: str = "Contracts",
+    business_semantics: str = "一行表示一份合同。",
+) -> str:
     return f"""---
 schema_version: "1"
 scene_id: {scene_id}
@@ -66,7 +72,7 @@ metrics:
 <!-- dataman:document=business-semantics -->
 # 业务语义说明
 
-一行表示一份合同。
+{business_semantics}
 """
 
 
@@ -86,7 +92,8 @@ def _client_with_scene_services(schema: ViewSchema | None = None) -> TestClient:
     return TestClient(app)
 
 
-def test_scene_management_api_lifecycle():
+@pytest.mark.parametrize("business_semantics", ["一行表示一份合同。", ""])
+def test_scene_management_api_lifecycle(business_semantics):
     client = _client_with_scene_services()
     payload = {
         "scene_id": "api_contracts",
@@ -94,7 +101,9 @@ def test_scene_management_api_lifecycle():
         "description": "Contract analysis",
         "data_source_name": "ecology",
         "view_name": "dbo.vw_contracts",
-        "semantic_md": _document("api_contracts"),
+        "semantic_md": _document(
+            "api_contracts", business_semantics=business_semantics
+        ),
     }
 
     created = client.post("/api/v1/ask-data/scenes", json=payload)
@@ -125,7 +134,11 @@ def test_scene_management_api_lifecycle():
         json={key: value for key, value in payload.items() if key != "scene_id"}
         | {
             "name": "Contracts v2",
-            "semantic_md": _document("api_contracts", name="Contracts v2"),
+            "semantic_md": _document(
+                "api_contracts",
+                name="Contracts v2",
+                business_semantics=business_semantics,
+            ),
         },
     )
     assert updated.status_code == 200

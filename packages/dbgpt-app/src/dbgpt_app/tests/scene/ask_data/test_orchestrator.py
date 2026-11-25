@@ -137,6 +137,17 @@ class _SlowQueryService(_FakeQueryService):
             self.active -= 1
 
 
+class _OutOfOrderQueryService(_FakeQueryService):
+    def execute(self, *, task_id, **kwargs):
+        import time
+
+        if task_id == "task-1":
+            time.sleep(0.03)
+        else:
+            time.sleep(0.005)
+        return super().execute(task_id=task_id, **kwargs)
+
+
 def test_plan_validator_rejects_unknown_scene_and_too_many_tasks():
     validator = PlanValidator(_registry(), max_tasks=1)
     plan = MainAgentPlan(
@@ -194,17 +205,27 @@ def test_orchestrator_reports_partial_success_and_limits_parallelism():
     plan = MainAgentPlan(
         action="execute",
         tasks=[_task("task-1"), _task("task-2"), _task("task-3")],
-        combine=CombinePlan(),
+        combine=CombinePlan(mode="compare", keys=["contract_amount"]),
     )
+    combine_events = []
+
+    async def on_combine_event(event):
+        combine_events.append(event)
 
     result = asyncio.run(
-        orchestrator.execute(plan=plan, engine_resolver=lambda _: object())
+        orchestrator.execute(
+            plan=plan,
+            engine_resolver=lambda _: object(),
+            on_combine_event=on_combine_event,
+        )
     )
 
     assert result.status == "partial_succeeded"
     assert len(result.results) == 2
     assert len(result.errors) == 1
     assert service.max_active == 1
+    assert [event["status"] for event in combine_events] == ["running", "done"]
+    assert combine_events[-1]["result"]["mode"] == "separate"
 
 
 def test_orchestrator_emits_task_lifecycle_with_executor_duration():
@@ -233,6 +254,37 @@ def test_orchestrator_emits_task_lifecycle_with_executor_duration():
     assert events[0]["ended_at"] is None
     assert events[1]["duration_ms"] == result.results[0].duration_ms
     assert events[1]["result"]["row_count"] == result.results[0].row_count
+
+
+def test_parallel_results_emit_a_code_combination_stage_in_plan_order():
+    registry = _registry()
+    validator = PlanValidator(registry, max_tasks=2)
+    service = _OutOfOrderQueryService()
+    orchestrator = AskDataOrchestrator(validator, service, max_parallel_tasks=2)
+    plan = MainAgentPlan(
+        action="execute",
+        tasks=[_task("task-1"), _task("task-2")],
+        combine=CombinePlan(),
+    )
+    events = []
+
+    async def on_combine_event(event):
+        events.append(event)
+
+    result = asyncio.run(
+        orchestrator.execute(
+            plan=plan,
+            engine_resolver=lambda _: object(),
+            on_combine_event=on_combine_event,
+        )
+    )
+
+    assert result.status == "succeeded"
+    assert [item.task_id for item in result.results] == ["task-1", "task-2"]
+    assert [event["status"] for event in events] == ["running", "done"]
+    assert events[0]["result"]["task_count"] == 2
+    assert events[1]["result"]["result_count"] == 2
+    assert events[1]["result"]["mode"] == "separate"
 
 
 def test_orchestrator_reports_all_failed():

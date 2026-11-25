@@ -38,6 +38,8 @@ export default function OntologyReviewDetails({ object }: { object: OntologyNode
         ['比较条件', data.comparability],
       ]
     : ([
+        ['引用字段', data.reference_field],
+        ['引用对象', data.reference_value],
         ['语义标识', data.semantic_key],
         ['来源字段', data.source_field],
         ['聚合方式', aggregation],

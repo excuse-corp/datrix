@@ -1601,6 +1601,32 @@ async def test_llm_generator_outputs_compilable_analysis_markdown():
 
 
 @pytest.mark.asyncio
+async def test_llm_draft_generation_accepts_empty_business_semantics():
+    source = _llm_source()
+    semantic_md = source.semantic_md.partition("# 业务语义说明\n")[0] + "# 业务语义说明\n"
+    responses = iter(
+        [json.dumps({"scene_id": source.scene_id, "scene_name": source.name}), "{}"]
+    )
+
+    async def generate(_: str) -> str:
+        return next(responses)
+
+    service = OntologyLifecycleService(
+        InMemoryOntologyRepository(), llm_generator=OntologyLLMGenerator(generate)
+    )
+    snapshot = _scene_snapshot(source.snapshot_id)
+    result = await service.generate_from_active_scenes_async(
+        scene_snapshots=[{"snapshot": snapshot, "semantic_md": semantic_md}],
+        user_id="admin",
+        apply=True,
+    )
+
+    assert result["generation"]["source_count"] == 1
+    assert result["generation"]["metric_count"] == 0
+    assert OntologyMarkdownParser().compile(result["revision"].ontology_md).valid
+
+
+@pytest.mark.asyncio
 async def test_llm_generator_rejects_invalid_json():
     async def generate(_: str) -> str:
         return "not-json"

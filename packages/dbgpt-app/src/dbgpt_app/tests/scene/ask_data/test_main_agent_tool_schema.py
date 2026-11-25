@@ -20,14 +20,17 @@ async def _noop_stream_callback(_event_type, _payload):
     return None
 
 
-def test_ask_data_query_public_schema_keeps_question_only():
+def test_ask_data_query_public_schema_exposes_optional_direct_reply():
     ask_data_query, _ = make_ask_data_tools(
         {},
         _noop_stream_callback,
         AskDataPrincipal(user_id="user-1"),
     )
 
-    assert list(getattr(ask_data_query, "_tool").args.keys()) == ["question"]
+    args = getattr(ask_data_query, "_tool").args
+    assert list(args) == ["question", "reply_after_query"]
+    assert args["question"].required
+    assert not args["reply_after_query"].required
 
 
 def test_ask_data_query_accepts_legacy_query_action_input():
@@ -44,6 +47,10 @@ def test_ask_data_query_accepts_legacy_query_action_input():
     )
 
     assert parsed == ((), {"question": "任博寒有哪些信息化项目"})
+    assert tool_pack.parse_execute_args(
+        resource_name="ask_data_query",
+        input_str='{"question": "项目情况", "reply_after_query": true}',
+    ) == ((), {"question": "项目情况", "reply_after_query": True})
 
 
 @pytest.mark.asyncio

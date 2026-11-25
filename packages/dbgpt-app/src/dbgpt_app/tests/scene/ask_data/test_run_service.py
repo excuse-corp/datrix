@@ -29,9 +29,11 @@ class FakeOrchestrator:
         self.plan_validator = FakePlanValidator(snapshot)
         self.result = result
         self.calls = 0
+        self.execute_kwargs = {}
 
-    async def execute(self, *, plan, engine_resolver):
+    async def execute(self, *, plan, engine_resolver, **kwargs):
         self.calls += 1
+        self.execute_kwargs = kwargs
         return self.result
 
 
@@ -113,6 +115,40 @@ def test_run_service_persists_query_and_agent_runs():
     assert len(agents) == 1
     assert agents[0].status == RunStatus.SUCCEEDED
     assert agents[0].sql_hash == "sha256:sql"
+
+
+def test_run_service_forwards_the_combine_stage_callback():
+    scene_result = SceneResult(
+        task_id="task_1",
+        scene_id="contracts",
+        scene_revision=2,
+        snapshot_id="snap_contracts",
+        status="succeeded",
+        columns=[ResultColumn(key="amount", type="number")],
+        query_spec_hash="sha256:query",
+        compiler_version="1",
+        sql_hash="sha256:sql",
+    )
+    orchestrator = FakeOrchestrator(
+        _snapshot(), QueryRunResult(status="succeeded", results=[scene_result])
+    )
+    service = RunExecutionService(orchestrator, InMemoryRunRepository())
+
+    async def on_combine_event(_event):
+        return None
+
+    __import__("asyncio").run(
+        service.execute(
+            question="total amount",
+            plan=_plan(),
+            user_id="user-1",
+            request_id="req-1",
+            engine_resolver=lambda _: object(),
+            on_combine_event=on_combine_event,
+        )
+    )
+
+    assert orchestrator.execute_kwargs["on_combine_event"] is on_combine_event
 
 
 def test_run_service_returns_idempotent_result_without_reexecution():

@@ -30,6 +30,7 @@ class PendingQuestion:
     conv_id: str
     questions: List[dict]  # raw dicts from LLM JSON for easy serialization
     user_id: Optional[str] = None
+    run_id: Optional[str] = None
     event: asyncio.Event = field(default_factory=asyncio.Event)
     answers: Optional[List[List[str]]] = None
     rejected: bool = False
@@ -66,6 +67,7 @@ class QuestionManager:
         questions: List[dict],
         request_id: Optional[str] = None,
         user_id: Optional[str] = None,
+        run_id: Optional[str] = None,
     ) -> PendingQuestion:
         rid = request_id or self._new_id()
         pq = PendingQuestion(
@@ -73,6 +75,7 @@ class QuestionManager:
             conv_id=conv_id,
             questions=questions,
             user_id=user_id,
+            run_id=run_id,
         )
         self._pending[rid] = pq
         logger.info("QuestionManager.create: request_id=%s, n=%d", rid, len(questions))
@@ -144,6 +147,28 @@ class QuestionManager:
             )
         return len(request_ids)
 
+    def reject_by_run(self, run_id: str, user_id: Optional[str] = None) -> int:
+        """Reject pending questions belonging to one run only."""
+        request_ids = [
+            request_id
+            for request_id, pending in self._pending.items()
+            if pending.run_id == run_id
+            and (user_id is None or pending.user_id == user_id)
+        ]
+        for request_id in request_ids:
+            pending = self._pending.get(request_id)
+            if not pending:
+                continue
+            pending.rejected = True
+            pending.event.set()
+        if request_ids:
+            logger.info(
+                "QuestionManager.reject_by_run: run_id=%s rejected=%d",
+                run_id,
+                len(request_ids),
+            )
+        return len(request_ids)
+
     def remove(self, request_id: str) -> None:
         self._pending.pop(request_id, None)
 
@@ -155,6 +180,7 @@ class QuestionManager:
                     {
                         "request_id": pq.request_id,
                         "conv_id": pq.conv_id,
+                        "run_id": pq.run_id,
                         "questions": pq.questions,
                     }
                 )

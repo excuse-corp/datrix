@@ -138,6 +138,56 @@ def test_ontology_document_preview_and_publish_api():
         ontology_api.configure_ontology_service(previous_service)
 
 
+def test_ontology_graph_neighborhood_api_returns_bounded_one_hop_graph(monkeypatch):
+    app = FastAPI()
+    app.include_router(ontology_api.router)
+    service = OntologyLifecycleService(InMemoryOntologyRepository())
+    previous_service = ontology_api.get_ontology_service()
+    ontology_api.configure_ontology_service(service)
+    monkeypatch.setattr(ontology_api, "_authorized_scene_sources", lambda _principal: [])
+    graph = {
+        "nodes": [
+            {"id": node_id, "name": node_id, "type": "entity"}
+            for node_id in ("node_a", "node_b", "node_c", "node_d")
+        ],
+        "edges": [
+            {"id": "edge_ab", "source": "node_a", "target": "node_b", "type": "relation", "name": "关联"},
+            {"id": "edge_ac", "source": "node_a", "target": "node_c", "type": "relation", "name": "关联"},
+            {"id": "edge_bc", "source": "node_b", "target": "node_c", "type": "relation", "name": "关联"},
+            {"id": "edge_cd", "source": "node_c", "target": "node_d", "type": "relation", "name": "关联"},
+        ],
+    }
+    monkeypatch.setattr(
+        service,
+        "graph",
+        lambda **_kwargs: {"revision": 4, "graph": graph},
+    )
+    app.dependency_overrides[ontology_api.get_principal] = lambda: AskDataPrincipal(
+        user_id="admin", roles=frozenset({"admin"})
+    )
+    try:
+        client = TestClient(app)
+        response = client.get(
+            "/api/v1/ask-data/ontology/graph/neighborhood",
+            params={"node_id": "node_a", "revision": 4, "node_limit": 2, "edge_limit": 1},
+        )
+
+        assert response.status_code == 200
+        payload = response.json()["data"]
+        assert payload["revision"] == 4
+        assert payload["center_node_id"] == "node_a"
+        assert payload["total_node_count"] == 4
+        assert payload["total_edge_count"] == 4
+        assert {node["id"] for node in payload["graph"]["nodes"]} == {"node_a", "node_c"}
+        assert [edge["id"] for edge in payload["graph"]["edges"]] == ["edge_ac"]
+        assert client.get(
+            "/api/v1/ask-data/ontology/graph/neighborhood",
+            params={"node_id": "missing", "revision": 4},
+        ).status_code == 404
+    finally:
+        ontology_api.configure_ontology_service(previous_service)
+
+
 def test_generate_draft_defaults_to_llm_and_fails_when_unavailable():
     app = FastAPI()
     app.include_router(ontology_api.router)
@@ -564,3 +614,84 @@ def _project_global_synthesis() -> dict:
         "clarification_rules": ["当项目问题未说明金额或进度口径时先澄清。"],
         "unresolved_questions": [],
     }
+
+
+def test_display_references_are_browsable_and_rule_decisions_are_optional(monkeypatch):
+    app = FastAPI()
+    app.include_router(ontology_api.router)
+    service = OntologyLifecycleService(InMemoryOntologyRepository())
+    monkeypatch.setattr(ontology_api, "_service", service)
+    monkeypatch.setattr(ontology_api, "_authorized_scene_sources", lambda _principal: [])
+    app.dependency_overrides[ontology_api.get_principal] = lambda: AskDataPrincipal(
+        user_id="admin", roles=frozenset({"admin"})
+    )
+    client = TestClient(app)
+    base = "/api/v1/ask-data/ontology"
+    draft = service.draft(user_id="admin")
+    markdown = draft.ontology_md + """
+## 业务实体
+
+| ID | 名称 | 别名 | 定义 |
+| --- | --- | --- | --- |
+| ent_paper | 科研论文 |  | 已发表的论文 |
+
+## 分析维度
+
+| 维度 | 适用实体 | 适用指标 | 分析用途 | 注意事项 |
+| --- | --- | --- | --- | --- |
+| 发表年份 | ent_paper、missing |  | 按年统计 |  |
+
+## 需求澄清规则
+
+- 查询科研论文时，先确认时间范围。
+"""
+    saved = service.save_draft(
+        markdown=markdown, user_id="admin", expected_revision=draft.revision
+    )
+    revision = saved.revision
+    reviews_url = f"{base}/revisions/{revision}/reviews"
+    preview = client.post(f"{base}/compile-preview", json={"markdown": markdown})
+    assert preview.status_code == 200
+    edges = preview.json()["data"]["graph"]["edges"]
+    assert {(edge["type"], edge["target"]) for edge in edges} == {
+        ("attribute_reference", "ent_paper"),
+        ("rule_reference", "ent_paper"),
+    }
+    neighborhood = client.get(
+        f"{base}/graph/neighborhood",
+        params={"revision": revision, "node_id": "ent_paper"},
+    )
+    assert neighborhood.status_code == 200
+    assert {edge["id"] for edge in neighborhood.json()["data"]["graph"]["edges"]} == {
+        edge["id"] for edge in edges
+    }
+
+    state = client.get(reviews_url).json()["data"]
+    candidate = next(item for item in state["items"] if item["object_type"] == "rule_reference")
+    assert not candidate["required"]
+    assert "先确认时间范围" in candidate["object"]["description"]
+    assert state["pending_count"] == 0
+    for decision in ("confirmed", "rejected", "candidate"):
+        result = client.post(
+            reviews_url,
+            json={
+                "target_type": "edge",
+                "target_id": candidate["target_id"],
+                "decision": decision,
+                "expected_fingerprint": candidate["fingerprint"],
+                "comment": "核对原文",
+            },
+        )
+        assert result.status_code == 200
+        assert (
+            result.json()["data"]["review_state"]["current_content_hash"]
+            == state["current_content_hash"]
+        )
+        graph = client.get(f"{base}/graph", params={"revision": revision}).json()["data"]["graph"]
+        rule_edges = [edge for edge in graph["edges"] if edge["type"] == "rule_reference"]
+        if decision == "rejected":
+            assert not rule_edges
+        else:
+            assert [edge["data"]["review_status"] for edge in rule_edges] == [decision]
+    canonical = service.graph(revision=revision, user_id="admin")["graph"]
+    assert canonical["edges"] == []

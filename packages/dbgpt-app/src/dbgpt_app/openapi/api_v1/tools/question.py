@@ -130,6 +130,7 @@ def make_question(react_state: Dict[str, Any], stream_callback: Callable):
             conv_id=conv_id,
             questions=parsed_questions,
             user_id=str(react_state.get("user_id") or "default"),
+            run_id=str(react_state.get("run_id") or "") or None,
         )
 
         # 2. Push question.asked SSE event to frontend
@@ -138,6 +139,7 @@ def make_question(react_state: Dict[str, Any], stream_callback: Callable):
             {
                 "request_id": pq.request_id,
                 "conv_id": conv_id,
+                "run_id": pq.run_id,
                 "questions": parsed_questions,
             },
         )
@@ -151,7 +153,12 @@ def make_question(react_state: Dict[str, Any], stream_callback: Callable):
         except asyncio.TimeoutError:
             question_manager.remove(pq.request_id)
             await stream_callback(
-                "question.rejected", {"request_id": pq.request_id, "conv_id": conv_id}
+                "question.rejected",
+                {
+                    "request_id": pq.request_id,
+                    "conv_id": conv_id,
+                    "run_id": pq.run_id,
+                },
             )
             return json.dumps(
                 {

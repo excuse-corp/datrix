@@ -1,5 +1,6 @@
 # ruff: noqa: E501
 
+import asyncio
 import io
 import json
 import logging
@@ -7,6 +8,7 @@ import os
 import re
 import shutil
 import tempfile
+import threading
 import uuid
 import zipfile
 from datetime import datetime, timezone
@@ -60,6 +62,7 @@ from dbgpt_app.openapi.api_v1.react_session_state import (
 )
 from dbgpt_app.openapi.api_v1.react_finalization import (
     build_react_final_answer_request,
+    render_ask_data_fallback,
 )
 from dbgpt_app.scene.conversation_context import (
     DEFAULT_CONTEXT_TOKEN_BUDGET,
@@ -86,6 +89,53 @@ if TYPE_CHECKING:
 REACT_AGENT_MEMORY_CACHE: Dict[str, "GptsMemory"] = {}
 REACT_ASK_DATA_PENDING: Dict[str, Dict[str, str]] = {}
 REACT_AGENT_RUNS: Dict[str, Dict[str, Any]] = {}
+REACT_ACTIVE_RUNS_BY_SESSION: Dict[Tuple[str, str], str] = {}
+_REACT_RUN_LOCK = threading.Lock()
+
+
+def _react_run_key(user_id: str, conv_uid: str) -> Tuple[str, str]:
+    return str(user_id), str(conv_uid)
+
+
+def _claim_react_run(
+    run_id: str, user_id: str, conv_uid: str
+) -> Optional[str]:
+    """Atomically reserve one ReAct run for a user and conversation.
+
+    The lock is process-local. Deployments with multiple workers need a shared
+    lease store, but this still closes the race between requests in the current
+    single-process service.
+    """
+    key = _react_run_key(user_id, conv_uid)
+    with _REACT_RUN_LOCK:
+        if run_id in REACT_AGENT_RUNS:
+            return run_id
+
+        active_run_id = REACT_ACTIVE_RUNS_BY_SESSION.get(key)
+        if active_run_id:
+            if active_run_id in REACT_AGENT_RUNS:
+                return active_run_id
+            REACT_ACTIVE_RUNS_BY_SESSION.pop(key, None)
+
+        REACT_ACTIVE_RUNS_BY_SESSION[key] = run_id
+        REACT_AGENT_RUNS[run_id] = {
+            "conv_uid": conv_uid,
+            "user_id": str(user_id),
+            "cancel_event": asyncio.Event(),
+            "attachment_service": None,
+        }
+    return None
+
+
+def _release_react_run(run_id: str) -> Optional[Dict[str, Any]]:
+    """Remove a run and release its session lease exactly once."""
+    with _REACT_RUN_LOCK:
+        run_state = REACT_AGENT_RUNS.pop(run_id, None)
+        if run_state:
+            key = _react_run_key(run_state.get("user_id", ""), run_state.get("conv_uid", ""))
+            if REACT_ACTIVE_RUNS_BY_SESSION.get(key) == run_id:
+                REACT_ACTIVE_RUNS_BY_SESSION.pop(key, None)
+        return run_state
 
 DEFAULT_SKILLS_DIR = SKILLS_DIR
 PROTECTED_SKILL_NAMES = {
@@ -222,6 +272,29 @@ def _has_open_task_plan(todo_list: List[Dict[str, Any]]) -> bool:
     return any(
         item.get("status") in {"pending", "in_progress", "failed"}
         for item in todo_list or []
+    )
+
+
+def _should_directly_finalize_ask_data(
+    action_output: Any,
+    *,
+    requested_call_id: Optional[str],
+    evidence: Optional[Dict[str, Any]],
+    cancelled: bool,
+    has_open_tasks: bool,
+    has_active_skill: bool,
+    has_pending_query: bool,
+) -> bool:
+    return bool(
+        action_output.action == "ask_data_query"
+        and action_output.is_exe_success
+        and requested_call_id
+        and evidence
+        and evidence.get("scenes")
+        and not cancelled
+        and not has_open_tasks
+        and not has_active_skill
+        and not has_pending_query
     )
 
 
@@ -1705,7 +1778,7 @@ async def _react_agent_stream(
         ):
             yield event
     finally:
-        run_state = REACT_AGENT_RUNS.pop(run_id, None)
+        run_state = _release_react_run(run_id)
         if run_state:
             cancel_event = run_state.get("cancel_event")
             if cancel_event is not None:
@@ -1780,13 +1853,17 @@ async def _react_agent_stream_impl(
         if ask_data_principal is not None
         else getattr(user_token, "user_id", None) or dialogue.user_name or "default"
     )
-    cancel_event = asyncio.Event()
-    REACT_AGENT_RUNS[run_id] = {
-        "conv_uid": conv_id,
-        "user_id": str(user_id),
-        "cancel_event": cancel_event,
-        "attachment_service": None,
-    }
+    run_state = REACT_AGENT_RUNS.get(run_id)
+    if run_state is None:
+        # Keep direct callers of the generator safe while normal HTTP requests
+        # claim the lease before constructing the StreamingResponse.
+        conflict_run_id = _claim_react_run(run_id, str(user_id), conv_id)
+        if conflict_run_id:
+            raise RuntimeError(
+                f"Conversation {conv_id} already has an active run {conflict_run_id}"
+            )
+        run_state = REACT_AGENT_RUNS[run_id]
+    cancel_event = run_state["cancel_event"]
     skill_maintenance = is_skill_maintenance_request(user_input)
     session_state = load_react_session_state(conv_id)
     attachment_ids = []
@@ -1815,7 +1892,6 @@ async def _react_agent_stream_impl(
                 allowed_roots=[upload_root],
             )
             if cancel_event.is_set():
-                REACT_AGENT_RUNS.pop(run_id, None)
                 yield _sse_event(
                     {
                         "type": "run.cancelled",
@@ -1855,7 +1931,6 @@ async def _react_agent_stream_impl(
         except Exception as exc:
             logger.warning("Attachment auto-parse failed without blocking chat: %s", exc)
             if cancel_event.is_set():
-                REACT_AGENT_RUNS.pop(run_id, None)
                 yield _sse_event(
                     {
                         "type": "run.cancelled",
@@ -2823,7 +2898,7 @@ print(json.dumps(summary, ensure_ascii=False))
             "AskData Direct Tool Schema",
             ask_data_tools,
             extra_rules=[
-                '- `ask_data_query` Action Input MUST be `{"question": "<natural-language business question>"}`.',
+                '- For a lookup, comparison, or written interpretation fully covered by this query, set `reply_after_query: true` alongside `question`. Omit it when more tools or deliverables are required, such as a report, chart, file, or another query.',
                 '- Never call `ask_data_query` with `{"query": ...}`; `query` is not a valid parameter name.',
                 "- Do not pass SQL, table names, field names, data-source names, or Snapshot IDs to `ask_data_query`.",
                 '- After `ask_data_query` returns `query_complete: true`, if no extra tool is explicitly needed, call `terminate` immediately with `Action Input: {"result": "final answer"}`. Do not answer in plain text and do not call `ask_data_query` again with the same question.',
@@ -2840,7 +2915,7 @@ print(json.dumps(summary, ensure_ascii=False))
 - When AskData returns data JSON, use it as the evidence for your final answer. You may call other built-in tools afterwards when the user asked for formatting or visualization.
 - After a successful AskData query, include a concise “数据口径” section after the result. Use each scene's data_caliber/sql_explanation fields to explain in plain Chinese where the data comes from, what each row represents, how the numbers are calculated, the statistical scope, and any business notes; do not invent missing business definitions.
 - Write for users who do not know databases: do not repeat SQL, table names, field names, aggregation, grain, or other database terms. If an item is missing, say it was not identified.
-- When an AskData Observation contains `query_complete: true`, the query requirement is satisfied. If no extra tool is explicitly needed, the next response MUST be `Action: terminate` with the full answer inside `Action Input: {{"result": "final answer"}}`. Do not output the final answer as plain Markdown, and never call `ask_data_query` again with the same question in this turn.
+- If this one query covers the full user request, use `Action Input: {{"question": "<self-contained business question>", "reply_after_query": true}}` to hand off the results directly to the final answer. Omit the flag when further tools or deliverables are needed. If the tool loop continues after a successful query, never query the same question again in this turn.
 - Do not broaden a successful query merely to add fields, rankings, or analysis that the user did not request.
 - For reports, visualizations, comparisons, summaries, or formatting, reuse all matching completed results from prior rounds in the current session. Do not query again merely because another tool or query ran more recently. Query only if the requested scope or freshness requires data that is not present.
 
@@ -2974,7 +3049,6 @@ print(json.dumps(summary, ensure_ascii=False))
             {"type": "final", "content": payload.get("answer") or "业务查询已处理。"}
         )
         yield _sse_event({"type": "done"})
-        REACT_AGENT_RUNS.pop(run_id, None)
         return
     if conv_id in REACT_AGENT_MEMORY_CACHE:
         gpt_memory = REACT_AGENT_MEMORY_CACHE[conv_id]
@@ -3574,8 +3648,29 @@ Parameters: {{"todos": [{{...}}]}}
         template_format="jinja2",
     )
 
+    class DataChatAgent(ReActAgent):
+        async def act(self, *args, **kwargs):
+            output = await super().act(*args, **kwargs)
+            requested_call_id = react_state.pop("ask_data_reply_call_id", None)
+            evidence = (
+                react_state.get("ask_data_evidence", {}).get(requested_call_id)
+                if requested_call_id
+                else None
+            )
+            if _should_directly_finalize_ask_data(
+                output,
+                requested_call_id=requested_call_id,
+                evidence=evidence,
+                cancelled=cancel_event.is_set(),
+                has_open_tasks=_has_open_task_plan(_todo_list),
+                has_active_skill=bool(react_state.get("matched")),
+                has_pending_query=bool(react_state.get("ask_data_pending_query_id")),
+            ):
+                output.terminate = True
+            return output
+
     agent_builder = (
-        ReActAgent(
+        DataChatAgent(
             max_retry_count=react_max_steps,
             llm_inference_retry_count=react_llm_error_limit,
             llm_error_retry_limit=react_llm_error_limit,
@@ -3621,6 +3716,7 @@ Parameters: {{"todos": [{{...}}]}}
     history_steps: List[Dict[str, Any]] = []
     current_history_step: Optional[Dict[str, Any]] = None
     ask_data_stage_started: Dict[str, float] = {}
+    ask_data_finished_at: Optional[float] = None
     ask_data_call_duration_ms: Dict[str, int] = {}
 
     def persist_task_checkpoint(
@@ -3888,7 +3984,6 @@ Parameters: {{"todos": [{{...}}]}}
                 logger.debug("Failed to persist disconnected ReAct run", exc_info=True)
             if not agent_task.done():
                 agent_task.cancel()
-            REACT_AGENT_RUNS.pop(run_id, None)
             raise
         except asyncio.TimeoutError:
             if (
@@ -3909,6 +4004,8 @@ Parameters: {{"todos": [{{...}}]}}
         elif event_type.startswith("ask_data."):
             if event_type == "ask_data.stage":
                 record_ask_data_stage_for_history(event)
+                if event.get("stage") == "query" and event.get("status") == "done":
+                    ask_data_finished_at = monotonic()
             yield _sse_event(event)
         elif event_type in ("question.asked", "question.replied", "question.rejected"):
             # Forward human-in-the-loop question events to frontend as-is.
@@ -3976,7 +4073,7 @@ Parameters: {{"todos": [{{...}}]}}
             is_terminate = action_output.get("terminate") or (
                 action and action.lower() == "terminate"
             )
-            if is_terminate:
+            if is_terminate and action != "ask_data_query":
                 pending_action_intentions.pop(round_num, None)
                 pending_action_reasons.pop(round_num, None)
                 continue
@@ -4187,6 +4284,8 @@ Parameters: {{"todos": [{{...}}]}}
             observation_text = action_output.get("observations") or action_output.get(
                 "content"
             )
+            if action == "html_interpreter":
+                observation_text = action_output.get("content") or observation_text
             ask_data_result_payload = (
                 _extract_ask_data_payload(observation_text)
                 if action and action.lower() == "ask_data_query"
@@ -4379,7 +4478,6 @@ Parameters: {{"todos": [{{...}}]}}
         storage_conv.add_view_message(history_payload)
         storage_conv.end_current_round()
         storage_conv.save_to_storage()
-        REACT_AGENT_RUNS.pop(run_id, None)
         yield _sse_event(
             {
                 "type": "run.incomplete" if planning_timeout else "run.cancelled",
@@ -4445,13 +4543,20 @@ Parameters: {{"todos": [{{...}}]}}
         storage_conv.add_view_message(error_payload)
         storage_conv.end_current_round()
         storage_conv.save_to_storage()
-        REACT_AGENT_RUNS.pop(run_id, None)
         yield _sse_event({"type": "run.failed", "run_id": run_id, **outcome})
         yield _sse_event({"type": "final", "content": err_msg, **outcome})
         yield _sse_event({"type": "done"})
         return
 
-    if reply.action_report and reply.action_report.terminate:
+    direct_ask_data_reply = bool(
+        reply.action_report
+        and reply.action_report.terminate
+        and reply.action_report.action == "ask_data_query"
+    )
+    ask_data_evidence = list(react_state.get("ask_data_evidence", {}).values())
+    if direct_ask_data_reply:
+        final_content = ""
+    elif reply.action_report and reply.action_report.terminate:
         raw_content = reply.action_report.content or ""
         # The terminate ActionOutput.content is the full raw LLM text, e.g.:
         # "Thought: ...\nAction: terminate\nAction Input: {"result": "..."}"
@@ -4508,18 +4613,107 @@ Parameters: {{"todos": [{{...}}]}}
     )
     final_content = _final_content_for_outcome(final_content, outcome)
 
+    if outcome["status"] == REACT_STATUS_COMPLETED and _has_open_task_plan(_todo_list):
+        try:
+            if final_llm_client is None:
+                final_llm_client = DefaultLLMClient(
+                    CFG.SYSTEM_APP.get_component(
+                        ComponentType.WORKER_MANAGER_FACTORY, WorkerManagerFactory
+                    ).create(),
+                    auto_convert_message=True,
+                )
+            model_name = await _resolve_llm_model_name(final_llm_client, dialogue.model_name)
+            evidence = []
+            for step in history_steps:
+                if step.get("action") in {"todowrite", "final_response"}:
+                    continue
+                evidence.append({
+                    "action": step.get("action"),
+                    "status": step.get("status"),
+                    "input": str(step.get("action_input") or "")[:4000],
+                    "outputs": [
+                        {"type": output.get("output_type"), "content": str(output.get("content") or "")[:4000]}
+                        for output in step.get("outputs", [])
+                        if isinstance(output, dict) and output.get("output_type") not in {"code", "image"}
+                    ],
+                })
+            request = ModelRequest.build_request(
+                model_name,
+                messages=[ModelMessage(
+                    role=ModelMessageRoleType.HUMAN,
+                    content=(
+                        "Review the task plan against the execution evidence. Return only a JSON "
+                        "array of IDs of open tasks that the evidence shows were actually completed. "
+                        "Do not infer completion from the final answer alone, a tool call alone, "
+                        "or a successful overall run. Leave uncertain, failed, and cancelled tasks out.\n"
+                        + json.dumps({"plan": _todo_list, "evidence": evidence}, ensure_ascii=False)
+                    ),
+                )],
+                temperature=0,
+            )
+            response = await final_llm_client.generate(request)
+            if not response.success or not response.has_text:
+                raise RuntimeError("Task plan review returned no result")
+            review = response.text.strip()
+            if review.startswith("```"):
+                review = re.sub(r"^```(?:json)?\s*|\s*```$", "", review, flags=re.IGNORECASE)
+            completed_ids = json.loads(review)
+            if not isinstance(completed_ids, list) or not all(isinstance(item, str) for item in completed_ids):
+                raise ValueError("Invalid task plan review")
+            changed = False
+            for item in _todo_list:
+                if item.get("status") in {"pending", "in_progress"} and item.get("id") in completed_ids:
+                    item["status"] = "completed"
+                    changed = True
+            if changed:
+                if not any(item.get("status") == "in_progress" for item in _todo_list):
+                    next_item = next(
+                        (item for item in _todo_list if item.get("status") == "pending"),
+                        None,
+                    )
+                    if next_item:
+                        next_item["status"] = "in_progress"
+                todo_plan_state["sequence"] = int(todo_plan_state.get("sequence") or 0) + 1
+                yield _sse_event({
+                    "type": "plan.update",
+                    "tasks": list(_todo_list),
+                    "plan_id": todo_plan_state.get("plan_id"),
+                    "revision": todo_plan_state.get("revision", 0),
+                    "sequence": todo_plan_state["sequence"],
+                })
+        except Exception:
+            logger.warning("Failed to reconcile task plan from execution evidence", exc_info=True)
+
     if (
+        outcome["status"] == REACT_STATUS_COMPLETED
+        and react_state.get("brief_dashboard_delivery")
+        and final_content.strip()
+        and history_steps
+        and history_steps[-1].get("action") == "html_interpreter"
+        and history_steps[-1].get("status") == "done"
+    ):
+        # The verified HTML is the deliverable. Stream the agent's handoff as written.
+        yield _sse_event({"type": "final.chunk", "content": final_content})
+    elif (
         outcome.get("status") == REACT_STATUS_COMPLETED
         and reply.action_report
         and reply.action_report.terminate
     ):
-        answer_draft = final_content
+        answer_draft = None if direct_ask_data_reply else final_content
         final_step_id, final_step_event = build_step(
             "最终回复",
             "Final response",
             phase="生成最终回复",
             action="final_response",
         )
+        final_step_started = monotonic()
+        if ask_data_evidence and ask_data_finished_at is not None:
+            logger.info(
+                "AskData final response started run_id=%s direct=%s query_to_final_ms=%d",
+                run_id,
+                direct_ask_data_reply,
+                int((final_step_started - ask_data_finished_at) * 1000),
+            )
         yield final_step_event
 
         final_thought_parts: List[str] = []
@@ -4545,6 +4739,7 @@ Parameters: {{"todos": [{{...}}]}}
                 user_request=user_input,
                 answer_draft=answer_draft,
                 history_steps=history_steps,
+                ask_data_evidence=ask_data_evidence,
                 temperature=dialogue.temperature or 0.2,
             )
             async for output in final_llm_client.generate_stream(final_request):
@@ -4576,6 +4771,12 @@ Parameters: {{"todos": [{{...}}]}}
                     )
                     previous_text = current_text
                     if text_delta:
+                        if ask_data_evidence and not final_answer_parts:
+                            logger.info(
+                                "AskData final response first text run_id=%s final_to_text_ms=%d",
+                                run_id,
+                                int((monotonic() - final_step_started) * 1000),
+                            )
                         final_answer_parts.append(text_delta)
                         yield _sse_event(
                             {"type": "final.chunk", "content": text_delta}
@@ -4592,7 +4793,11 @@ Parameters: {{"todos": [{{...}}]}}
                 type(exc).__name__,
                 exc_info=True,
             )
-            final_content = answer_draft
+            final_content = (
+                render_ask_data_fallback(ask_data_evidence)
+                if direct_ask_data_reply
+                else answer_draft
+            )
 
         yield step_done(final_step_id, final_step_status)
         history_steps.append(
@@ -4668,8 +4873,6 @@ Parameters: {{"todos": [{{...}}]}}
     storage_conv.add_view_message(history_payload)
     storage_conv.end_current_round()
     storage_conv.save_to_storage()
-    REACT_AGENT_RUNS.pop(run_id, None)
-
     yield _sse_event({"type": f"run.{outcome['status']}", "run_id": run_id, **outcome})
     yield _sse_event({"type": "final", "content": final_content, **outcome})
     yield _sse_event({"type": "done"})
@@ -4909,6 +5112,27 @@ async def chat_react_agent(
         dialogue.user_name = ask_data_principal.user_id
     elif user_token:
         dialogue.user_name = user_token.user_id
+    user_id = str(
+        ask_data_principal.user_id
+        if ask_data_principal is not None
+        else getattr(user_token, "user_id", None) or dialogue.user_name or "default"
+    )
+    conv_uid = str(dialogue.conv_uid or uuid.uuid4().hex)
+    dialogue.conv_uid = conv_uid
+    ext_info = dialogue.ext_info if isinstance(dialogue.ext_info, dict) else {}
+    run_id = str(ext_info.get("client_run_id") or ext_info.get("run_id") or uuid.uuid4().hex)
+    dialogue.ext_info = {**ext_info, "client_run_id": run_id}
+    conflict_run_id = _claim_react_run(run_id, user_id, conv_uid)
+    if conflict_run_id:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "REACT_RUN_CONFLICT",
+                "message": "该会话已有任务正在运行，请等待其完成或停止后再试。",
+                "conv_uid": conv_uid,
+                "run_id": conflict_run_id,
+            },
+        )
     headers = {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache, no-transform",
@@ -4923,6 +5147,7 @@ async def chat_react_agent(
             media_type="text/event-stream",
         )
     except Exception as e:
+        _release_react_run(run_id)
         logger.exception("React Agent Exception!%s", dialogue, exc_info=e)
 
         async def error_text(err_msg):
@@ -4980,11 +5205,8 @@ async def chat_react_agent_cancel(
             attachment_service = run_state.get("attachment_service")
             if attachment_service is not None:
                 attachment_service.cancel_active_parsers()
-
-    if body.conv_uid:
+    elif body.conv_uid:
         for active_run_id, run_state in list(REACT_AGENT_RUNS.items()):
-            if body.run_id and active_run_id == body.run_id:
-                continue
             if (
                 run_state.get("conv_uid") != body.conv_uid
                 or run_state.get("user_id") != user_id
@@ -4999,7 +5221,13 @@ async def chat_react_agent_cancel(
                 attachment_service.cancel_active_parsers()
 
     rejected_questions = 0
-    if body.conv_uid:
+    if body.run_id:
+        from dbgpt_app.openapi.api_v1.tools.question_manager import question_manager
+
+        rejected_questions = question_manager.reject_by_run(
+            body.run_id, user_id=user_id
+        )
+    elif body.conv_uid:
         from dbgpt_app.openapi.api_v1.tools.question_manager import question_manager
 
         rejected_questions = question_manager.reject_by_conv(

@@ -110,3 +110,37 @@ def test_main_agent_result_context_passes_scene_ids_and_columns(monkeypatch):
             "time_range": None,
         }
     ]
+
+
+def test_main_agent_result_truncation_preserves_some_code_combined_rows():
+    content = ask_data_tools._encode_main_agent_result(
+        {
+            "status": "succeeded",
+            "query_id": "query-1",
+            "call_id": "call-1",
+            "scenes": [
+                {
+                    "scene_id": "contracts",
+                    "scene_name": "合同分析",
+                    "status": "succeeded",
+                    "row_count": 50,
+                    "columns": [],
+                    "rows": [],
+                }
+            ],
+            "combined": {
+                "mode": "compare",
+                "status": "succeeded",
+                "columns": [{"key": "amount", "type": "metric"}],
+                "rows": [{"department": f"部门{i}", "amount": i} for i in range(50)],
+            },
+            "errors": [],
+            "warnings": [],
+        },
+        max_result_tokens=300,
+    )
+
+    payload = json.loads(content)
+    combined_rows = payload["combined"]["rows"]
+    assert 0 < len(combined_rows) < 50
+    assert payload["scenes"][0]["rows"] == []

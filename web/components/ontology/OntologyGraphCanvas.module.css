@@ -24,8 +24,7 @@
 }
 
 .spatial {
-  background:
-    radial-gradient(ellipse at 13% 16%, rgba(12, 117, 252, 0.11), transparent 31%),
+  background: radial-gradient(ellipse at 13% 16%, rgba(12, 117, 252, 0.11), transparent 31%),
     radial-gradient(ellipse at 88% 76%, rgba(32, 159, 133, 0.1), transparent 32%),
     linear-gradient(145deg, #f8fbff 0%, #eef4fa 53%, #f7fbf9 100%);
 }
@@ -43,10 +42,8 @@
 }
 
 .flat {
-  background:
-    linear-gradient(rgba(111, 132, 158, 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(111, 132, 158, 0.05) 1px, transparent 1px),
-    #f5f8fc;
+  background: linear-gradient(rgba(111, 132, 158, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(111, 132, 158, 0.05) 1px, transparent 1px), #f5f8fc;
   background-size: 24px 24px;
 }
 
@@ -59,8 +56,6 @@
   z-index: 0;
   overflow: hidden;
   pointer-events: none;
-  perspective: 1350px;
-  perspective-origin: 50% 38%;
 }
 
 .depthPlane {
@@ -69,21 +64,19 @@
   left: 0;
   border: 1px solid rgba(87, 122, 165, 0.32);
   border-radius: 24px;
-  background:
-    linear-gradient(150deg, rgba(255, 255, 255, 0.8), rgba(228, 239, 250, 0.44)),
+  background: linear-gradient(150deg, rgba(255, 255, 255, 0.8), rgba(228, 239, 250, 0.44)),
     linear-gradient(rgba(76, 111, 154, 0.08) 1px, transparent 1px),
     linear-gradient(90deg, rgba(76, 111, 154, 0.08) 1px, transparent 1px);
-  background-size: auto, 28px 28px, 28px 28px;
+  background-size:
+    auto,
+    28px 28px,
+    28px 28px;
   box-shadow:
-    0 35px 58px rgba(37, 71, 111, 0.18),
-    0 12px 18px rgba(37, 71, 111, 0.1),
+    0 18px 34px rgba(37, 71, 111, 0.09),
     inset 0 1px 0 rgba(255, 255, 255, 0.96);
   transform-origin: top left;
-  transform-style: preserve-3d;
-  transform: translate3d(var(--viewport-x), var(--viewport-y), 0)
-    scale(var(--viewport-zoom))
-    translate3d(var(--plane-x), var(--plane-y), var(--plane-z))
-    rotateX(var(--plane-rotate-x, 8deg)) rotateY(var(--plane-rotate-y, -8deg));
+  transform: translate3d(var(--viewport-x), var(--viewport-y), 0) scale(var(--viewport-zoom))
+    translate3d(var(--plane-x), var(--plane-y), 0);
 }
 
 .depthPlane::before {
@@ -96,16 +89,7 @@
 }
 
 .depthPlane::after {
-  position: absolute;
-  inset: auto 8px -16px;
-  height: 16px;
-  border: 1px solid color-mix(in srgb, var(--plane-accent), transparent 58%);
-  border-top: 0;
-  border-radius: 0 0 16px 16px;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--plane-accent), white 70%), color-mix(in srgb, var(--plane-accent), transparent 82%));
-  transform: rotateX(-48deg);
-  transform-origin: top;
-  content: '';
+  display: none;
 }
 
 .depthPlane span {
@@ -125,89 +109,143 @@
 
 .businessPlane {
   --plane-accent: #3188eb;
-  --plane-rotate-y: 8deg;
   border-color: rgba(49, 136, 235, 0.4);
   background-color: rgba(49, 136, 235, 0.08);
 }
 
 .analysisPlane {
   --plane-accent: #7869d2;
-  --plane-rotate-y: 0deg;
   border-color: rgba(120, 105, 210, 0.38);
   background-color: rgba(120, 105, 210, 0.075);
 }
 
 .mappingPlane {
   --plane-accent: #219a83;
-  --plane-rotate-y: -8deg;
   border-color: rgba(33, 154, 131, 0.38);
   background-color: rgba(33, 154, 131, 0.07);
 }
 
-.nodeCard {
+.graphNode {
   position: relative;
-  border-color: color-mix(in srgb, var(--node-accent), white 26%) !important;
-  background: linear-gradient(145deg, #ffffff 0%, #f9fbfe 52%, color-mix(in srgb, var(--node-accent), white 93%) 100%) !important;
-  box-shadow:
-    0 6px 12px rgba(31, 57, 91, 0.1),
-    0 2px 3px rgba(31, 57, 91, 0.12),
-    inset 0 1px 0 rgba(255, 255, 255, 0.98) !important;
-  transform-style: preserve-3d;
+  display: grid;
+  width: var(--node-diameter);
+  height: var(--node-diameter);
+  place-items: center;
+  cursor: pointer;
+  transition: opacity 140ms ease;
 }
 
-.nodeCard::before {
+.nodeHitArea {
   position: absolute;
-  inset: 0 auto 0 0;
-  width: 5px;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--node-accent), white 8%), var(--node-accent));
-  content: '';
+  inset: -5px;
+  border-radius: 50%;
 }
 
-.spatialNode {
+.graphNodeShape {
+  display: block;
+  width: 74%;
+  height: 74%;
+  border: 2px solid color-mix(in srgb, var(--node-outline), white 26%);
+  background: var(--node-accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--node-accent), transparent 86%);
+  transition:
+    box-shadow 140ms ease,
+    transform 140ms ease;
+}
+
+.entityShape {
+  border-radius: 50%;
+}
+
+.metricShape {
+  width: 62%;
+  height: 62%;
+  border-radius: 3px;
+  transform: rotate(45deg);
+}
+
+.sceneShape {
+  border-radius: 5px;
+}
+
+.ruleShape {
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+
+.dimensionShape {
+  clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
+}
+
+.pathShape {
+  border-radius: 3px;
+  transform: rotate(45deg) scale(0.82);
+}
+
+.analysisRuleShape {
+  border-radius: 5px;
+  clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
+}
+
+.nodeHovered .graphNodeShape,
+.focusNode .graphNodeShape {
   box-shadow:
-    0 20px 0 -9px color-mix(in srgb, var(--node-accent), #253a53 54%),
-    0 25px 34px rgba(31, 57, 91, 0.2),
-    0 8px 14px rgba(31, 57, 91, 0.12),
-    inset 0 1px 0 rgba(255, 255, 255, 1) !important;
-  transition: transform 220ms ease, box-shadow 220ms ease;
+    0 0 0 5px var(--ontology-focus-glow),
+    0 0 18px var(--ontology-focus-glow);
 }
 
-.spatialNode:hover {
-  box-shadow:
-    0 22px 0 -9px color-mix(in srgb, var(--node-accent), #253a53 45%),
-    0 32px 42px rgba(31, 57, 91, 0.24),
-    0 10px 17px rgba(31, 57, 91, 0.14),
-    inset 0 1px 0 rgba(255, 255, 255, 1) !important;
-  translate: 0 -5px;
-}
-
-.nodeContent {
-  position: relative;
-  z-index: 1;
-}
-
-.nodeMark {
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-accent), transparent 88%);
-}
-
-.typeBadge {
-  border: 1px solid color-mix(in srgb, currentColor, transparent 76%);
-  background: color-mix(in srgb, currentColor, white 93%);
-}
-
-.reviewConfirmed {
-  color: #16805f;
-  background: rgba(22, 138, 118, 0.1);
+.searchNode .graphNodeShape {
+  border-color: var(--ontology-warning);
+  outline: 2px solid color-mix(in srgb, var(--ontology-warning), transparent 24%);
+  outline-offset: 4px;
 }
 
 .reviewPending {
-  color: #a96c12;
-  background: rgba(217, 144, 33, 0.12);
+  outline: 2px dashed var(--ontology-review-pending);
+  outline-offset: 4px;
+}
+
+.reviewConfirmed {
+  outline: 2px solid #16805f;
+  outline-offset: 4px;
 }
 
 .reviewRejected {
-  color: #bf4f4f;
-  background: rgba(206, 101, 90, 0.12);
+  outline: 2px solid var(--ontology-review-rejected);
+  outline-offset: 4px;
+}
+
+.graphNodeLabel {
+  position: absolute;
+  top: calc(100% + 7px);
+  left: 50%;
+  z-index: 3;
+  max-width: 180px;
+  overflow: hidden;
+  padding: 4px 7px;
+  transform: translateX(-50%);
+  border: 1px solid color-mix(in srgb, var(--node-accent), var(--ontology-border) 72%);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--ontology-surface), transparent 5%);
+  box-shadow: 0 4px 12px rgba(24, 39, 61, 0.1);
+  color: var(--ontology-edge-label);
+  font-size: 11px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.nodeHovered .graphNodeLabel,
+.focusNode .graphNodeLabel,
+.searchNode .graphNodeLabel,
+.highDegree .graphNodeLabel,
+.labelsVisible .graphNodeLabel,
+.canvas[data-zoom-tier='detail'] .graphNodeLabel {
+  opacity: 1;
+  visibility: visible;
 }
 
 .reviewLine {
@@ -224,18 +262,70 @@
   background: color-mix(in srgb, var(--ontology-surface), var(--ontology-focus) 3%);
 }
 
+.toolbar {
+  border-color: color-mix(in srgb, var(--ontology-border), transparent 12%) !important;
+}
+
+.toolbarTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 4px 0 2px;
+  color: #26384d;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.toolbarTitleMark {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--ontology-focus);
+  box-shadow: 0 0 0 4px var(--ontology-focus-glow);
+}
+
+.toolbarStats {
+  color: #7a8aa0;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.canvas :global(.react-flow__controls) {
+  overflow: hidden;
+  border: 1px solid var(--ontology-border);
+  border-radius: 10px;
+  box-shadow: 0 6px 18px rgba(37, 71, 111, 0.1);
+}
+
+.canvas :global(.react-flow__controls-button) {
+  width: 29px;
+  height: 29px;
+  border-color: var(--ontology-border);
+  background: var(--ontology-surface);
+  color: var(--ontology-edge-label);
+}
+
+.canvas :global(.react-flow__edge-textbg) {
+  fill: var(--ontology-surface);
+}
+
+.canvas :global(.react-flow__edge-text) {
+  font-family: inherit;
+}
+
 :global(html[data-interface-style='dashboard']) .canvas {
-  --ontology-entity: #209f85;
-  --ontology-metric: #397bbb;
-  --ontology-scene: #6f73b9;
-  --ontology-analysis: #658e9c;
-  --ontology-rule: #d68a4d;
-  --ontology-focus: #209f85;
-  --ontology-warning: #c18020;
-  --ontology-cross-scene: #cc665b;
-  --ontology-review-pending: #c18020;
-  --ontology-review-rejected: #cc665b;
-  --ontology-focus-glow: rgba(32, 159, 133, 0.34);
+  --ontology-entity: #d29a52;
+  --ontology-metric: #6e9fd3;
+  --ontology-scene: #5db8a9;
+  --ontology-analysis: #c6b061;
+  --ontology-rule: #c8835a;
+  --ontology-focus: #3d88d8;
+  --ontology-warning: #b9781f;
+  --ontology-cross-scene: #bd6a64;
+  --ontology-review-pending: #b9781f;
+  --ontology-review-rejected: #bd6a64;
+  --ontology-focus-glow: rgba(61, 136, 216, 0.3);
   font-family: Manrope, Inter, 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
 }
 
@@ -277,32 +367,30 @@
 
 :global(body.dark) .spatial,
 :global(.dark) .spatial {
-  background:
-    radial-gradient(ellipse at 12% 18%, rgba(50, 125, 217, 0.18), transparent 34%),
+  background: radial-gradient(ellipse at 12% 18%, rgba(50, 125, 217, 0.18), transparent 34%),
     radial-gradient(ellipse at 88% 78%, rgba(32, 159, 133, 0.13), transparent 35%),
     linear-gradient(145deg, #171d27 0%, #11151c 56%, #151c20 100%);
 }
 
 :global(body.dark) .flat,
 :global(.dark) .flat {
-  background:
-    linear-gradient(rgba(181, 198, 220, 0.045) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(181, 198, 220, 0.045) 1px, transparent 1px),
-    #11151c;
+  background: linear-gradient(rgba(181, 198, 220, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(181, 198, 220, 0.045) 1px, transparent 1px), #11151c;
   background-size: 24px 24px;
 }
 
 :global(body.dark) .depthPlane,
 :global(.dark) .depthPlane {
   border-color: color-mix(in srgb, var(--plane-accent), transparent 48%);
-  background:
-    linear-gradient(145deg, rgba(40, 53, 71, 0.82), rgba(24, 35, 49, 0.56)),
+  background: linear-gradient(145deg, rgba(40, 53, 71, 0.82), rgba(24, 35, 49, 0.56)),
     linear-gradient(rgba(181, 198, 220, 0.07) 1px, transparent 1px),
     linear-gradient(90deg, rgba(181, 198, 220, 0.07) 1px, transparent 1px);
-  background-size: auto, 28px 28px, 28px 28px;
+  background-size:
+    auto,
+    28px 28px,
+    28px 28px;
   box-shadow:
-    0 30px 58px rgba(0, 0, 0, 0.34),
-    0 12px 18px rgba(0, 0, 0, 0.24),
+    0 18px 34px rgba(0, 0, 0, 0.24),
     inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
@@ -328,26 +416,21 @@
   --plane-accent: #5bd3b4;
 }
 
-:global(body.dark) .nodeCard,
-:global(.dark) .nodeCard {
-  background: linear-gradient(145deg, #252b35 0%, #1b222b 70%, #18212a 100%) !important;
-  box-shadow:
-    0 8px 18px rgba(0, 0, 0, 0.28),
-    0 2px 4px rgba(0, 0, 0, 0.18),
-    inset 0 1px 0 rgba(255, 255, 255, 0.07) !important;
+:global(body.dark) .nodeHovered,
+:global(body.dark) .focusNode,
+:global(.dark) .nodeHovered,
+:global(.dark) .focusNode {
+  filter: drop-shadow(0 0 8px var(--ontology-focus-glow));
 }
 
-:global(body.dark) .spatialNode,
-:global(.dark) .spatialNode {
-  box-shadow:
-    0 18px 32px rgba(0, 0, 0, 0.38),
-    0 5px 12px rgba(0, 0, 0, 0.25),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+:global(body.dark) .toolbarTitle,
+:global(.dark) .toolbarTitle {
+  color: #dbe6f5;
 }
 
-:global(body.dark) .typeBadge,
-:global(.dark) .typeBadge {
-  background: color-mix(in srgb, currentColor, #1a1b1e 88%);
+:global(body.dark) .toolbarStats,
+:global(.dark) .toolbarStats {
+  color: #8998ad;
 }
 
 :global(body.dark) .reviewPanel,
@@ -362,13 +445,396 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .nodeCard,
-  .spatialNode,
-  .nodeContent {
+  .graphNode,
+  .graphNodeShape,
+  .graphNodeLabel {
     transition: none !important;
   }
 
   :global(.react-flow__edge.animated) .react-flow__edge-path {
     animation: none !important;
   }
+}
+
+.workbench {
+  container-type: inline-size;
+  --ontology-entity: #6eaaff;
+  --ontology-metric: #5bdaba;
+  --ontology-scene: #d29942;
+  --ontology-analysis: #a17dd9;
+  --ontology-rule: #a17dd9;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid #dbe4ef;
+  border-radius: 10px;
+  background: #fff;
+  color: #263b53;
+}
+
+.workbench:fullscreen {
+  height: 100vh;
+}
+.workbenchToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #dbe4ef;
+  background: #fff;
+}
+.search {
+  width: min(340px, 100%);
+}
+.workbenchBody {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr) 306px;
+  flex: 1;
+  min-height: 0;
+}
+.filters {
+  overflow: auto;
+  padding: 14px 12px;
+  border-right: 1px solid #dbe4ef;
+  background: #f9fbfd;
+  color: #334c67;
+}
+.filterHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 15px;
+}
+.filterTitle {
+  margin: 0 6px 8px;
+  color: #61758a;
+  font-size: 12px;
+}
+.layerButton {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: #405874;
+  text-align: left;
+}
+.layerButton[aria-pressed='true'] {
+  border-color: #d5e6fb;
+  background: #e9f2ff;
+  color: #174e91;
+  font-weight: 600;
+}
+.filterDivider {
+  margin: 16px 0;
+  border-top: 1px solid #dbe4ef;
+}
+.typeFilter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 2px 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.typeSwatch {
+  flex: none;
+  width: 10px;
+  height: 10px;
+}
+.filterCount {
+  margin-left: auto;
+  color: #687d93;
+}
+.workbench .canvas,
+:global(body.dark) .workbench .canvas,
+:global(.dark) .workbench .canvas {
+  --ontology-surface: #15273d;
+  --ontology-border: #3b506a;
+  --ontology-edge-label: #d9e7f8;
+  --ontology-grid: #344a66;
+  --ontology-entity: #6eaaff;
+  --ontology-metric: #5bdaba;
+  --ontology-scene: #f6c477;
+  --ontology-analysis: #c0a6ff;
+  --ontology-rule: #c0a6ff;
+  --ontology-edge: #91add2;
+  --ontology-cross-scene: #c0a6ff;
+  --ontology-focus: #a7d3ff;
+  --ontology-focus-glow: rgba(110, 170, 255, 0.35);
+  position: relative;
+  min-width: 0;
+  min-height: 360px;
+  overflow: hidden;
+  background: radial-gradient(ellipse at 48% 46%, #172b43, #0f1b2c 76%);
+}
+.workbench .graphNodeShape {
+  width: 100%;
+  height: 100%;
+  border-color: transparent;
+}
+.workbench .metricShape {
+  width: 75%;
+  height: 75%;
+}
+.workbench .graphNodeLabel {
+  border: 0;
+  background: #13243a;
+  color: #e3edfa;
+  box-shadow: none;
+  font-size: 12px;
+}
+.workbench .detailPanel {
+  position: relative;
+  min-width: 0;
+  overflow: auto;
+  padding: 16px;
+  border-left: 1px solid #dbe4ef !important;
+  background: #fff !important;
+  color: #263b53;
+}
+.detailEmpty p,
+.nodeDescription,
+.relationList p {
+  margin: 12px 0;
+  color: #61758a;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.relationHeading {
+  margin-top: 18px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid #dbe4ef;
+  color: #174e91;
+  font-weight: 600;
+}
+.relationList {
+  margin-bottom: 16px;
+}
+.relationList button {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 9px 3px;
+  border-bottom: 1px solid #edf1f5;
+  color: #263b53;
+  text-align: left;
+}
+.relationList button:hover {
+  background: #edf4fc;
+}
+.relationList button span:last-child {
+  color: #62768d;
+  font-size: 11px;
+  text-align: right;
+}
+.graphLegend {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  z-index: 2;
+  display: flex;
+  gap: 12px;
+  padding: 6px 8px;
+  border: 1px solid #344960;
+  border-radius: 5px;
+  background: #142237;
+  color: #c3d4ea;
+  font-size: 11px;
+}
+.footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 14px;
+  border-top: 1px solid #dbe4ef;
+  background: #fff;
+  color: #61758a;
+  font-size: 12px;
+}
+@media (max-width: 1100px) {
+  .workbenchBody {
+    grid-template-columns: 160px minmax(0, 1fr) 250px;
+  }
+}
+@media (max-width: 850px) {
+  .workbench {
+    height: auto;
+    min-height: 100%;
+    overflow: visible;
+  }
+  .workbenchBody {
+    grid-template-columns: 150px minmax(0, 1fr);
+  }
+  .workbench .detailPanel {
+    grid-column: 1 / -1;
+    max-height: 350px;
+    border-top: 1px solid #dbe4ef;
+    border-left: 0 !important;
+  }
+}
+@media (max-width: 560px) {
+  .workbenchBody {
+    grid-template-columns: 1fr;
+  }
+  .filters {
+    max-height: 210px;
+    border-right: 0;
+    border-bottom: 1px solid #dbe4ef;
+  }
+  .footer {
+    flex-wrap: wrap;
+  }
+}
+
+.workbench .typeSwatch {
+  width: 10px;
+  height: 10px;
+}
+
+:global(html[data-interface-style='dashboard']) .workbench .canvas,
+:global(html[data-interface-style='terminal']) .workbench .canvas {
+  --ontology-entity: #6eaaff;
+  --ontology-metric: #5bdaba;
+  --ontology-scene: #f6c477;
+  --ontology-analysis: #c0a6ff;
+  --ontology-rule: #c0a6ff;
+  --ontology-edge-label: #d9e7f8;
+  --ontology-surface: #15273d;
+}
+
+@container (max-width: 900px) {
+  .workbenchBody {
+    grid-template-columns: 150px minmax(0, 1fr);
+    overflow-y: auto;
+  }
+
+  .workbench .detailPanel {
+    grid-column: 1 / -1;
+    max-height: 300px;
+    border-top: 1px solid #dbe4ef;
+    border-left: 0 !important;
+  }
+}
+
+@container (max-width: 520px) {
+  .workbenchBody {
+    grid-template-columns: 1fr;
+  }
+
+  .filters {
+    max-height: 200px;
+    border-right: 0;
+    border-bottom: 1px solid #dbe4ef;
+  }
+}
+
+:global(.dark) .workbench .detailPanel :global(.ant-descriptions-item-label),
+:global(.dark) .workbench .detailPanel :global(.ant-descriptions-item-content) {
+  color: #334c67;
+}
+
+.workbench .canvas {
+  --ontology-reference: #90ccde;
+}
+
+.layerName {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.layerDot {
+  width: 7px;
+  height: 11px;
+  border-radius: 2px;
+}
+
+.layerDot[data-layer='business_semantics'] {
+  background: #4f8cd6;
+}
+
+.layerDot[data-layer='analysis_explanations'] {
+  background: #9679db;
+}
+
+.layerDot[data-layer='mapping_governance'] {
+  background: #3ba88c;
+}
+
+.workbench .depthPlane {
+  border: 1px solid color-mix(in srgb, var(--plane-accent), transparent 58%);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--plane-accent) 10%, #102035);
+  box-shadow: none;
+}
+
+.workbench .depthPlane[data-focused='true'] {
+  border-color: var(--plane-accent);
+  background: color-mix(in srgb, var(--plane-accent) 18%, #102035);
+}
+
+.workbench .depthPlane span {
+  border-radius: 4px;
+  background: #13243a;
+  color: color-mix(in srgb, var(--plane-accent), white 58%);
+  font-size: 17px;
+}
+
+.graphLegend {
+  max-width: calc(100% - 68px);
+  flex-wrap: wrap;
+  gap: 5px 12px;
+  pointer-events: none;
+}
+
+.graphLegend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.graphLegend i {
+  width: 16px;
+  border-top: 2px solid #91add2;
+}
+
+.graphLegend .referenceLine {
+  border-top: 2px dashed var(--ontology-reference);
+}
+
+.graphLegend .candidateLine {
+  border-top: 2px dotted var(--ontology-review-pending);
+}
+
+.relationOrigin {
+  padding: 7px 3px 3px;
+  color: #61758a;
+  font-size: 11px;
+}
+
+.relationRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  border-bottom: 1px solid #edf1f5;
+}
+
+.relationList .relationRow button {
+  display: block;
+  overflow-wrap: anywhere;
+  border: 0;
+}
+
+.relationList .relationRow button:last-child {
+  color: #426a91;
+  font-size: 11px;
+  text-align: right;
 }

@@ -58,7 +58,7 @@ export default function EditScenePage() {
   return (
     <AskDataPageShell
       title='编辑场景'
-      description='停用状态下维护场景介绍、绑定对象、数据字典和业务语义；保存后需校验启用。'
+      description='停用状态下维护场景介绍、绑定对象和数据字典，业务语义可按需补充。保存后需校验启用。'
       maxWidth='max-w-6xl'
       actions={
         <Button

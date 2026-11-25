@@ -144,7 +144,9 @@ def infer_decimals(reported) -> int:
     return len(m.group(1)) if m else 0
 
 
-def verify_row(row: dict) -> dict:
+def verify_row(
+    row: dict, variables: dict | None = None, *, use_computed: bool = False
+) -> dict:
     rid = row.get("id", "?")
     name = row.get("name", "")
     formula = row.get("formula", "")
@@ -157,7 +159,9 @@ def verify_row(row: dict) -> dict:
     out = {"id": rid, "name": name, "formula": formula,
            "reported": str(reported), "computed": "", "diff": "", "status": "warn"}
     try:
-        value = safe_eval(formula, row.get("vars"))
+        value = safe_eval(formula, {**(variables or {}), **(row.get("vars") or {})})
+        if isinstance(value, bool) or not math.isfinite(value):
+            raise ValueError("公式必须返回有限数值")
     except Exception as exc:  # noqa: BLE001
         out.update(computed="求值失败", diff="-", status="fail",
                    error=f"{type(exc).__name__}: {exc}")
@@ -165,15 +169,16 @@ def verify_row(row: dict) -> dict:
 
     out["computed_raw"] = value
     out["computed"] = display(value, decimals, unit)
+    if use_computed and reported is None:
+        out.update(reported=out["computed"], diff="0", status="pass")
+        return out
     rep_val, _ = parse_reported(reported)
     if rep_val is None:
         out.update(diff="-", status="fail", error="报告值无法解析为数字")
         return out
 
-    # 报告值按展示口径存的是百分数本身（如 16.1 表示 16.1%），
-    # 若公式返回的是比率（0~1 之间且单位是 percent），换算成百分数再比。
-    cmp_val = value * 100.0 if (unit == "percent" and -1.5 < value < 1.5) else value
-    diff = cmp_val - rep_val
+    # 百分比公式返回百分数本身，例如 0.5 表示 0.5%。
+    diff = value - rep_val
     out["diff_pp"] = diff
     out["diff"] = (f"{abs(diff):.{max(decimals, 2)}f}"
                    + ("pp" if unit == "percent" else ""))
@@ -191,11 +196,21 @@ def main() -> int:
     ap.add_argument("spec", help="calcs.json 路径")
     ap.add_argument("--emit-audit", action="store_true", help="输出 DATA.audit.rows 可用的 JSON")
     ap.add_argument("--strict", action="store_true", help="存在 fail 项时退出码 1")
-    args = ap.parse_args()
+    argv = sys.argv[1:]
+    if len(argv) == 1 and argv[0].lstrip().startswith("{"):
+        options = json.loads(argv[0])
+        argv = [options.get("calcs_file") or options.get("spec") or ""]
+        if options.get("strict"):
+            argv.append("--strict")
+        if options.get("emit_audit"):
+            argv.append("--emit-audit")
+    args = ap.parse_args(argv)
 
     with open(args.spec, encoding="utf-8") as fh:
         spec = json.load(fh)
-    rows = [verify_row(r) for r in spec.get("rows", [])]
+    if not isinstance(spec.get("rows"), list) or not spec["rows"]:
+        raise ValueError("calcs.json 必须包含非空 rows 列表")
+    rows = [verify_row(r, spec.get("vars")) for r in spec["rows"]]
 
     cnt = {"pass": 0, "warn": 0, "fail": 0}
     for r in rows:

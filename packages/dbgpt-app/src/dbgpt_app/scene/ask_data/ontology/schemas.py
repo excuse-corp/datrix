@@ -55,6 +55,8 @@ class OntologyEdge(BaseModel):
         "cross_scene_join",
         "clarification_rule",
         "metric_relation",
+        "attribute_reference",
+        "rule_reference",
     ]
     name: str = Field(min_length=1, max_length=255)
     description: str = ""

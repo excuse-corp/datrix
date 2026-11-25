@@ -73,7 +73,9 @@ def test_compare_aligns_by_stable_key_and_keeps_metric_columns():
     )
 
     assert result.status == "succeeded"
-    assert result.rows == [{"department": "D1", "amount": 40}]
+    assert result.rows == [
+        {"department": "D1", "contracts__amount": 100, "receipts__amount": 40}
+    ]
     assert len(result.columns) == 3
 
 
@@ -92,6 +94,26 @@ def test_incompatible_results_fall_back_to_separate():
 
     assert result.mode == "separate"
     assert any(item["code"] == "TRUNCATED_RESULT" for item in result.warnings)
+
+
+def test_incompatible_time_bases_fall_back_to_separate():
+    first = _result("contracts", [{"department": "D1", "amount": 100}])
+    second = _result("receipts", [{"department": "D1", "amount": 40}])
+    result = ResultCombiner().combine(
+        results=[
+            first.model_copy(update={"time_basis": "signed_at"}),
+            second.model_copy(update={"time_basis": "received_at"}),
+        ],
+        snapshots={
+            "contracts": _snapshot("contracts"),
+            "receipts": _snapshot("receipts"),
+        },
+        mode="compare",
+        keys=["department"],
+    )
+
+    assert result.mode == "separate"
+    assert any(item["code"] == "TIME_BASIS_MISMATCH" for item in result.warnings)
 
 
 def test_scene_snapshots_do_not_drive_derived_metric_calculation():

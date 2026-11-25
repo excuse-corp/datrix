@@ -38,7 +38,7 @@ export default function NewScenePage() {
   return (
     <AskDataPageShell
       title='新建场景'
-      description='填写场景介绍并上传数据字典、业务语义文档；创建时会自动校验并启用。'
+      description='填写场景介绍和数据字典，业务语义可按需补充。创建时会自动校验并启用。'
       maxWidth='max-w-6xl'
       actions={
         <Button href='/ask-data/scenes' icon={<ArrowLeftOutlined />}>

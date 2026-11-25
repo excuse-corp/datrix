@@ -140,9 +140,7 @@ def _parse_ask_data_query_args(input_str: str | None):
     fallback is never used; ToolPack then drops ``query`` because it is not in the
     registered schema and the call fails with a missing ``question`` argument.
 
-    Keep ``question`` as the only public parameter, but accept the historical
-    ``query`` key at execution time so one bad model token does not abort the
-    business-data workflow.
+    Accept the historical ``query`` key and preserve the optional reply flag.
     """
     if not input_str:
         return None
@@ -159,7 +157,10 @@ def _parse_ask_data_query_args(input_str: str | None):
         if (question is None or not str(question).strip()) and "query" in payload:
             question = payload.get("query")
         if question is not None:
-            return (), {"question": str(question)}
+            args = {"question": str(question)}
+            if payload.get("reply_after_query") is True:
+                args["reply_after_query"] = True
+            return (), args
     if isinstance(payload, str):
         return (), {"question": payload}
     return None
@@ -180,7 +181,7 @@ def make_ask_data_tools(
     @tool(
         description=(
             "查询已授权的业务数据场景。仅用于业务指标、统计、合同、项目、"
-            "部门和时间维度等问题。参数只允许自然语言问题，禁止传入 SQL、"
+            "部门和时间维度等问题。查询条件只接受自然语言，禁止传入 SQL、"
             "数据源、表名、字段名、视图名或 Snapshot。"
         ),
         args={
@@ -191,10 +192,15 @@ def make_ask_data_tools(
                     "SQL、表名、字段名、数据源名或 Snapshot ID。"
                 ),
                 "required": True,
-            }
+            },
+            "reply_after_query": {
+                "type": "boolean",
+                "description": "本次查询覆盖用户完整问题，查完即可回复时设为 true。",
+                "required": False,
+            },
         },
     )
-    async def ask_data_query(question: str) -> str:
+    async def ask_data_query(question: str, reply_after_query: bool = False) -> str:
         from dbgpt_app.scene.ask_data.api import scenes
 
         normalized_question = _normalize_ask_data_question(question)
@@ -210,6 +216,8 @@ def make_ask_data_tools(
 
         cached = successful_results.get(normalized_question)
         if cached is not None:
+            if reply_after_query is True:
+                react_state["ask_data_reply_call_id"] = cached["call_id"]
             reused_content = dict(cached["content"])
             reused_content.update(
                 {
@@ -427,6 +435,29 @@ def make_ask_data_tools(
                     ),
                 )
 
+            combine_started = None
+
+            async def on_combine_event(event: dict[str, Any]) -> None:
+                nonlocal combine_started
+                if combine_started is None:
+                    combine_started = (_utc_now(), monotonic())
+                status = event["status"]
+                counts = event["result"]
+                detail = {
+                    "running": "正在汇集子任务结果",
+                    "done": f"已汇集 {counts['result_count']}/{counts['task_count']} 个子任务的结果",
+                    "failed": "结果合并失败",
+                }
+                await emit_stage(
+                    "combine",
+                    status=status,
+                    title="合并查数结果",
+                    detail=detail[status],
+                    started_at=combine_started[0],
+                    started_monotonic=combine_started[1],
+                    result=counts,
+                )
+
             query, result = await scenes.get_run_service().execute(
                 question=normalized_question,
                 plan=plan,
@@ -441,6 +472,7 @@ def make_ask_data_tools(
                 entry_type="main_agent",
                 sql_by_task=sql_by_task,
                 on_task_event=on_sql_task_event,
+                on_combine_event=on_combine_event,
                 authorized_scene_ids=sorted(principal.scene_ids),
                 is_platform_admin=principal.is_platform_admin,
                 authz_version=principal.authz_version,
@@ -530,12 +562,13 @@ def make_ask_data_tools(
             content = clarification.get("question") or "需要补充业务查询条件。"
         elif payload.get("status") in {"succeeded", "partial_succeeded"}:
             try:
-                content = _main_agent_result_content(
-                    payload,
-                    max_result_tokens,
-                    normalized_question,
-                    principal=principal,
+                evidence = _build_main_agent_result(
+                    payload, normalized_question, principal=principal
                 )
+                content = _encode_main_agent_result(evidence, max_result_tokens)
+                react_state.setdefault("ask_data_evidence", {})[call_id] = evidence
+                if reply_after_query is True:
+                    react_state["ask_data_reply_call_id"] = call_id
             except Exception as exc:
                 payload["status"] = "failed"
                 payload.setdefault("errors", []).append(
@@ -843,6 +876,18 @@ def _main_agent_result_content(
     *,
     principal: AskDataPrincipal | None = None,
 ) -> str:
+    return _encode_main_agent_result(
+        _build_main_agent_result(payload, question, principal=principal),
+        max_result_tokens,
+    )
+
+
+def _build_main_agent_result(
+    payload: dict[str, Any],
+    question: str | None,
+    *,
+    principal: AskDataPrincipal | None = None,
+) -> dict[str, Any]:
     scene_items = [
         item for item in payload.get("results", []) if isinstance(item, dict)
     ]
@@ -866,8 +911,6 @@ def _main_agent_result_content(
     result_profiles = []
     result_lineage = []
     for item in scene_items:
-        caliber = item.get("sql_explanation")
-        caliber = caliber if isinstance(caliber, dict) else {}
         result_profiles.append(
             {
                 "scene_id": str(item.get("scene_id") or ""),
@@ -905,15 +948,21 @@ def _main_agent_result_content(
         "status": payload.get("status"),
         "query_id": payload.get("query_id"),
         "call_id": payload.get("call_id"),
+        "question": question,
         "answer": payload.get("answer"),
         "scenes": [
             {
+                "task_id": item.get("task_id"),
                 "scene_id": item.get("scene_id"),
+                "scene_name": _scene_display_name(str(item.get("scene_id") or "")),
                 "scene_snapshot_id": item.get("snapshot_id"),
                 "status": item.get("status"),
                 "row_count": item.get("row_count"),
                 "truncated": item.get("truncated"),
                 "data_caliber": item.get("sql_explanation"),
+                "time_basis": item.get("time_basis"),
+                "time_range": item.get("time_range"),
+                "grain": item.get("grain"),
                 "columns": [
                     {
                         key: column.get(key)
@@ -937,7 +986,14 @@ def _main_agent_result_content(
             for item in scene_items
         ],
         "errors": payload.get("errors", []),
+        "warnings": payload.get("warnings", []),
     }
+    combined = payload.get("combined")
+    if isinstance(combined, dict) and combined.get("mode") in {"compare", "derived"}:
+        for scene in compact["scenes"]:
+            scene["rows"] = []
+            scene["columns"] = []
+        compact["combined"] = combined
     if payload.get("status") == "succeeded":
         compact["query_complete"] = True
         compact["next_action"] = (
@@ -962,6 +1018,14 @@ def _main_agent_result_content(
         compact["analysis_guidance_for_final_answer"] = (
             _ASK_DATA_RESULT_ANALYSIS_GUIDANCE
         )
+    return compact
+
+
+def _encode_main_agent_result(
+    evidence: dict[str, Any], max_result_tokens: int | None
+) -> str:
+    compact = {**evidence, "scenes": [dict(scene) for scene in evidence["scenes"]]}
+    ontology_context = compact.get("ontology_context_for_analysis")
     max_chars = max(1024, int(max_result_tokens or 0) * 4)
     if not max_result_tokens:
         return json.dumps(compact, ensure_ascii=False, default=str)
@@ -972,6 +1036,22 @@ def _main_agent_result_content(
     compact["truncation_message"] = (
         "AskData result exceeded 50% of the configured context window; rows were truncated."
     )
+    combined = compact.get("combined")
+    if combined:
+        combined_rows = combined.get("rows") or []
+        compact["combined"] = {
+            **combined,
+            "rows": combined_rows[:20],
+        }
+    else:
+        combined_rows = []
+    encoded = json.dumps(compact, ensure_ascii=False, default=str)
+    while len(encoded) > max_chars and combined_rows:
+        combined_rows = combined_rows[: len(combined_rows) // 2]
+        compact["combined"]["rows"] = combined_rows
+        encoded = json.dumps(compact, ensure_ascii=False, default=str)
+    if len(encoded) <= max_chars:
+        return encoded
     for scene in compact["scenes"]:
         rows = scene.get("rows") or []
         if isinstance(rows, list):
